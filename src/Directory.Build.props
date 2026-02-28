@@ -1,0 +1,50 @@
+<Project>
+
+  <PropertyGroup>
+    <MinVerDefaultPreReleaseIdentifiers>preview</MinVerDefaultPreReleaseIdentifiers>
+    <MinVerTagPrefix>v</MinVerTagPrefix>
+    <MinVerVerbosity>minimal</MinVerVerbosity>
+
+    <Company>nietras</Company>
+    <Authors>nietras</Authors>
+    <Copyright>Copyright © nietras A/S 2026</Copyright>
+    <NeutralLanguage>en</NeutralLanguage>
+
+    <TargetFramework>net10.0</TargetFramework>
+    <CheckEolTargetFramework>false</CheckEolTargetFramework>
+
+    <LangVersion>14.0</LangVersion>
+    <Deterministic>true</Deterministic>
+    <DebugType>portable</DebugType>
+    <Nullable>enable</Nullable>
+
+    <UseArtifactsOutput>true</UseArtifactsOutput>
+    <ArtifactsPath>$(MSBuildThisFileDirectory)../artifacts</ArtifactsPath>
+    <VSTestResultsDirectory>$(ArtifactsPath)/TestResults</VSTestResultsDirectory>
+
+    <PublishRelease>true</PublishRelease>
+    <PackRelease>true</PackRelease>
+
+    <!-- https://github.com/dotnet/roslyn/issues/41640 🤦 -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591;CS8981</NoWarn>
+
+    <AnalysisLevel>latest</AnalysisLevel>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <RunAnalyzersDuringBuild>true</RunAnalyzersDuringBuild>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <CodeAnalysisTreatWarningsAsErrors>true</CodeAnalysisTreatWarningsAsErrors>
+    <SuppressNETCoreSdkPreviewMessage>true</SuppressNETCoreSdkPreviewMessage>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <AssemblyAttribute Include="System.CLSCompliantAttribute">
+      <_Parameter1>false</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MinVer" Version="7.0.0" PrivateAssets="All" /> 
+  </ItemGroup>
+
+</Project>
