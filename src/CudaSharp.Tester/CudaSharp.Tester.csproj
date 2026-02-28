@@ -1,0 +1,35 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  
+  <PropertyGroup>
+    <RootNamespace>CudaSharp.Tester</RootNamespace>
+    <OutputType>Exe</OutputType>
+    <IsTrimmable>true</IsTrimmable>
+    <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
+    <EnableAOTAnalyzer>true</EnableAOTAnalyzer>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <!-- Reduce size of Native AOT generated executable
+         https://github.com/dotnet/corert/blob/master/Documentation/using-corert/optimizing-corert.md 
+         https://github.com/dotnet/runtimelab/issues/1269 ([NativeAOT] Best way to track down app size bloat?) 
+         https://github.com/dotnet/runtime/blob/main/src/coreclr/nativeaot/docs/optimizing.md (IlcInstructionSet, IlcMaxVectorTBitWidth)
+     -->
+    <IlcInstructionSet Condition="$(RuntimeIdentifier) == 'win-x64'" >native</IlcInstructionSet>
+    <IlcInvariantGlobalization>true</IlcInvariantGlobalization>
+    <IlcDisableReflection>true</IlcDisableReflection>
+    <IlcGenerateMstatFile>true</IlcGenerateMstatFile>
+    <IlcGenerateDgmlFile>true</IlcGenerateDgmlFile>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <DebugType>pdbonly</DebugType>
+    <DebugSymbols>true</DebugSymbols>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CudaSharp\CudaSharp.csproj" />
+  </ItemGroup>
+
+</Project>

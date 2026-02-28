@@ -1,0 +1,42 @@
+name: bench
+
+permissions: read-all
+
+# configure manual trigger
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os:
+          [
+            windows-latest,
+            ubuntu-latest,
+            macos-latest,
+            windows-11-arm,
+            ubuntu-24.04-arm,
+          ]
+        configuration: [Release]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@95d9a5deda9de15063e7595e9719c11c38c90ae2 # v2.13.2
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - name: Setup .NET
+        uses: actions/setup-dotnet@baa11fbfe1d6520db94683bd5c7a3818018e4309 # v5.1.0
+        with:
+          global-json-file: global.json
+      - name: Restore dependencies
+        run: dotnet restore
+      - name: Build
+        run: dotnet build -c ${{ matrix.configuration }} --no-restore
+      - name: Bench
+        shell: pwsh
+        run: ./bench.ps1

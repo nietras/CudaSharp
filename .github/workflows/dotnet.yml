@@ -1,0 +1,184 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+
+name: dotnet
+
+permissions: read-all
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version to tag and create"
+        required: false
+
+env:
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: 1
+  DOTNET_NOLOGO: true
+  NuGetDirectory: ${{ github.workspace }}/nuget
+
+jobs:
+  build-and-test:
+    strategy:
+      matrix:
+        os:
+          [
+            ubuntu-latest,
+            windows-latest,
+            macos-latest,
+            windows-11-arm,
+            ubuntu-24.04-arm,
+          ]
+        configuration: [Debug, Release]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@95d9a5deda9de15063e7595e9719c11c38c90ae2 # v2.13.2
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+
+      - name: Setup .NET (global.json)
+        uses: actions/setup-dotnet@baa11fbfe1d6520db94683bd5c7a3818018e4309 # v5.1.0
+        with:
+          global-json-file: global.json
+
+      - name: Restore dependencies
+        run: dotnet restore
+      - name: Build
+        run: dotnet build -c ${{ matrix.configuration }} --no-restore
+      - name: Test
+        run: dotnet test -c ${{ matrix.configuration }} --no-build --verbosity normal --collect:"XPlat Code Coverage"
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@5a1091511ad55cbe89839c7260b706298ca349f7 # v5.5.1
+        with:
+          flags: ${{ matrix.os }}
+          token: ${{ secrets.CODECOV_TOKEN }}
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@5a1091511ad55cbe89839c7260b706298ca349f7 # v5.5.1
+        with:
+          flags: ${{ matrix.configuration }}
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+  format:
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@95d9a5deda9de15063e7595e9719c11c38c90ae2 # v2.13.2
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - name: Setup .NET
+        uses: actions/setup-dotnet@baa11fbfe1d6520db94683bd5c7a3818018e4309 # v5.1.0
+        with:
+          global-json-file: global.json
+      - name: Format verify no changes
+        run: dotnet format --verify-no-changes
+
+  pack:
+    runs-on: windows-latest
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@95d9a5deda9de15063e7595e9719c11c38c90ae2 # v2.13.2
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          fetch-depth: 0 # Get all history to allow automatic versioning using MinVer
+      - name: Create tag (to set version of nuget package)
+        if: ${{ github.event.inputs.version != '' && github.actor == 'nietras' }}
+        run: |
+          git tag v${{ github.event.inputs.version }}
+      - name: Setup .NET (global.json)
+        uses: actions/setup-dotnet@baa11fbfe1d6520db94683bd5c7a3818018e4309 # v5.1.0
+        with:
+          global-json-file: global.json
+      - name: Pack nuget package
+        run: dotnet pack -c Release --output ${{ env.NuGetDirectory }}
+      - name: Get version of dll
+        run: (Get-Item ./artifacts/bin/CudaSharp/release/CudaSharp.dll).VersionInfo.ProductVersion
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: nuget
+          if-no-files-found: error
+          retention-days: 7
+          path: ${{ env.NuGetDirectory }}/*nupkg
+
+  create-release-push:
+    needs: [build-and-test, pack]
+    runs-on: windows-latest
+    permissions:
+      contents: write
+      id-token: write # enable GitHub OIDC token issuance for this job
+    if: ${{ github.event.inputs.version != '' && github.actor == 'nietras' }}
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@95d9a5deda9de15063e7595e9719c11c38c90ae2 # v2.13.2
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - name: Download nuget packages
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+        with:
+          name: nuget
+          path: ${{ env.NuGetDirectory }}
+      - name: Create release
+        id: create_release
+        uses: actions/create-release@0cb9c9b65d5d1901c1f53e5e66eaf4afd303e70e # v1.1.4
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v${{ github.event.inputs.version }}
+          release_name: ${{ github.event.inputs.version }}
+          draft: true
+      - name: Create tag (for release)
+        run: |
+          git tag v${{ github.event.inputs.version }}
+          git push origin v${{ github.event.inputs.version }}
+      - name: Upload nupkg package
+        uses: actions/upload-release-asset@e8f9f06c4b078e705bd2ea027f0926603fc9b4d5 # v1.0.2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ${{ env.NuGetDirectory }}/CudaSharp.${{ github.event.inputs.version }}.nupkg
+          asset_name: CudaSharp.${{ github.event.inputs.version }}.nupkg
+          asset_content_type: application/zip
+      - name: Upload snupkg package
+        uses: actions/upload-release-asset@e8f9f06c4b078e705bd2ea027f0926603fc9b4d5 # v1.0.2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ${{ env.NuGetDirectory }}/CudaSharp.${{ github.event.inputs.version }}.snupkg
+          asset_name: CudaSharp.${{ github.event.inputs.version }}.snupkg
+          asset_content_type: application/zip
+      - name: Setup .NET
+        uses: actions/setup-dotnet@baa11fbfe1d6520db94683bd5c7a3818018e4309 # v5.1.0
+        with:
+          global-json-file: global.json
+
+      - name: NuGet login (OIDC → temp API key)
+        uses: NuGet/login@v1
+        id: login
+        with:
+          user: ${{ secrets.NUGET_USER }}
+      - name: Push nupkg package
+        run: dotnet nuget push ${{ env.NuGetDirectory }}/CudaSharp.${{ github.event.inputs.version }}.nupkg --api-key ${{ steps.login.outputs.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
+      - name: Push snupkg package
+        run: dotnet nuget push ${{ env.NuGetDirectory }}/CudaSharp.${{ github.event.inputs.version }}.snupkg --api-key ${{ steps.login.outputs.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate

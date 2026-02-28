@@ -1,0 +1,50 @@
+﻿name: nativeaot
+
+permissions: read-all
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+env:
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: 1
+  DOTNET_NOLOGO: true
+  ArtifactsDirectory: ${{ github.workspace }}/artifacts
+
+jobs:
+  nativeaot:
+    strategy:
+      matrix:
+        # https://docs.github.com/en/actions/using-github-hosted-runners/using-github-hosted-runners/about-github-hosted-runners#standard-github-hosted-runners-for-public-repositories
+        os: [windows-latest]
+        configuration: [Release]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@95d9a5deda9de15063e7595e9719c11c38c90ae2 # v2.13.2
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          fetch-depth: 0 # Get all history to allow automatic versioning using MinVer
+      - name: Setup .NET
+        uses: actions/setup-dotnet@baa11fbfe1d6520db94683bd5c7a3818018e4309 # v5.1.0
+        with:
+          global-json-file: global.json
+      - name: Publish Tester
+        shell: pwsh
+        run: ./publish-tester.ps1
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: artifacts-${{ matrix.os }}
+          if-no-files-found: error
+          retention-days: 7
+          path: ${{ env.ArtifactsDirectory }}
+      - name: Run Tester
+        shell: pwsh
+        run: ./artifacts/bin/CudaSharp.Tester/release_win-x64/native/CudaSharp.Tester.exe
