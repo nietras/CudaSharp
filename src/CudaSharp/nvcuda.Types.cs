@@ -193,13 +193,36 @@ public static partial class nvcuda
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    public struct CUDA_RESOURCE_DESC_ARRAY { public CUarray hArray; }
+    public struct CUDA_RESOURCE_DESC_ARRAY
+    {
+        public CUarray hArray;
+    }
+
     [StructLayout(LayoutKind.Sequential)]
-    public struct CUDA_RESOURCE_DESC_MIPMAPPED_ARRAY { public IntPtr hMipmappedArray; }
+    public struct CUDA_RESOURCE_DESC_MIPMAPPED_ARRAY
+    {
+        public IntPtr hMipmappedArray;
+    }
+
     [StructLayout(LayoutKind.Sequential)]
-    public struct CUDA_RESOURCE_DESC_LINEAR { public CUdeviceptr devPtr; public CUarray_format format; public uint numChannels; public nuint sizeInBytes; }
+    public struct CUDA_RESOURCE_DESC_LINEAR
+    {
+        public CUdeviceptr devPtr;
+        public CUarray_format format;
+        public uint numChannels;
+        public nuint sizeInBytes;
+    }
+
     [StructLayout(LayoutKind.Sequential)]
-    public struct CUDA_RESOURCE_DESC_PITCH2D { public CUdeviceptr devPtr; public CUarray_format format; public uint numChannels; public nuint width; public nuint height; public nuint pitchInBytes; }
+    public struct CUDA_RESOURCE_DESC_PITCH2D
+    {
+        public CUdeviceptr devPtr;
+        public CUarray_format format;
+        public uint numChannels;
+        public nuint width;
+        public nuint height;
+        public nuint pitchInBytes;
+    }
 
     [StructLayout(LayoutKind.Sequential)]
     public struct CUDA_TEXTURE_DESC
