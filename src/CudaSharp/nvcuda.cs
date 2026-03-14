@@ -230,7 +230,9 @@ public static partial class nvcuda
     /// <param name="outputMode">Output mode.</param>
     /// <param name="mode">Profiler output mode.</param>
     [LibraryImport(LibName, StringMarshalling = StringMarshalling.Utf8)]
-    public static partial CUresult cuProfilerInitialize(string configFile, string outputMode, CUprofiler_outputMode mode);
+    public static partial CUresult cuProfilerInitialize(
+        string configFile, string outputMode,
+        CUprofiler_outputMode mode);
 
     /// <summary>
     /// Enable profiling.
@@ -346,7 +348,10 @@ public static partial class nvcuda
     /// <param name="dptr">Device pointer to bind.</param>
     /// <param name="bytes">Size of memory to bind.</param>
     [LibraryImport(LibName)]
-    public static partial CUresult cuTexRefSetAddress(out nuint ByteOffset, CUtexref hTexRef, CUdeviceptr dptr, nuint bytes);
+    public static partial CUresult cuTexRefSetAddress(
+        out nuint ByteOffset,
+        CUtexref hTexRef, CUdeviceptr dptr,
+        nuint bytes);
 
     /// <summary>
     /// Binds an address to a texture reference.
@@ -356,7 +361,9 @@ public static partial class nvcuda
     /// <param name="dptr">Device pointer to bind.</param>
     /// <param name="Pitch">Pitch of linear memory.</param>
     [LibraryImport(LibName)]
-    public static partial CUresult cuTexRefSetAddress2D(CUtexref hTexRef, in CUDA_ARRAY_DESCRIPTOR desc, CUdeviceptr dptr, nuint Pitch);
+    public static partial CUresult cuTexRefSetAddress2D(
+        CUtexref hTexRef, in CUDA_ARRAY_DESCRIPTOR desc,
+        CUdeviceptr dptr, nuint Pitch);
 
     /// <summary>
     /// Sets the format for a texture reference.
@@ -432,7 +439,9 @@ public static partial class nvcuda
     /// <param name="pNumPackedComponents">Returned number of components.</param>
     /// <param name="hTexRef">Texture reference.</param>
     [LibraryImport(LibName)]
-    public static partial CUresult cuTexRefGetFormat(out CUarray_format pFormat, out int pNumPackedComponents, CUtexref hTexRef);
+    public static partial CUresult cuTexRefGetFormat(
+        out CUarray_format pFormat, out int pNumPackedComponents,
+        CUtexref hTexRef);
 
     /// <summary>
     /// Gets the flags used by a texture reference.
@@ -481,7 +490,10 @@ public static partial class nvcuda
     /// <param name="pTexDesc">Texture descriptor.</param>
     /// <param name="pResViewDesc">Resource view descriptor.</param>
     [LibraryImport(LibName)]
-    public static partial CUresult cuTexObjectCreate(out CUtexObject pTexObject, in CUDA_RESOURCE_DESC pResDesc, in CUDA_TEXTURE_DESC pTexDesc, in CUDA_RESOURCE_VIEW_DESC pResViewDesc);
+    public static partial CUresult cuTexObjectCreate(
+        out CUtexObject pTexObject, in CUDA_RESOURCE_DESC pResDesc,
+        in CUDA_TEXTURE_DESC pTexDesc,
+        in CUDA_RESOURCE_VIEW_DESC pResViewDesc);
 
     /// <summary>
     /// Destroys a texture object.
@@ -539,23 +551,20 @@ public static partial class nvcuda
 
     [LibraryImport(LibName)]
     public static partial CUresult cuLaunchKernel(
-        CUfunction f,
-        uint gridDimX,
-        uint gridDimY,
-        uint gridDimZ,
-        uint blockDimX,
-        uint blockDimY,
-        uint blockDimZ,
-        uint sharedMemBytes,
-        CUstream hStream,
-        ReadOnlySpan<IntPtr> kernelParams,
-        ReadOnlySpan<IntPtr> extra);
+        CUfunction f, uint gridDimX, uint gridDimY, uint gridDimZ,
+        uint blockDimX, uint blockDimY, uint blockDimZ,
+        uint sharedMemBytes, CUstream hStream,
+        ReadOnlySpan<IntPtr> kernelParams, ReadOnlySpan<IntPtr> extra);
 
     [LibraryImport(LibName)]
-    public static partial CUresult cuOccupancyMaxActiveBlocksPerMultiprocessor(out int numBlocks, CUfunction func, int blockSize, nuint dynamicSMemSize);
+    public static partial CUresult cuOccupancyMaxActiveBlocksPerMultiprocessor(
+        out int numBlocks, CUfunction func,
+        int blockSize, nuint dynamicSMemSize);
 
     [LibraryImport(LibName)]
-    public static partial CUresult cuOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(out int numBlocks, CUfunction func, int blockSize, nuint dynamicSMemSize, uint flags);
+    public static partial CUresult cuOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(
+        out int numBlocks, CUfunction func,
+        int blockSize, nuint dynamicSMemSize, uint flags);
 
     [LibraryImport(LibName)]
     public static partial CUresult cuMemAlloc(out CUdeviceptr dptr, nuint bytesize);
@@ -570,16 +579,24 @@ public static partial class nvcuda
     public static partial CUresult cuMemcpyDtoH(IntPtr dstHost, CUdeviceptr srcDevice, nuint bytesize);
 
     [LibraryImport(LibName)]
-    public static partial CUresult cuMemcpyHtoDAsync(CUdeviceptr dstDevice, IntPtr srcHost, nuint bytesize, CUstream hStream);
+    public static partial CUresult cuMemcpyHtoDAsync(
+        CUdeviceptr dstDevice, IntPtr srcHost,
+        nuint bytesize, CUstream hStream);
 
     [LibraryImport(LibName)]
-    public static partial CUresult cuMemcpyDtoHAsync(IntPtr dstHost, CUdeviceptr srcDevice, nuint bytesize, CUstream hStream);
+    public static partial CUresult cuMemcpyDtoHAsync(
+        IntPtr dstHost, CUdeviceptr srcDevice,
+        nuint bytesize, CUstream hStream);
 
     [LibraryImport(LibName)]
-    public static partial CUresult cuMemcpyDtoDAsync(CUdeviceptr dstDevice, CUdeviceptr srcDevice, nuint bytesize, CUstream hStream);
+    public static partial CUresult cuMemcpyDtoDAsync(
+        CUdeviceptr dstDevice, CUdeviceptr srcDevice,
+        nuint bytesize, CUstream hStream);
 
     [LibraryImport(LibName)]
-    public static partial CUresult cuMemAllocPitch(out CUdeviceptr dptr, out nuint pPitch, nuint WidthInBytes, nuint Height, uint ElementSizeBytes);
+    public static partial CUresult cuMemAllocPitch(
+        out CUdeviceptr dptr, out nuint pPitch,
+        nuint WidthInBytes, nuint Height, uint ElementSizeBytes);
 
     [LibraryImport(LibName)]
     public static partial CUresult cuMemFreeHost(IntPtr p);
@@ -612,13 +629,19 @@ public static partial class nvcuda
     public static partial CUresult cuMemsetD32(CUdeviceptr dstDevice, uint ui, nuint N);
 
     [LibraryImport(LibName)]
-    public static partial CUresult cuMemsetD2D8(CUdeviceptr dstDevice, nuint dstPitch, byte uc, nuint Width, nuint Height);
+    public static partial CUresult cuMemsetD2D8(
+        CUdeviceptr dstDevice, nuint dstPitch,
+        byte uc, nuint Width, nuint Height);
 
     [LibraryImport(LibName)]
-    public static partial CUresult cuMemsetD2D16(CUdeviceptr dstDevice, nuint dstPitch, ushort us, nuint Width, nuint Height);
+    public static partial CUresult cuMemsetD2D16(
+        CUdeviceptr dstDevice, nuint dstPitch,
+        ushort us, nuint Width, nuint Height);
 
     [LibraryImport(LibName)]
-    public static partial CUresult cuMemsetD2D32(CUdeviceptr dstDevice, nuint dstPitch, uint ui, nuint Width, nuint Height);
+    public static partial CUresult cuMemsetD2D32(
+        CUdeviceptr dstDevice, nuint dstPitch,
+        uint ui, nuint Width, nuint Height);
 
     [LibraryImport(LibName)]
     public static partial CUresult cuMemsetD8Async(CUdeviceptr dstDevice, byte uc, nuint N, CUstream hStream);
@@ -630,13 +653,22 @@ public static partial class nvcuda
     public static partial CUresult cuMemsetD32Async(CUdeviceptr dstDevice, uint ui, nuint N, CUstream hStream);
 
     [LibraryImport(LibName)]
-    public static partial CUresult cuMemsetD2D8Async(CUdeviceptr dstDevice, nuint dstPitch, byte uc, nuint Width, nuint Height, CUstream hStream);
+    public static partial CUresult cuMemsetD2D8Async(
+        CUdeviceptr dstDevice, nuint dstPitch,
+        byte uc, nuint Width, nuint Height,
+        CUstream hStream);
 
     [LibraryImport(LibName)]
-    public static partial CUresult cuMemsetD2D16Async(CUdeviceptr dstDevice, nuint dstPitch, ushort us, nuint Width, nuint Height, CUstream hStream);
+    public static partial CUresult cuMemsetD2D16Async(
+        CUdeviceptr dstDevice, nuint dstPitch,
+        ushort us, nuint Width, nuint Height,
+        CUstream hStream);
 
     [LibraryImport(LibName)]
-    public static partial CUresult cuMemsetD2D32Async(CUdeviceptr dstDevice, nuint dstPitch, uint ui, nuint Width, nuint Height, CUstream hStream);
+    public static partial CUresult cuMemsetD2D32Async(
+        CUdeviceptr dstDevice, nuint dstPitch,
+        uint ui, nuint Width, nuint Height,
+        CUstream hStream);
 
     /// <summary>
     /// Imports an external memory object.
@@ -644,7 +676,9 @@ public static partial class nvcuda
     /// <param name="extMem">Returned external memory handle.</param>
     /// <param name="memHandleDesc">Memory handle descriptor.</param>
     [LibraryImport(LibName)]
-    public static partial CUresult cuImportExternalMemory(out CUexternalMemory extMem, in CUDA_EXTERNAL_MEMORY_HANDLE_DESC memHandleDesc);
+    public static partial CUresult cuImportExternalMemory(
+        out CUexternalMemory extMem,
+        in CUDA_EXTERNAL_MEMORY_HANDLE_DESC memHandleDesc);
 
     /// <summary>
     /// Maps a buffer onto an imported memory object.
@@ -653,7 +687,9 @@ public static partial class nvcuda
     /// <param name="extMem">External memory handle.</param>
     /// <param name="bufferDesc">Buffer descriptor.</param>
     [LibraryImport(LibName)]
-    public static partial CUresult cuExternalMemoryGetMappedBuffer(out CUdeviceptr devPtr, CUexternalMemory extMem, in CUDA_EXTERNAL_MEMORY_BUFFER_DESC bufferDesc);
+    public static partial CUresult cuExternalMemoryGetMappedBuffer(
+        out CUdeviceptr devPtr, CUexternalMemory extMem,
+        in CUDA_EXTERNAL_MEMORY_BUFFER_DESC bufferDesc);
 
     /// <summary>
     /// Maps a mipmapped array onto an imported memory object.
@@ -662,7 +698,9 @@ public static partial class nvcuda
     /// <param name="extMem">External memory handle.</param>
     /// <param name="mipmapDesc">Mipmapped array descriptor.</param>
     [LibraryImport(LibName)]
-    public static partial CUresult cuExternalMemoryGetMappedMipmappedArray(out IntPtr mipmappedArray, CUexternalMemory extMem, in CUDA_EXTERNAL_MEMORY_MIPMAPPED_ARRAY_DESC mipmapDesc);
+    public static partial CUresult cuExternalMemoryGetMappedMipmappedArray(
+        out IntPtr mipmappedArray, CUexternalMemory extMem,
+        in CUDA_EXTERNAL_MEMORY_MIPMAPPED_ARRAY_DESC mipmapDesc);
 
     /// <summary>
     /// Destroys an external memory object.
@@ -677,7 +715,9 @@ public static partial class nvcuda
     /// <param name="extSem">Returned external semaphore.</param>
     /// <param name="semHandleDesc">Semaphore descriptor.</param>
     [LibraryImport(LibName)]
-    public static partial CUresult cuImportExternalSemaphore(out CUexternalSemaphore extSem, in CUDA_EXTERNAL_SEMAPHORE_HANDLE_DESC semHandleDesc);
+    public static partial CUresult cuImportExternalSemaphore(
+        out CUexternalSemaphore extSem,
+        in CUDA_EXTERNAL_SEMAPHORE_HANDLE_DESC semHandleDesc);
 
     /// <summary>
     /// Signals a set of external semaphores.
@@ -687,7 +727,10 @@ public static partial class nvcuda
     /// <param name="numSemaphores">Number of semaphores.</param>
     /// <param name="stream">Stream.</param>
     [LibraryImport(LibName)]
-    public static partial CUresult cuSignalExternalSemaphoresAsync(ReadOnlySpan<CUexternalSemaphore> extSemArray, ReadOnlySpan<CUDA_EXTERNAL_SEMAPHORE_SIGNAL_PARAMS> paramsArray, uint numSemaphores, CUstream stream);
+    public static partial CUresult cuSignalExternalSemaphoresAsync(
+        ReadOnlySpan<CUexternalSemaphore> extSemArray,
+        ReadOnlySpan<CUDA_EXTERNAL_SEMAPHORE_SIGNAL_PARAMS> paramsArray,
+        uint numSemaphores, CUstream stream);
 
     /// <summary>
     /// Waits on a set of external semaphores.
@@ -697,7 +740,10 @@ public static partial class nvcuda
     /// <param name="numSemaphores">Number of semaphores.</param>
     /// <param name="stream">Stream.</param>
     [LibraryImport(LibName)]
-    public static partial CUresult cuWaitExternalSemaphoresAsync(ReadOnlySpan<CUexternalSemaphore> extSemArray, ReadOnlySpan<CUDA_EXTERNAL_SEMAPHORE_WAIT_PARAMS> paramsArray, uint numSemaphores, CUstream stream);
+    public static partial CUresult cuWaitExternalSemaphoresAsync(
+        ReadOnlySpan<CUexternalSemaphore> extSemArray,
+        ReadOnlySpan<CUDA_EXTERNAL_SEMAPHORE_WAIT_PARAMS> paramsArray,
+        uint numSemaphores, CUstream stream);
 
     /// <summary>
     /// Destroys an external semaphore.
@@ -754,7 +800,10 @@ public static partial class nvcuda
     /// <param name="paramArray">Operations.</param>
     /// <param name="flags">Flags.</param>
     [LibraryImport(LibName)]
-    public static partial CUresult cuStreamBatchMemOp(CUstream stream, uint count, ReadOnlySpan<CUstreamBatchMemOpParams> paramArray, uint flags);
+    public static partial CUresult cuStreamBatchMemOp(
+        CUstream stream, uint count,
+        ReadOnlySpan<CUstreamBatchMemOpParams> paramArray,
+        uint flags);
 
     /// <summary>
     /// Creates a graph.
@@ -780,7 +829,11 @@ public static partial class nvcuda
     /// <param name="numDependencies">Number of dependencies.</param>
     /// <param name="nodeParams">Kernel parameters.</param>
     [LibraryImport(LibName)]
-    public static partial CUresult cuGraphAddKernelNode(out CUgraphNode phGraphNode, CUgraph hGraph, ReadOnlySpan<CUgraphNode> dependencies, nuint numDependencies, in CUDA_KERNEL_NODE_PARAMS nodeParams);
+    public static partial CUresult cuGraphAddKernelNode(
+        out CUgraphNode phGraphNode,
+        CUgraph hGraph, ReadOnlySpan<CUgraphNode> dependencies,
+        nuint numDependencies,
+        in CUDA_KERNEL_NODE_PARAMS nodeParams);
 
     /// <summary>
     /// Instantiates a graph.
@@ -791,7 +844,10 @@ public static partial class nvcuda
     /// <param name="logBuffer">Log buffer.</param>
     /// <param name="bufferSize">Buffer size.</param>
     [LibraryImport(LibName)]
-    public static partial CUresult cuGraphInstantiate(out CUgraphExec phGraphExec, CUgraph hGraph, out CUgraphNode phErrorNode, Span<byte> logBuffer, nuint bufferSize);
+    public static partial CUresult cuGraphInstantiate(
+        out CUgraphExec phGraphExec,
+        CUgraph hGraph, out CUgraphNode phErrorNode,
+        Span<byte> logBuffer, nuint bufferSize);
 
     /// <summary>
     /// Launches an executable graph.
