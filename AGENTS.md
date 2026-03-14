@@ -18,6 +18,8 @@
 * **Type Safety:** Use `readonly record struct` wrappers around `IntPtr` for all handles (e.g., `CUcontext`, `CUdeviceptr`).
 * **Enums:** Use enums for all return values (`CUresult`) and bitwise flags.
 * **Modern Interop:** Use `LibraryImport` for all P/Invoke declarations.
+* **CUDA Version Source of Truth:** Always align bindings with the latest CUDA release from NVIDIA web documentation/header definitions (for example, CUDA 13.2 at the time of writing).
+* **Signature Fidelity:** P/Invoke method signatures must match NVIDIA C definitions exactly; do not change interop API shape unless the upstream C API changed.
 * **Span Usage:** Use `Span<T>` (for output) and `ReadOnlySpan<T>` (for input) instead of arrays for all interop buffers to ensure type safety and avoid pinning overhead where possible.
 * **Pointer Types:** Use specific pointer types where applicable. For untyped data, use `IntPtr` or `void*`. For text buffers, use `Span<byte>` or `Span<char>` as appropriate.
 

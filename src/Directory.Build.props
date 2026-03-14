@@ -27,7 +27,7 @@
 
     <!-- https://github.com/dotnet/roslyn/issues/41640 🤦 -->
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <NoWarn>$(NoWarn);CS1591;CS8981</NoWarn>
+    <NoWarn>$(NoWarn);CS1591;CS8981;CA1401;IDE1006</NoWarn>
 
     <AnalysisLevel>latest</AnalysisLevel>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
