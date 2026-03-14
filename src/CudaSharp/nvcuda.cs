@@ -13,7 +13,7 @@ public static partial class nvcuda
         DllResolver.Register();
     }
 
-    private const string LibName = "nvcuda";
+    const string LibName = "nvcuda";
 
     /// <summary>
     /// Initialize the CUDA driver API.

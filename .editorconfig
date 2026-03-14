@@ -228,6 +228,8 @@ dotnet_diagnostic.IDE0021.severity = silent
 dotnet_diagnostic.IDE0022.severity = silent
 # IDE0039: Use local function
 dotnet_diagnostic.IDE0039.severity = none
+# IDE0040: Add accessibility modifiers
+dotnet_diagnostic.IDE0040.severity = warning
 # IDE0044: Add readonly modifier
 dotnet_diagnostic.IDE0044.severity = warning
 # IDE0051: Remove unused private members
@@ -345,6 +347,10 @@ dotnet_diagnostic.CS8981.severity = none
 
 
 [*.cs]
+# IDE0040: omit default accessibility modifiers for C#
+dotnet_style_require_accessibility_modifiers = omit_if_default
+dotnet_diagnostic.IDE0040.severity = warning
+
 #indent switch case contents.
 csharp_indent_case_contents = true
 #indent switch labels

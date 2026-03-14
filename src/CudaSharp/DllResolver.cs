@@ -1,15 +1,14 @@
-﻿using System;
-using System.IO;
+﻿using System.IO;
 using System.Linq;
 using System.Reflection;
-using System.Runtime.InteropServices;
+using System.Threading;
 
 namespace CudaSharp;
 
 public static class DllResolver
 {
-    private static bool _registered = false;
-    private static readonly object _lock = new object();
+    static bool _registered = false;
+    static readonly Lock _lock = new();
 
     public static void Register()
     {
@@ -28,7 +27,7 @@ public static class DllResolver
         }
     }
 
-    private static IntPtr OnDllImport(string libraryName, Assembly assembly, DllImportSearchPath? searchPath)
+    static IntPtr OnDllImport(string libraryName, Assembly assembly, DllImportSearchPath? searchPath)
     {
         if (libraryName == "nvcuda")
         {
