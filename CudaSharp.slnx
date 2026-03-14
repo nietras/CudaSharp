@@ -13,6 +13,7 @@
     <File Path=".editorconfig" />
     <File Path=".gitattributes" />
     <File Path=".gitignore" />
+    <File Path="AGENTS.md" />
     <File Path="bench.ps1" />
     <File Path="codecov.yml" />
     <File Path="CODE_OF_CONDUCT.md" />

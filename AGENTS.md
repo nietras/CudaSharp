@@ -26,10 +26,19 @@
 * **Code Quality:** Run `dotnet format` before every commit.
 * **Atomic Commits:** Commit after each successful change or logical unit of work.
 
+## Agent Instruction Source
+
+* **Use AGENTS.md:** Treat `AGENTS.md` as the primary instruction source for this repository.
+* **No Repeated Vendor-Instruction Prompts:** Do not repeatedly ask to copy the same preferences into vendor-specific instruction systems.
+* **Apply by Default:** Apply these repository instructions automatically during work in this repository.
+
 ## Code Quality and Formatting
 
 * **Adhere to .editorconfig:** Strictly follow the formatting rules defined in the `.editorconfig` file.
 * **Clean Formatting:** Avoid adding unnecessary empty lines and ensure proper indentation.
+* **Struct Definitions:** Define `struct` types with multi-line bodies; avoid one-line `struct` declarations.
+* **Method Declarations:** Keep declaration line lengths around 100-120 characters and split long signatures across multiple lines.
+* **Parameter Grouping:** When wrapping method signatures, group parameters by purpose (for example outputs vs inputs) and avoid defaulting to one-parameter-per-line when a denser, readable grouping fits.
 * **Performance:** Prioritize writing high-performance, low-overhead code, especially for interop calls.
 
 ## Documentation
