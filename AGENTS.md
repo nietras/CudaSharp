@@ -30,7 +30,7 @@
 
 * **Use AGENTS.md:** Treat `AGENTS.md` as the primary instruction source for this repository.
 * **No Repeated Vendor-Instruction Prompts:** Do not repeatedly ask to copy the same preferences into vendor-specific instruction systems.
-* **Apply by Default:** Apply these repository instructions automatically during work in this repo.
+* **Apply by Default:** Apply these repository instructions automatically during work in this repository.
 
 ## Code Quality and Formatting
 
