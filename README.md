@@ -16,6 +16,8 @@
 Low-level CUDA interop in modern C#. Cross-platform, trimmable and
 AOT/NativeAOT compatible.
 
+⚠ WORK IN PROGRESS - definitions and interop may be wrong and untested.
+
 ⭐ Please star this project if you like it. ⭐
 
 [Example](#example) | [Example Catalogue](#example-catalogue) | [Public API Reference](#public-api-reference)
