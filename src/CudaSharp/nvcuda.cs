@@ -1,19 +1,19 @@
-﻿using System.Runtime.InteropServices;
-
-namespace CudaSharp;
+﻿namespace CudaSharp;
 
 /// <summary>
 /// CUDA Driver API.
 /// </summary>
 /// <seealso href="https://docs.nvidia.com/cuda/cuda-driver-api/index.html"/>
+#pragma warning disable IDE1006 // Naming Styles
 public static partial class nvcuda
+#pragma warning restore IDE1006 // Naming Styles
 {
     static nvcuda()
     {
         DllResolver.Register();
     }
 
-    const string LibName = "nvcuda";
+    const string LibName = nameof(nvcuda);
 
     /// <summary>
     /// Initialize the CUDA driver API.
