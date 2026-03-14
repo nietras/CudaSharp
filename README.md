@@ -999,5 +999,85 @@ namespace CudaSharp
             public CudaSharp.nvcuda.CUuuid.<bytes>e__FixedBuffer bytes;
         }
     }
+    public static class nvrtc
+    {
+        [System.Runtime.CompilerServices.SkipLocalsInit]
+        [System.Runtime.InteropServices.LibraryImport("nvrtc", StringMarshalling=System.Runtime.InteropServices.StringMarshalling.Utf8)]
+        public static CudaSharp.nvrtc.nvrtcResult nvrtcAddNameExpression(CudaSharp.nvrtc.nvrtcProgram prog, string name_expression) { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
+        [System.Runtime.InteropServices.LibraryImport("nvrtc", StringMarshalling=System.Runtime.InteropServices.StringMarshalling.Utf8)]
+        public static CudaSharp.nvrtc.nvrtcResult nvrtcCompileProgram(CudaSharp.nvrtc.nvrtcProgram prog, int numOptions, in System.ReadOnlySpan<string> options) { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
+        [System.Runtime.InteropServices.LibraryImport("nvrtc", StringMarshalling=System.Runtime.InteropServices.StringMarshalling.Utf8)]
+        public static CudaSharp.nvrtc.nvrtcResult nvrtcCreateProgram(out CudaSharp.nvrtc.nvrtcProgram prog, string src, string name, int numHeaders, in System.ReadOnlySpan<string> headers, in System.ReadOnlySpan<string> includeNames) { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
+        [System.Runtime.InteropServices.LibraryImport("nvrtc")]
+        public static CudaSharp.nvrtc.nvrtcResult nvrtcDestroyProgram(ref CudaSharp.nvrtc.nvrtcProgram prog) { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
+        [System.Runtime.InteropServices.LibraryImport("nvrtc")]
+        public static CudaSharp.nvrtc.nvrtcResult nvrtcGetCUBIN(CudaSharp.nvrtc.nvrtcProgram prog, System.Span<byte> cubin) { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
+        [System.Runtime.InteropServices.LibraryImport("nvrtc")]
+        public static CudaSharp.nvrtc.nvrtcResult nvrtcGetCUBINSize(CudaSharp.nvrtc.nvrtcProgram prog, out System.UIntPtr cubinSizeRet) { }
+        [System.Runtime.InteropServices.LibraryImport("nvrtc")]
+        public static nint nvrtcGetErrorString(CudaSharp.nvrtc.nvrtcResult result) { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
+        [System.Runtime.InteropServices.LibraryImport("nvrtc")]
+        public static CudaSharp.nvrtc.nvrtcResult nvrtcGetLTOIR(CudaSharp.nvrtc.nvrtcProgram prog, System.Span<byte> ltoIR) { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
+        [System.Runtime.InteropServices.LibraryImport("nvrtc")]
+        public static CudaSharp.nvrtc.nvrtcResult nvrtcGetLTOIRSize(CudaSharp.nvrtc.nvrtcProgram prog, out System.UIntPtr ltoIRSizeRet) { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
+        [System.Runtime.InteropServices.LibraryImport("nvrtc", StringMarshalling=System.Runtime.InteropServices.StringMarshalling.Utf8)]
+        public static CudaSharp.nvrtc.nvrtcResult nvrtcGetLoweredName(CudaSharp.nvrtc.nvrtcProgram prog, string name_expression, out System.IntPtr lowered_name) { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
+        [System.Runtime.InteropServices.LibraryImport("nvrtc")]
+        public static CudaSharp.nvrtc.nvrtcResult nvrtcGetNumSupportedArchs(out int numArchs) { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
+        [System.Runtime.InteropServices.LibraryImport("nvrtc")]
+        public static CudaSharp.nvrtc.nvrtcResult nvrtcGetOptiXIR(CudaSharp.nvrtc.nvrtcProgram prog, System.Span<byte> optixIR) { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
+        [System.Runtime.InteropServices.LibraryImport("nvrtc")]
+        public static CudaSharp.nvrtc.nvrtcResult nvrtcGetOptiXIRSize(CudaSharp.nvrtc.nvrtcProgram prog, out System.UIntPtr optixIRSizeRet) { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
+        [System.Runtime.InteropServices.LibraryImport("nvrtc")]
+        public static CudaSharp.nvrtc.nvrtcResult nvrtcGetPTX(CudaSharp.nvrtc.nvrtcProgram prog, System.Span<byte> ptx) { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
+        [System.Runtime.InteropServices.LibraryImport("nvrtc")]
+        public static CudaSharp.nvrtc.nvrtcResult nvrtcGetPTXSize(CudaSharp.nvrtc.nvrtcProgram prog, out System.UIntPtr ptxSizeRet) { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
+        [System.Runtime.InteropServices.LibraryImport("nvrtc")]
+        public static CudaSharp.nvrtc.nvrtcResult nvrtcGetProgramLog(CudaSharp.nvrtc.nvrtcProgram prog, System.Span<byte> log) { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
+        [System.Runtime.InteropServices.LibraryImport("nvrtc", StringMarshalling=System.Runtime.InteropServices.StringMarshalling.Utf8)]
+        public static CudaSharp.nvrtc.nvrtcResult nvrtcGetProgramLogSize(CudaSharp.nvrtc.nvrtcProgram prog, out System.UIntPtr logSizeRet) { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
+        [System.Runtime.InteropServices.LibraryImport("nvrtc")]
+        public static CudaSharp.nvrtc.nvrtcResult nvrtcGetSupportedArchs(System.Span<int> supportedArchs) { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
+        [System.Runtime.InteropServices.LibraryImport("nvrtc")]
+        public static CudaSharp.nvrtc.nvrtcResult nvrtcVersion(out int major, out int minor) { }
+        public readonly struct nvrtcProgram : System.IEquatable<CudaSharp.nvrtc.nvrtcProgram>
+        {
+            public nvrtcProgram(nint Value) { }
+            public System.IntPtr Value { get; init; }
+        }
+        public enum nvrtcResult
+        {
+            NVRTC_SUCCESS = 0,
+            NVRTC_ERROR_OUT_OF_MEMORY = 1,
+            NVRTC_ERROR_PROGRAM_CREATION_FAILURE = 2,
+            NVRTC_ERROR_INVALID_INPUT = 3,
+            NVRTC_ERROR_INVALID_PROGRAM = 4,
+            NVRTC_ERROR_INVALID_OPTION = 5,
+            NVRTC_ERROR_COMPILATION = 6,
+            NVRTC_ERROR_BUILTIN_OPERATION_FAILURE = 7,
+            NVRTC_ERROR_NO_NAME_EXPRESSIONS_AFTER_COMPILATION = 8,
+            NVRTC_ERROR_NO_LOWERED_NAMES_BEFORE_COMPILATION = 9,
+            NVRTC_ERROR_NAME_EXPRESSION_NOT_VALID = 10,
+            NVRTC_ERROR_INTERNAL_ERROR = 11,
+            NVRTC_ERROR_TIME_FILE_WRITE_FAILED = 12,
+        }
+    }
 }
 ```
