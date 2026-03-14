@@ -6,8 +6,8 @@ namespace CudaSharp.Test;
 public class nvcudaTest
 {
     [TestMethod]
-    public void nvcudaTest_Empty()
+    public void nvcudaTest_cuInit()
     {
-        nvcuda.Empty();
+        nvcuda.cuInit(0);
     }
 }
