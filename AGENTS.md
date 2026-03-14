@@ -9,7 +9,7 @@
 ## File Structure and Nesting
 
 * **API Definition:** API methods must be defined in a file named exactly after the DLL (e.g., `nvcuda.cs`).
-* **Type Definitions:** All API-specific types (enums, structs, handles) must be **nested** within the API's static class.
+* **Type Definitions:** All API-specific types (enums, structs, handles) must be **nested** within the APIs static class.
 * **Type File:** Define these nested types in a separate partial class file named `[DllName].Types.cs` (e.g., `nvcuda.Types.cs`).
 * **Test Files:** Test classes must be named `[DllName]Tests.cs` (e.g., `nvcudaTests.cs`) and contain unit tests specific to that API.
 
