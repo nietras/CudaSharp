@@ -4,6 +4,14 @@ public static partial class nvcuda
 {
     extension(CUresult result)
     {
+        public void Ok()
+        {
+            if (result != CUresult.CUDA_SUCCESS)
+            {
+                Throws.Throw(result, result.ToStringFast());
+            }
+        }
+
         public string ToStringFast() => result switch
         {
             CUresult.CUDA_SUCCESS => nameof(CUresult.CUDA_SUCCESS),
