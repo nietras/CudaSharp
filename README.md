@@ -69,6 +69,16 @@ The following examples are available in [ReadMeTest.cs](src/CudaSharp.XyzTest/Re
 [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
 namespace CudaSharp
 {
+    public class CudaException : System.Exception
+    {
+        public CudaException(string message) { }
+    }
+    public sealed class CudaException<TResult> : System.Exception
+        where TResult :  unmanaged, System.Enum
+    {
+        public CudaException(TResult result, string message) { }
+        public TResult Result { get; }
+    }
     public static class DllResolver
     {
         public static void Register() { }
@@ -998,6 +1008,11 @@ namespace CudaSharp
             [System.Runtime.CompilerServices.FixedBuffer(typeof(byte), 16)]
             public CudaSharp.nvcuda.CUuuid.<bytes>e__FixedBuffer bytes;
         }
+        extension(CudaSharp.nvcuda.CUresult result)
+        {
+            public void Ok() { }
+            public string ToStringFast() { }
+        }
     }
     public static class nvrtc
     {
@@ -1021,6 +1036,7 @@ namespace CudaSharp
         public static CudaSharp.nvrtc.nvrtcResult nvrtcGetCUBINSize(CudaSharp.nvrtc.nvrtcProgram prog, out System.UIntPtr cubinSizeRet) { }
         [System.Runtime.InteropServices.LibraryImport("nvrtc")]
         public static nint nvrtcGetErrorString(CudaSharp.nvrtc.nvrtcResult result) { }
+        public static System.ReadOnlySpan<byte> nvrtcGetErrorStringSpan(CudaSharp.nvrtc.nvrtcResult result) { }
         [System.Runtime.CompilerServices.SkipLocalsInit]
         [System.Runtime.InteropServices.LibraryImport("nvrtc")]
         public static CudaSharp.nvrtc.nvrtcResult nvrtcGetLTOIR(CudaSharp.nvrtc.nvrtcProgram prog, System.Span<byte> ltoIR) { }
@@ -1077,6 +1093,9 @@ namespace CudaSharp
             NVRTC_ERROR_NAME_EXPRESSION_NOT_VALID = 10,
             NVRTC_ERROR_INTERNAL_ERROR = 11,
             NVRTC_ERROR_TIME_FILE_WRITE_FAILED = 12,
+        }
+        extension(CudaSharp.nvrtc.nvrtcResult result)
+        {
         }
     }
 }

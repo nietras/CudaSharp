@@ -20,8 +20,10 @@ public static partial class nvrtc
     /// </summary>
     /// <param name="result">The error code.</param>
     /// <returns>A pointer to the error string.</returns>
+    // NOTE: Error string is nothing more than the enum definition as string. No
+    //       need here really.
     [LibraryImport(LibName)]
-    public static partial IntPtr nvrtcGetErrorString(nvrtcResult result);
+    public unsafe static partial IntPtr nvrtcGetErrorString(nvrtcResult result);
 
     /// <summary>
     /// Sets the output parameters major and minor to the NVRTC version number.

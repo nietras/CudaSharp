@@ -24,4 +24,20 @@ public class nvrtcTest
     {
         Assert.AreNotEqual(IntPtr.Zero, nvrtcGetErrorString(nvrtcResult.NVRTC_SUCCESS));
     }
+
+    [TestMethod]
+    public void nvrtcTest_nvrtcResult_ToStringFast()
+    {
+        Assert.EnumValuesToString<nvrtcResult>(r => r.ToStringFast());
+        var unknown = (nvrtcResult)(int.MaxValue - 1);
+        Assert.AreEqual("NVRTC_ERROR_UNKNOWN:2147483646", unknown.ToStringFast());
+    }
+
+    [TestMethod]
+    public void nvrtcTest_nvrtcResult_nvrtcGetErrorStringString()
+    {
+        Assert.EnumValuesToString<nvrtcResult>(nvrtcGetErrorStringString);
+        var unknown = (nvrtcResult)(int.MaxValue - 1);
+        Assert.AreEqual("NVRTC_ERROR unknown", nvrtcGetErrorStringString(unknown));
+    }
 }
