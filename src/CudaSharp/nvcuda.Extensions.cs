@@ -45,7 +45,7 @@ public static partial class nvcuda
             CUresult.CUDA_ERROR_INVALID_GRAPHICS_CONTEXT => nameof(CUresult.CUDA_ERROR_INVALID_GRAPHICS_CONTEXT),
             CUresult.CUDA_ERROR_INVALID_SOURCE => nameof(CUresult.CUDA_ERROR_INVALID_SOURCE),
             CUresult.CUDA_ERROR_INVALID_ADDRESS => nameof(CUresult.CUDA_ERROR_INVALID_ADDRESS),
-            _ => "CUDA_ERROR_UNKNOWN",
+            _ => $"CUDA_ERROR_UNKNOWN:{result}",
         };
     }
 }

@@ -31,9 +31,8 @@ public class nvcudaTest
     public void nvcudaTest_CUresult()
     {
         AssertEnumToString<CUresult>(r => r.ToStringFast());
-        var unknown = ((CUresult)int.MaxValue - 1);
-        Assert.AreEqual("CUDA_ERROR_UNKNOWN", unknown.ToStringFast());
-        Assert.AreEqual("2147483646", unknown.ToString());
+        var unknown = (CUresult)(int.MaxValue - 1);
+        Assert.AreEqual("CUDA_ERROR_UNKNOWN:2147483646", unknown.ToStringFast());
     }
 
     public static void AssertEnumToString<TEnum>(Func<TEnum, string> toString)
