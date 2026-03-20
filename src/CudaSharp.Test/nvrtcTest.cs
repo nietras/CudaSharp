@@ -40,4 +40,10 @@ public class nvrtcTest
         var unknown = (nvrtcResult)(int.MaxValue - 1);
         Assert.AreEqual("NVRTC_ERROR unknown", nvrtcGetErrorStringString(unknown));
     }
+
+    [TestMethod]
+    public void nvrtcTest_nvrtcResult_Ok()
+    {
+        Assert.EnumValuesOkThrows<nvrtcResult>(r => r == nvrtcResult.NVRTC_SUCCESS, r => r.Ok());
+    }
 }

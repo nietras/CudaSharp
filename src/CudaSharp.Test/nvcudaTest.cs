@@ -28,10 +28,16 @@ public class nvcudaTest
     }
 
     [TestMethod]
-    public void nvcudaTest_CUresult()
+    public void nvcudaTest_CUresult_ToStringFast()
     {
         Assert.EnumValuesToString<CUresult>(r => r.ToStringFast());
         var unknown = (CUresult)(int.MaxValue - 1);
         Assert.AreEqual("CUDA_ERROR_UNKNOWN:2147483646", unknown.ToStringFast());
+    }
+
+    [TestMethod]
+    public void nvcudaTest_CUresult_Ok()
+    {
+        Assert.EnumValuesOkThrows<CUresult>(r => r == CUresult.CUDA_SUCCESS, r => r.Ok());
     }
 }
