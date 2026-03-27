@@ -11,7 +11,7 @@ public class nvcudaTest
     {
         try
         {
-            cuInit(0);
+            cuInit();
         }
         catch (Exception ex)
         {
@@ -24,7 +24,7 @@ public class nvcudaTest
     [TestMethod]
     public void nvcudaTest_cuInit()
     {
-        cuInit(0);
+        cuInit();
     }
 
     [TestMethod]

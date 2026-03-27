@@ -29,7 +29,7 @@ public partial class ReadMeTest
     public unsafe void ReadMeTest_()
     {
         Log("Initializing CUDA...");
-        cuInit(0).Ok();
+        cuInit().Ok();
 
         cuDeviceGet(out var device, 0).Ok();
         cuCtxCreate(out var context, CUctx_flags.CU_CTX_SCHED_AUTO, device).Ok();
