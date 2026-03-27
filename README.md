@@ -213,7 +213,7 @@ namespace CudaSharp
         [System.Runtime.InteropServices.LibraryImport("nvcuda")]
         public static CudaSharp.nvcuda.CUresult cuImportExternalSemaphore(out CudaSharp.nvcuda.CUexternalSemaphore extSem, in CudaSharp.nvcuda.CUDA_EXTERNAL_SEMAPHORE_HANDLE_DESC semHandleDesc) { }
         [System.Runtime.InteropServices.LibraryImport("nvcuda")]
-        public static CudaSharp.nvcuda.CUresult cuInit(uint flags) { }
+        public static CudaSharp.nvcuda.CUresult cuInit(uint flags = 0) { }
         [System.Runtime.CompilerServices.SkipLocalsInit]
         [System.Runtime.InteropServices.LibraryImport("nvcuda")]
         public static CudaSharp.nvcuda.CUresult cuLaunchKernel(CudaSharp.nvcuda.CUfunction f, uint gridDimX, uint gridDimY, uint gridDimZ, uint blockDimX, uint blockDimY, uint blockDimZ, uint sharedMemBytes, CudaSharp.nvcuda.CUstream hStream, System.ReadOnlySpan<System.IntPtr> kernelParams, System.ReadOnlySpan<System.IntPtr> extra) { }
