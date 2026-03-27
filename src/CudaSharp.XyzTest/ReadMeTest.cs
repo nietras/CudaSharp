@@ -34,15 +34,16 @@ public partial class ReadMeTest
         cuDeviceGet(out var device, 0).Ok();
         cuCtxCreate(out var context, CUctx_flags.CU_CTX_SCHED_AUTO, device).Ok();
 
-        var kernelSource = @"
-extern ""C"" __global__ void saxpy(float a, float *x, float *y, float *out, size_t n)
-{
-    size_t tid = blockIdx.x * blockDim.x + threadIdx.x;
-    if (tid < n) {
-        out[tid] = a * x[tid] + y[tid];
-    }
-}
-";
+        var kernelSource =
+            """
+            extern ""C"" __global__ void saxpy(float a, float *x, float *y, float *out, size_t n)
+            {
+                size_t tid = blockIdx.x * blockDim.x + threadIdx.x;
+                if (tid < n) {
+                    out[tid] = a * x[tid] + y[tid];
+                }
+            }
+            """;
         Log("Compiling kernel with NVRTC...");
         nvrtcCreateProgram(out var prog, kernelSource, "saxpy.cu", 0, [], []).Ok();
 
@@ -307,7 +308,7 @@ extern ""C"" __global__ void saxpy(float a, float *x, float *y, float *out, size
             l => l.StartsWith(endLineStartsWith, StringComparison.Ordinal));
         sourceEndLine += endLineOffset;
         var sourceExampleLines = sourceLines[sourceStartLine..sourceEndLine]
-            .Select(l => l.Length > 0 ? l.Remove(0, whitespaceToRemove) : l).ToArray();
+            .Select(l => l.Length >= whitespaceToRemove ? l.Remove(0, whitespaceToRemove) : l).ToArray();
         return sourceExampleLines;
     }
 
