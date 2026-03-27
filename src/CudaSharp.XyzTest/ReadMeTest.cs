@@ -36,7 +36,7 @@ public partial class ReadMeTest
 
         var kernelSource =
             """
-            extern ""C"" __global__ void saxpy(float a, float *x, float *y, float *out, size_t n)
+            extern "C" __global__ void saxpy(float a, float *x, float *y, float *out, size_t n)
             {
                 size_t tid = blockIdx.x * blockDim.x + threadIdx.x;
                 if (tid < n) {
@@ -54,8 +54,7 @@ public partial class ReadMeTest
             var logBuffer = new byte[logSize];
             nvrtcGetProgramLog(prog, logBuffer).Ok();
             var log = Encoding.UTF8.GetString(logBuffer).TrimEnd('\0');
-            Log($"Compilation failed:\n{log}");
-            return; // Exit
+            Assert.Fail($"Compilation failed:\n{log}");
         }
 
         nvrtcGetPTXSize(prog, out var ptxSize).Ok();

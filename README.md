@@ -32,7 +32,7 @@ cuCtxCreate(out var context, CUctx_flags.CU_CTX_SCHED_AUTO, device).Ok();
 
 var kernelSource =
     """
-    extern ""C"" __global__ void saxpy(float a, float *x, float *y, float *out, size_t n)
+    extern "C" __global__ void saxpy(float a, float *x, float *y, float *out, size_t n)
     {
         size_t tid = blockIdx.x * blockDim.x + threadIdx.x;
         if (tid < n) {
@@ -50,8 +50,7 @@ if (compileResult != nvrtcResult.NVRTC_SUCCESS)
     var logBuffer = new byte[logSize];
     nvrtcGetProgramLog(prog, logBuffer).Ok();
     var log = Encoding.UTF8.GetString(logBuffer).TrimEnd('\0');
-    Log($"Compilation failed:\n{log}");
-    return; // Exit
+    Assert.Fail($"Compilation failed:\n{log}");
 }
 
 nvrtcGetPTXSize(prog, out var ptxSize).Ok();
@@ -175,7 +174,7 @@ cuCtxCreate(out var context, CUctx_flags.CU_CTX_SCHED_AUTO, device).Ok();
 
 var kernelSource =
     """
-    extern ""C"" __global__ void saxpy(float a, float *x, float *y, float *out, size_t n)
+    extern "C" __global__ void saxpy(float a, float *x, float *y, float *out, size_t n)
     {
         size_t tid = blockIdx.x * blockDim.x + threadIdx.x;
         if (tid < n) {
@@ -193,8 +192,7 @@ if (compileResult != nvrtcResult.NVRTC_SUCCESS)
     var logBuffer = new byte[logSize];
     nvrtcGetProgramLog(prog, logBuffer).Ok();
     var log = Encoding.UTF8.GetString(logBuffer).TrimEnd('\0');
-    Log($"Compilation failed:\n{log}");
-    return; // Exit
+    Assert.Fail($"Compilation failed:\n{log}");
 }
 
 nvrtcGetPTXSize(prog, out var ptxSize).Ok();
