@@ -25,7 +25,6 @@ AOT/NativeAOT compatible.
 ## Example
 ```csharp
 cuInit().Ok();
-
 cuDeviceGet(out var device, 0).Ok();
 cuCtxCreate(out var context, CUctx_flags.CU_CTX_SCHED_AUTO, device).Ok();
 
@@ -154,7 +153,6 @@ The following examples are available in [ReadMeTest.cs](src/CudaSharp.XyzTest/Re
 ### Example - Empty
 ```csharp
 cuInit().Ok();
-
 cuDeviceGet(out var device, 0).Ok();
 cuCtxCreate(out var context, CUctx_flags.CU_CTX_SCHED_AUTO, device).Ok();
 

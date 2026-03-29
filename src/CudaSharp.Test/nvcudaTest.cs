@@ -34,13 +34,11 @@ public class nvcudaTest
         var unknown = (CUresult)(int.MaxValue - 1);
         Assert.AreEqual("CUDA_ERROR_UNKNOWN:2147483646", unknown.ToStringFast());
     }
-
     [TestMethod]
     public void nvcudaTest_CUresult_Ok()
     {
         Assert.EnumValuesOkThrows<CUresult>(r => r == CUresult.CUDA_SUCCESS, r => r.Ok());
     }
-
     [TestMethod]
     public void nvcudaTest_CUresult_IsOk()
     {
@@ -48,7 +46,6 @@ public class nvcudaTest
         Assert.IsFalse(CUresult.CUDA_ERROR_DEINITIALIZED.IsOk());
         Assert.IsFalse(CUresult.CUDA_ERROR_NOT_READY.IsOk());
     }
-
     [TestMethod]
     public void nvcudaTest_CUresult_IsError()
     {

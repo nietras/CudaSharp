@@ -24,6 +24,8 @@ public static partial class nvrtc
                 Throws.Throw(result, result.ToStringFast());
             }
         }
+        public bool IsOk() => result == nvrtcResult.NVRTC_SUCCESS;
+        public bool IsError() => result != nvrtcResult.NVRTC_SUCCESS;
 
         public string ToStringFast() => result switch
         {
