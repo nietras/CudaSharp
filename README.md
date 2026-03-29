@@ -24,6 +24,107 @@ AOT/NativeAOT compatible.
 
 ## Example
 ```csharp
+cuInit().Ok();
+cuDeviceGet(out var device, 0).Ok();
+cuCtxCreate(out var context, CUctx_flags.CU_CTX_SCHED_AUTO, device).Ok();
+
+var kernelSource =
+    """
+    extern "C" __global__ void saxpy(float a, float *x, float *y, float *out, size_t n)
+    {
+        size_t tid = blockIdx.x * blockDim.x + threadIdx.x;
+        if (tid < n) {
+            out[tid] = a * x[tid] + y[tid];
+        }
+    }
+    """;
+nvrtcCreateProgram(out var prog, kernelSource, "saxpy.cu", 0, [], []).Ok();
+
+var compileResult = nvrtcCompileProgram(prog, 0, []);
+if (compileResult != nvrtcResult.NVRTC_SUCCESS)
+{
+    nvrtcGetProgramLogSize(prog, out var logSize).Ok();
+    var logBuffer = new byte[logSize];
+    nvrtcGetProgramLog(prog, logBuffer).Ok();
+    var log = Encoding.UTF8.GetString(logBuffer).TrimEnd('\0');
+    Assert.Fail($"Compilation failed:\n{log}");
+}
+
+nvrtcGetPTXSize(prog, out var ptxSize).Ok();
+var ptxBuffer = new byte[ptxSize];
+nvrtcGetPTX(prog, ptxBuffer).Ok();
+
+nvrtcDestroyProgram(ref prog).Ok();
+
+cuModuleLoadData(out var module, ptxBuffer).Ok();
+cuModuleGetFunction(out var function, module, "saxpy").Ok();
+
+var n = 1024;
+var a = 2.5f;
+var bytes = (nuint)(n * sizeof(float));
+
+// Allocate Device Memory
+cuMemAlloc(out var d_x, bytes).Ok();
+cuMemAlloc(out var d_y, bytes).Ok();
+cuMemAlloc(out var d_out, bytes).Ok();
+
+// Allocate Host Memory (Pinned)
+cuMemHostAlloc(out var h_x_ptr, bytes, 0).Ok();
+cuMemHostAlloc(out var h_y_ptr, bytes, 0).Ok();
+cuMemHostAlloc(out var h_out_ptr, bytes, 0).Ok();
+
+// Initialize Host Data
+var h_x = new Span<float>((void*)h_x_ptr, n);
+var h_y = new Span<float>((void*)h_y_ptr, n);
+var h_out = new Span<float>((void*)h_out_ptr, n);
+
+for (var i = 0; i < n; i++)
+{
+    h_x[i] = i;
+    h_y[i] = i * 2;
+}
+
+cuMemcpyHtoD(d_x, h_x_ptr, bytes).Ok();
+cuMemcpyHtoD(d_y, h_y_ptr, bytes).Ok();
+
+// Kernel params
+void*[] args = [&a, &d_x, &d_y, &d_out, &n];
+var argsPtrs = new IntPtr[args.Length];
+for (var i = 0; i < args.Length; i++)
+{
+    argsPtrs[i] = (IntPtr)args[i];
+}
+
+cuLaunchKernel(
+    function,
+    (uint)((n + 255) / 256), 1, 1, // Grid
+    256, 1, 1, // Block
+    0, new CUstream(IntPtr.Zero),
+    new ReadOnlySpan<IntPtr>(argsPtrs),
+    []
+).Ok();
+
+cuCtxSynchronize().Ok();
+
+cuMemcpyDtoH(h_out_ptr, d_out, bytes).Ok();
+
+for (var i = 0; i < n; i++)
+{
+    var actual = h_out[i];
+    var expected = a * h_x[i] + h_y[i];
+    Assert.AreEqual(expected, actual, 1e-5);
+}
+
+// Cleanup
+cuMemFreeHost(h_x_ptr);
+cuMemFreeHost(h_y_ptr);
+cuMemFreeHost(h_out_ptr);
+
+cuMemFree(d_x);
+cuMemFree(d_y);
+cuMemFree(d_out);
+cuCtxDestroy(context);
+
 // Above example code is for demonstration purposes only.
 // Short names and repeated constants are only for demonstration.
 ```
@@ -49,10 +150,12 @@ Benchmarks.
 ## Example Catalogue
 The following examples are available in [ReadMeTest.cs](src/CudaSharp.XyzTest/ReadMeTest.cs).
 
-### Example - Empty
+### Example - cuCtx
 ```csharp
-// Above example code is for demonstration purposes only.
-// Short names and repeated constants are only for demonstration.
+cuInit().Ok();
+cuDeviceGet(out var device, 0).Ok();
+cuCtxCreate(out var context, CUctx_flags.CU_CTX_SCHED_AUTO, device).Ok();
+cuCtxDestroy(context);
 ```
 
 ## Public API Reference
@@ -69,6 +172,16 @@ The following examples are available in [ReadMeTest.cs](src/CudaSharp.XyzTest/Re
 [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
 namespace CudaSharp
 {
+    public class CudaException : System.Exception
+    {
+        public CudaException(string message) { }
+    }
+    public sealed class CudaException<TResult> : System.Exception
+        where TResult :  unmanaged, System.Enum
+    {
+        public CudaException(TResult result, string message) { }
+        public TResult Result { get; }
+    }
     public static class DllResolver
     {
         public static void Register() { }
@@ -203,7 +316,7 @@ namespace CudaSharp
         [System.Runtime.InteropServices.LibraryImport("nvcuda")]
         public static CudaSharp.nvcuda.CUresult cuImportExternalSemaphore(out CudaSharp.nvcuda.CUexternalSemaphore extSem, in CudaSharp.nvcuda.CUDA_EXTERNAL_SEMAPHORE_HANDLE_DESC semHandleDesc) { }
         [System.Runtime.InteropServices.LibraryImport("nvcuda")]
-        public static CudaSharp.nvcuda.CUresult cuInit(uint flags) { }
+        public static CudaSharp.nvcuda.CUresult cuInit(uint flags = 0) { }
         [System.Runtime.CompilerServices.SkipLocalsInit]
         [System.Runtime.InteropServices.LibraryImport("nvcuda")]
         public static CudaSharp.nvcuda.CUresult cuLaunchKernel(CudaSharp.nvcuda.CUfunction f, uint gridDimX, uint gridDimY, uint gridDimZ, uint blockDimX, uint blockDimY, uint blockDimZ, uint sharedMemBytes, CudaSharp.nvcuda.CUstream hStream, System.ReadOnlySpan<System.IntPtr> kernelParams, System.ReadOnlySpan<System.IntPtr> extra) { }
@@ -998,6 +1111,13 @@ namespace CudaSharp
             [System.Runtime.CompilerServices.FixedBuffer(typeof(byte), 16)]
             public CudaSharp.nvcuda.CUuuid.<bytes>e__FixedBuffer bytes;
         }
+        extension(CudaSharp.nvcuda.CUresult result)
+        {
+            public void Ok() { }
+            public bool IsOk() { }
+            public bool IsError() { }
+            public string ToStringFast() { }
+        }
     }
     public static class nvrtc
     {
@@ -1021,6 +1141,7 @@ namespace CudaSharp
         public static CudaSharp.nvrtc.nvrtcResult nvrtcGetCUBINSize(CudaSharp.nvrtc.nvrtcProgram prog, out System.UIntPtr cubinSizeRet) { }
         [System.Runtime.InteropServices.LibraryImport("nvrtc")]
         public static nint nvrtcGetErrorString(CudaSharp.nvrtc.nvrtcResult result) { }
+        public static System.ReadOnlySpan<byte> nvrtcGetErrorStringSpan(CudaSharp.nvrtc.nvrtcResult result) { }
         [System.Runtime.CompilerServices.SkipLocalsInit]
         [System.Runtime.InteropServices.LibraryImport("nvrtc")]
         public static CudaSharp.nvrtc.nvrtcResult nvrtcGetLTOIR(CudaSharp.nvrtc.nvrtcProgram prog, System.Span<byte> ltoIR) { }
@@ -1077,6 +1198,9 @@ namespace CudaSharp
             NVRTC_ERROR_NAME_EXPRESSION_NOT_VALID = 10,
             NVRTC_ERROR_INTERNAL_ERROR = 11,
             NVRTC_ERROR_TIME_FILE_WRITE_FAILED = 12,
+        }
+        extension(CudaSharp.nvrtc.nvrtcResult result)
+        {
         }
     }
 }

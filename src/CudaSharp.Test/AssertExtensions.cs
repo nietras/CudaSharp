@@ -1,7 +1,4 @@
 ﻿using System;
-using System.Diagnostics.CodeAnalysis;
-using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace CudaSharp.Test;
@@ -10,23 +7,30 @@ public static class AssertExtensions
 {
     extension(Assert)
     {
-        [return: NotNullIfNotNull(nameof(actual))]
-        public static T? AreEqualReturn<T>(T? expected, T? actual, string? message = "",
-            [CallerArgumentExpression(nameof(expected))] string expectedExpression = "",
-            [CallerArgumentExpression(nameof(actual))] string actualExpression = "")
+        public static void EnumValuesToString<TEnum>(Func<TEnum, string> toString)
+            where TEnum : unmanaged, Enum
         {
-            Assert.AreEqual(expected, actual, message, expectedExpression, actualExpression);
-            return actual;
+            var values = Enum.GetValues<TEnum>();
+            foreach (var value in values)
+            {
+                Assert.AreEqual(value.ToString(), toString(value));
+            }
         }
 
-        public static void AreSame<T>(ReadOnlySpan<T> expected, ReadOnlySpan<T> actual, string? message = "",
-            [CallerArgumentExpression(nameof(expected))] string expectedExpression = "",
-            [CallerArgumentExpression(nameof(actual))] string actualExpression = "")
+        public static void EnumValuesOkThrows<TEnum>(Func<TEnum, bool> isOk, Action<TEnum> ok)
+            where TEnum : unmanaged, Enum
         {
-            Assert.AreEqual(expected.Length, actual.Length, message, expectedExpression, actualExpression);
-            Assert.IsTrue(Unsafe.AreSame(ref MemoryMarshal.GetReference(expected),
-                                         ref MemoryMarshal.GetReference(actual)),
-                          message);
+            var values = Enum.GetValues<TEnum>();
+            foreach (var value in values)
+            {
+                if (isOk(value)) { ok(value); }
+                else
+                {
+                    var e = Assert.Throws<CudaException<TEnum>>(() => ok(value));
+                    Assert.AreEqual(value.ToString(), e.Message);
+                }
+            }
         }
     }
 }
+

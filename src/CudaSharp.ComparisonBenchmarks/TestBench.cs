@@ -51,6 +51,6 @@ public class TestBench : BaseBench
     [Benchmark(Baseline = true)]
     public void CudaSharp______()
     {
-        nvcuda.cuInit(0);
+        nvcuda.cuInit();
     }
 }

@@ -20,7 +20,7 @@ public static partial class nvcuda
     /// </summary>
     /// <param name="flags">Initialization flags. Should be 0.</param>
     [LibraryImport(LibName)]
-    public static partial CUresult cuInit(uint flags);
+    public static partial CUresult cuInit(uint flags = 0);
 
     /// <summary>
     /// Returns the latest version of CUDA supported by the driver.

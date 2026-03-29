@@ -4,8 +4,11 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Text;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using PublicApiGenerator;
+using static CudaSharp.nvcuda;
+using static CudaSharp.nvrtc;
 #pragma warning disable CA2007 // Consider calling ConfigureAwait on the awaited task
 #pragma warning disable CA1822 // Member does not access instance data and can be marked as static
 
@@ -21,11 +24,135 @@ public partial class ReadMeTest
     static readonly string s_rootDirectory = Path.GetDirectoryName(s_testSourceFilePath) + @"../../../";
     static readonly string s_readmeFilePath = s_rootDirectory + @"README.md";
 
-    [TestMethod]
-    public void ReadMeTest_()
+    public ReadMeTest()
     {
+        try
+        {
+            cuInit().Ok();
+        }
+        catch (Exception ex)
+        {
+#pragma warning disable MSTEST0058 // Do not use asserts in catch blocks
+            Assert.Inconclusive($"CUDA initialization failed: {ex.Message}");
+#pragma warning restore MSTEST0058 // Do not use asserts in catch blocks
+        }
+    }
+
+    [TestMethod]
+    public unsafe void ReadMeTest_()
+    {
+        cuInit().Ok();
+        cuDeviceGet(out var device, 0).Ok();
+        cuCtxCreate(out var context, CUctx_flags.CU_CTX_SCHED_AUTO, device).Ok();
+
+        var kernelSource =
+            """
+            extern "C" __global__ void saxpy(float a, float *x, float *y, float *out, size_t n)
+            {
+                size_t tid = blockIdx.x * blockDim.x + threadIdx.x;
+                if (tid < n) {
+                    out[tid] = a * x[tid] + y[tid];
+                }
+            }
+            """;
+        nvrtcCreateProgram(out var prog, kernelSource, "saxpy.cu", 0, [], []).Ok();
+
+        var compileResult = nvrtcCompileProgram(prog, 0, []);
+        if (compileResult != nvrtcResult.NVRTC_SUCCESS)
+        {
+            nvrtcGetProgramLogSize(prog, out var logSize).Ok();
+            var logBuffer = new byte[logSize];
+            nvrtcGetProgramLog(prog, logBuffer).Ok();
+            var log = Encoding.UTF8.GetString(logBuffer).TrimEnd('\0');
+            Assert.Fail($"Compilation failed:\n{log}");
+        }
+
+        nvrtcGetPTXSize(prog, out var ptxSize).Ok();
+        var ptxBuffer = new byte[ptxSize];
+        nvrtcGetPTX(prog, ptxBuffer).Ok();
+
+        nvrtcDestroyProgram(ref prog).Ok();
+
+        cuModuleLoadData(out var module, ptxBuffer).Ok();
+        cuModuleGetFunction(out var function, module, "saxpy").Ok();
+
+        var n = 1024;
+        var a = 2.5f;
+        var bytes = (nuint)(n * sizeof(float));
+
+        // Allocate Device Memory
+        cuMemAlloc(out var d_x, bytes).Ok();
+        cuMemAlloc(out var d_y, bytes).Ok();
+        cuMemAlloc(out var d_out, bytes).Ok();
+
+        // Allocate Host Memory (Pinned)
+        cuMemHostAlloc(out var h_x_ptr, bytes, 0).Ok();
+        cuMemHostAlloc(out var h_y_ptr, bytes, 0).Ok();
+        cuMemHostAlloc(out var h_out_ptr, bytes, 0).Ok();
+
+        // Initialize Host Data
+        var h_x = new Span<float>((void*)h_x_ptr, n);
+        var h_y = new Span<float>((void*)h_y_ptr, n);
+        var h_out = new Span<float>((void*)h_out_ptr, n);
+
+        for (var i = 0; i < n; i++)
+        {
+            h_x[i] = i;
+            h_y[i] = i * 2;
+        }
+
+        cuMemcpyHtoD(d_x, h_x_ptr, bytes).Ok();
+        cuMemcpyHtoD(d_y, h_y_ptr, bytes).Ok();
+
+        // Kernel params
+        void*[] args = [&a, &d_x, &d_y, &d_out, &n];
+        var argsPtrs = new IntPtr[args.Length];
+        for (var i = 0; i < args.Length; i++)
+        {
+            argsPtrs[i] = (IntPtr)args[i];
+        }
+
+        cuLaunchKernel(
+            function,
+            (uint)((n + 255) / 256), 1, 1, // Grid
+            256, 1, 1, // Block
+            0, new CUstream(IntPtr.Zero),
+            new ReadOnlySpan<IntPtr>(argsPtrs),
+            []
+        ).Ok();
+
+        cuCtxSynchronize().Ok();
+
+        cuMemcpyDtoH(h_out_ptr, d_out, bytes).Ok();
+
+        for (var i = 0; i < n; i++)
+        {
+            var actual = h_out[i];
+            var expected = a * h_x[i] + h_y[i];
+            Assert.AreEqual(expected, actual, 1e-5);
+        }
+
+        // Cleanup
+        cuMemFreeHost(h_x_ptr);
+        cuMemFreeHost(h_y_ptr);
+        cuMemFreeHost(h_out_ptr);
+
+        cuMemFree(d_x);
+        cuMemFree(d_y);
+        cuMemFree(d_out);
+        cuCtxDestroy(context);
+
         // Above example code is for demonstration purposes only.
         // Short names and repeated constants are only for demonstration.
+    }
+
+    [TestMethod]
+    public void ReadMeTest_cuCtx()
+    {
+        cuInit().Ok();
+        cuDeviceGet(out var device, 0).Ok();
+        cuCtxCreate(out var context, CUctx_flags.CU_CTX_SCHED_AUTO, device).Ok();
+        cuCtxDestroy(context);
     }
 
 #if NET10_0
@@ -100,7 +227,7 @@ public partial class ReadMeTest
         var testBlocksToUpdate = new (string StartLineContains, string ReadmeLineBeforeCodeBlock)[]
         {
             (nameof(ReadMeTest_) + "()", "## Example"),
-            (nameof(ReadMeTest_) + "()", "### Example - Empty"),
+            (nameof(ReadMeTest_cuCtx) + "()", "### Example - cuCtx"),
         };
         readmeLines = UpdateReadme(testSourceLines, readmeLines, testBlocksToUpdate,
             sourceStartLineOffset: 2, "    }", sourceEndLineOffset: 0, sourceWhitespaceToRemove: 8);
@@ -188,7 +315,7 @@ public partial class ReadMeTest
             l => l.StartsWith(endLineStartsWith, StringComparison.Ordinal));
         sourceEndLine += endLineOffset;
         var sourceExampleLines = sourceLines[sourceStartLine..sourceEndLine]
-            .Select(l => l.Length > 0 ? l.Remove(0, whitespaceToRemove) : l).ToArray();
+            .Select(l => l.Length >= whitespaceToRemove ? l.Remove(0, whitespaceToRemove) : l).ToArray();
         return sourceExampleLines;
     }
 
