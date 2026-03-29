@@ -1,1 +1,1 @@
-CudaSharp 0.0.0.0, System 10.0.326.7603
+CudaSharp 0.0.4.0, System 10.0.526.15411
