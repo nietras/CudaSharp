@@ -146,6 +146,15 @@ public partial class ReadMeTest
         // Short names and repeated constants are only for demonstration.
     }
 
+    [TestMethod]
+    public void ReadMeTest_cuCtx()
+    {
+        cuInit().Ok();
+        cuDeviceGet(out var device, 0).Ok();
+        cuCtxCreate(out var context, CUctx_flags.CU_CTX_SCHED_AUTO, device).Ok();
+        cuCtxDestroy(context);
+    }
+
 #if NET10_0
     // Only update README on latest .NET version to avoid multiple accesses
     [TestMethod]
@@ -218,7 +227,7 @@ public partial class ReadMeTest
         var testBlocksToUpdate = new (string StartLineContains, string ReadmeLineBeforeCodeBlock)[]
         {
             (nameof(ReadMeTest_) + "()", "## Example"),
-            (nameof(ReadMeTest_) + "()", "### Example - Empty"),
+            (nameof(ReadMeTest_cuCtx) + "()", "### Example - cuCtx"),
         };
         readmeLines = UpdateReadme(testSourceLines, readmeLines, testBlocksToUpdate,
             sourceStartLineOffset: 2, "    }", sourceEndLineOffset: 0, sourceWhitespaceToRemove: 8);
