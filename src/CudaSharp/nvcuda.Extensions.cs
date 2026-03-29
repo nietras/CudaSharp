@@ -11,6 +11,8 @@ public static partial class nvcuda
                 Throws.Throw(result, result.ToStringFast());
             }
         }
+        public bool IsOk() => result == CUresult.CUDA_SUCCESS;
+        public bool IsError() => result != CUresult.CUDA_SUCCESS;
 
         public string ToStringFast() => result switch
         {

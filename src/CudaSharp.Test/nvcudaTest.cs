@@ -11,7 +11,7 @@ public class nvcudaTest
     {
         try
         {
-            cuInit();
+            cuInit().Ok();
         }
         catch (Exception ex)
         {
@@ -39,5 +39,21 @@ public class nvcudaTest
     public void nvcudaTest_CUresult_Ok()
     {
         Assert.EnumValuesOkThrows<CUresult>(r => r == CUresult.CUDA_SUCCESS, r => r.Ok());
+    }
+
+    [TestMethod]
+    public void nvcudaTest_CUresult_IsOk()
+    {
+        Assert.IsTrue(CUresult.CUDA_SUCCESS.IsOk());
+        Assert.IsFalse(CUresult.CUDA_ERROR_DEINITIALIZED.IsOk());
+        Assert.IsFalse(CUresult.CUDA_ERROR_NOT_READY.IsOk());
+    }
+
+    [TestMethod]
+    public void nvcudaTest_CUresult_IsError()
+    {
+        Assert.IsFalse(CUresult.CUDA_SUCCESS.IsError());
+        Assert.IsTrue(CUresult.CUDA_ERROR_DEINITIALIZED.IsError());
+        Assert.IsTrue(CUresult.CUDA_ERROR_NOT_READY.IsError());
     }
 }

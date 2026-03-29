@@ -23,14 +23,25 @@ public partial class ReadMeTest
     static readonly string s_testSourceFilePath = SourceFile();
     static readonly string s_rootDirectory = Path.GetDirectoryName(s_testSourceFilePath) + @"../../../";
     static readonly string s_readmeFilePath = s_rootDirectory + @"README.md";
-    static readonly Action<string> Log = t => Trace.WriteLine(t);
+
+    public ReadMeTest()
+    {
+        try
+        {
+            cuInit().Ok();
+        }
+        catch (Exception ex)
+        {
+#pragma warning disable MSTEST0058 // Do not use asserts in catch blocks
+            Assert.Inconclusive($"CUDA initialization failed: {ex.Message}");
+#pragma warning restore MSTEST0058 // Do not use asserts in catch blocks
+        }
+    }
 
     [TestMethod]
     public unsafe void ReadMeTest_()
     {
-        Log("Initializing CUDA...");
         cuInit().Ok();
-
         cuDeviceGet(out var device, 0).Ok();
         cuCtxCreate(out var context, CUctx_flags.CU_CTX_SCHED_AUTO, device).Ok();
 
@@ -44,7 +55,6 @@ public partial class ReadMeTest
                 }
             }
             """;
-        Log("Compiling kernel with NVRTC...");
         nvrtcCreateProgram(out var prog, kernelSource, "saxpy.cu", 0, [], []).Ok();
 
         var compileResult = nvrtcCompileProgram(prog, 0, []);
@@ -63,7 +73,6 @@ public partial class ReadMeTest
 
         nvrtcDestroyProgram(ref prog).Ok();
 
-        Log("Loading module...");
         cuModuleLoadData(out var module, ptxBuffer).Ok();
         cuModuleGetFunction(out var function, module, "saxpy").Ok();
 
@@ -103,7 +112,6 @@ public partial class ReadMeTest
             argsPtrs[i] = (IntPtr)args[i];
         }
 
-        Log("Launching kernel...");
         cuLaunchKernel(
             function,
             (uint)((n + 255) / 256), 1, 1, // Grid
@@ -117,21 +125,12 @@ public partial class ReadMeTest
 
         cuMemcpyDtoH(h_out_ptr, d_out, bytes).Ok();
 
-        Log("Verifying...");
-        var correct = true;
         for (var i = 0; i < n; i++)
         {
+            var actual = h_out[i];
             var expected = a * h_x[i] + h_y[i];
-            if (Math.Abs(h_out[i] - expected) > 1e-5)
-            {
-                Log($"Mismatch at {i}: {h_out[i]} != {expected}");
-                correct = false;
-                break;
-            }
+            Assert.AreEqual(expected, actual, 1e-5);
         }
-
-        if (correct) Log("SUCCESS: SAXPY results correct!");
-        else Log("FAILURE: SAXPY results incorrect.");
 
         // Cleanup
         cuMemFreeHost(h_x_ptr);

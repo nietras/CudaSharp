@@ -24,7 +24,6 @@ AOT/NativeAOT compatible.
 
 ## Example
 ```csharp
-Log("Initializing CUDA...");
 cuInit().Ok();
 
 cuDeviceGet(out var device, 0).Ok();
@@ -40,7 +39,6 @@ var kernelSource =
         }
     }
     """;
-Log("Compiling kernel with NVRTC...");
 nvrtcCreateProgram(out var prog, kernelSource, "saxpy.cu", 0, [], []).Ok();
 
 var compileResult = nvrtcCompileProgram(prog, 0, []);
@@ -59,7 +57,6 @@ nvrtcGetPTX(prog, ptxBuffer).Ok();
 
 nvrtcDestroyProgram(ref prog).Ok();
 
-Log("Loading module...");
 cuModuleLoadData(out var module, ptxBuffer).Ok();
 cuModuleGetFunction(out var function, module, "saxpy").Ok();
 
@@ -99,7 +96,6 @@ for (var i = 0; i < args.Length; i++)
     argsPtrs[i] = (IntPtr)args[i];
 }
 
-Log("Launching kernel...");
 cuLaunchKernel(
     function,
     (uint)((n + 255) / 256), 1, 1, // Grid
@@ -113,21 +109,12 @@ cuCtxSynchronize().Ok();
 
 cuMemcpyDtoH(h_out_ptr, d_out, bytes).Ok();
 
-Log("Verifying...");
-var correct = true;
 for (var i = 0; i < n; i++)
 {
+    var actual = h_out[i];
     var expected = a * h_x[i] + h_y[i];
-    if (Math.Abs(h_out[i] - expected) > 1e-5)
-    {
-        Log($"Mismatch at {i}: {h_out[i]} != {expected}");
-        correct = false;
-        break;
-    }
+    Assert.AreEqual(expected, actual, 1e-5);
 }
-
-if (correct) Log("SUCCESS: SAXPY results correct!");
-else Log("FAILURE: SAXPY results incorrect.");
 
 // Cleanup
 cuMemFreeHost(h_x_ptr);
@@ -166,7 +153,6 @@ The following examples are available in [ReadMeTest.cs](src/CudaSharp.XyzTest/Re
 
 ### Example - Empty
 ```csharp
-Log("Initializing CUDA...");
 cuInit().Ok();
 
 cuDeviceGet(out var device, 0).Ok();
@@ -182,7 +168,6 @@ var kernelSource =
         }
     }
     """;
-Log("Compiling kernel with NVRTC...");
 nvrtcCreateProgram(out var prog, kernelSource, "saxpy.cu", 0, [], []).Ok();
 
 var compileResult = nvrtcCompileProgram(prog, 0, []);
@@ -201,7 +186,6 @@ nvrtcGetPTX(prog, ptxBuffer).Ok();
 
 nvrtcDestroyProgram(ref prog).Ok();
 
-Log("Loading module...");
 cuModuleLoadData(out var module, ptxBuffer).Ok();
 cuModuleGetFunction(out var function, module, "saxpy").Ok();
 
@@ -241,7 +225,6 @@ for (var i = 0; i < args.Length; i++)
     argsPtrs[i] = (IntPtr)args[i];
 }
 
-Log("Launching kernel...");
 cuLaunchKernel(
     function,
     (uint)((n + 255) / 256), 1, 1, // Grid
@@ -255,21 +238,12 @@ cuCtxSynchronize().Ok();
 
 cuMemcpyDtoH(h_out_ptr, d_out, bytes).Ok();
 
-Log("Verifying...");
-var correct = true;
 for (var i = 0; i < n; i++)
 {
+    var actual = h_out[i];
     var expected = a * h_x[i] + h_y[i];
-    if (Math.Abs(h_out[i] - expected) > 1e-5)
-    {
-        Log($"Mismatch at {i}: {h_out[i]} != {expected}");
-        correct = false;
-        break;
-    }
+    Assert.AreEqual(expected, actual, 1e-5);
 }
-
-if (correct) Log("SUCCESS: SAXPY results correct!");
-else Log("FAILURE: SAXPY results incorrect.");
 
 // Cleanup
 cuMemFreeHost(h_x_ptr);
@@ -1241,6 +1215,8 @@ namespace CudaSharp
         extension(CudaSharp.nvcuda.CUresult result)
         {
             public void Ok() { }
+            public bool IsOk() { }
+            public bool IsError() { }
             public string ToStringFast() { }
         }
     }
