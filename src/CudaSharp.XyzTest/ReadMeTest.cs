@@ -28,7 +28,7 @@ public partial class ReadMeTest
     {
         try
         {
-            cuInit().Ok();
+            CuInit.EnsureInit();
         }
         catch (Exception ex)
         {

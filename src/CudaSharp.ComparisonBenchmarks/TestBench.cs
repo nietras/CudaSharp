@@ -2,6 +2,7 @@
 using System.Linq;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Configs;
+using static CudaSharp.nvcuda;
 
 namespace CudaSharp.ComparisonBenchmarks;
 
@@ -46,11 +47,23 @@ public class TestBench : BaseBench
     const int DefaultCount = 25_000;
 #endif
 
-    public TestBench() : base("Test", DefaultCount) { }
+    public TestBench() : base("Test", DefaultCount) { CuInit.EnsureInit(); }
 
     [Benchmark(Baseline = true)]
-    public void CudaSharp______()
+    public void CudaSharp_cuInit()
     {
-        nvcuda.cuInit();
+        cuInit();
+    }
+    [Benchmark]
+    public void CudaSharp_CuInit_EnsureInit()
+    {
+        CuInit.EnsureInit();
+    }
+    [Benchmark]
+    public void CudaSharp_CtxCreateDestroy()
+    {
+        cuDeviceGet(out var device, 0).Ok();
+        cuCtxCreate(out var context, CUctx_flags.CU_CTX_SCHED_AUTO, device).Ok();
+        cuCtxDestroy(context);
     }
 }

@@ -140,11 +140,13 @@ Benchmarks.
 
 ##### TestBench Benchmark Results
 
-###### AMD.Ryzen.9.9950X - TestBench Benchmark Results (CudaSharp 0.0.0.0, System 10.0.326.7603)
+###### AMD.Ryzen.9.9950X - TestBench Benchmark Results (CudaSharp 0.0.4.0, System 10.0.526.15411)
 
-| Method          | Scope | Count | Mean      | Ratio | Allocated | Alloc Ratio |
-|---------------- |------ |------ |----------:|------:|----------:|------------:|
-| CudaSharp______ | Test  | 25000 | 0.0004 ns |     ? |         - |           ? |
+| Method                      | Scope | Count | Mean               | Ratio         | Allocated | Alloc Ratio |
+|---------------------------- |------ |------ |-------------------:|--------------:|----------:|------------:|
+| CudaSharp_cuInit            | Test  | 25000 |         27.3211 ns |         1.000 |         - |          NA |
+| CudaSharp_CuInit_EnsureInit | Test  | 25000 |          0.0126 ns |         0.000 |         - |          NA |
+| CudaSharp_CtxCreateDestroy  | Test  | 25000 | 60,732,426.6667 ns | 2,222,917.574 |         - |          NA |
 
 
 ## Example Catalogue
@@ -172,6 +174,11 @@ cuCtxDestroy(context);
 [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
 namespace CudaSharp
 {
+    public static class CuInit
+    {
+        public static void EnsureInit() { }
+        public static CudaSharp.nvcuda.CUresult TryEnsureInit() { }
+    }
     public class CudaException : System.Exception
     {
         public CudaException(string message) { }
