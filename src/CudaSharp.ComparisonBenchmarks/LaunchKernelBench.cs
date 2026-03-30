@@ -38,16 +38,10 @@ public unsafe class LaunchKernelBench
     [GlobalCleanup]
     public void Cleanup()
     {
-        if (_context.Value == IntPtr.Zero)
-        {
-            return;
-        }
-
+        if (_context.Value == IntPtr.Zero) { return; }
         cuCtxSetCurrent(_context).Ok();
         if (_module.Value != IntPtr.Zero)
-        {
-            cuModuleUnload(_module).Ok();
-        }
+        { cuModuleUnload(_module).Ok(); }
         cuCtxDestroy(_context).Ok();
     }
 
@@ -84,7 +78,7 @@ public unsafe class LaunchKernelBench
 
     static byte[] CompileKernel(string source, string kernelName)
     {
-        nvrtcCreateProgram(out var program, source, $"{kernelName}.cu", 0, [], []).Ok();
+        nvrtcCreateProgram(out var program, source, kernelName, 0, [], []).Ok();
         try
         {
             var result = nvrtcCompileProgram(program, 0, []);
