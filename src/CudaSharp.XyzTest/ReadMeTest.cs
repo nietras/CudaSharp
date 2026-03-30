@@ -104,22 +104,12 @@ public partial class ReadMeTest
         cuMemcpyHtoD(d_x, h_x_ptr, bytes).Ok();
         cuMemcpyHtoD(d_y, h_y_ptr, bytes).Ok();
 
-        // Kernel params
-        void*[] args = [&a, &d_x, &d_y, &d_out, &n];
-        var argsPtrs = new IntPtr[args.Length];
-        for (var i = 0; i < args.Length; i++)
-        {
-            argsPtrs[i] = (IntPtr)args[i];
-        }
-
         cuLaunchKernel(
             function,
             (uint)((n + 255) / 256), 1, 1, // Grid
             256, 1, 1, // Block
             0, new CUstream(IntPtr.Zero),
-            new ReadOnlySpan<IntPtr>(argsPtrs),
-            []
-        ).Ok();
+            a, d_x, d_y, d_out, n).Ok();
 
         cuCtxSynchronize().Ok();
 
