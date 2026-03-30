@@ -315,7 +315,22 @@ namespace CudaSharp
         [System.Runtime.InteropServices.LibraryImport("nvcuda")]
         public static CudaSharp.nvcuda.CUresult cuInit(uint flags = 0) { }
         [System.Runtime.InteropServices.LibraryImport("nvcuda")]
-        public static unsafe CudaSharp.nvcuda.CUresult cuLaunchKernel(CudaSharp.nvcuda.CUfunction f, uint gridDimX, uint gridDimY, uint gridDimZ, uint blockDimX, uint blockDimY, uint blockDimZ, uint sharedMemBytes, CudaSharp.nvcuda.CUstream hStream, System.IntPtr* kernelParams, System.IntPtr* extra) { }
+        public static unsafe CudaSharp.nvcuda.CUresult cuLaunchKernel(CudaSharp.nvcuda.CUfunction f, uint gridDimX, uint gridDimY, uint gridDimZ, uint blockDimX, uint blockDimY, uint blockDimZ, uint sharedMemBytes, CudaSharp.nvcuda.CUstream hStream, void** kernelParams, void** extra) { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
+        public static CudaSharp.nvcuda.CUresult cuLaunchKernel<T1, T2>(CudaSharp.nvcuda.CUfunction function, uint gridDimX, uint gridDimY, uint gridDimZ, uint blockDimX, uint blockDimY, uint blockDimZ, uint sharedMemBytes, CudaSharp.nvcuda.CUstream stream, T1 arg1, T2 arg2)
+            where T1 :  unmanaged
+            where T2 :  unmanaged { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
+        public static CudaSharp.nvcuda.CUresult cuLaunchKernel<T1, T2, T3>(CudaSharp.nvcuda.CUfunction function, uint gridDimX, uint gridDimY, uint gridDimZ, uint blockDimX, uint blockDimY, uint blockDimZ, uint sharedMemBytes, CudaSharp.nvcuda.CUstream stream, T1 arg1, T2 arg2, T3 arg3)
+            where T1 :  unmanaged
+            where T2 :  unmanaged
+            where T3 :  unmanaged { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
+        public static CudaSharp.nvcuda.CUresult cuLaunchKernel<T1, T2, T3, T4>(CudaSharp.nvcuda.CUfunction function, uint gridDimX, uint gridDimY, uint gridDimZ, uint blockDimX, uint blockDimY, uint blockDimZ, uint sharedMemBytes, CudaSharp.nvcuda.CUstream stream, T1 arg1, T2 arg2, T3 arg3, T4 arg4)
+            where T1 :  unmanaged
+            where T2 :  unmanaged
+            where T3 :  unmanaged
+            where T4 :  unmanaged { }
         [System.Runtime.CompilerServices.SkipLocalsInit]
         public static CudaSharp.nvcuda.CUresult cuLaunchKernel<T1, T2, T3, T4, T5>(CudaSharp.nvcuda.CUfunction function, uint gridDimX, uint gridDimY, uint gridDimZ, uint blockDimX, uint blockDimY, uint blockDimZ, uint sharedMemBytes, CudaSharp.nvcuda.CUstream stream, T1 arg1, T2 arg2, T3 arg3, T4 arg4, T5 arg5)
             where T1 :  unmanaged
@@ -323,6 +338,14 @@ namespace CudaSharp
             where T3 :  unmanaged
             where T4 :  unmanaged
             where T5 :  unmanaged { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
+        public static CudaSharp.nvcuda.CUresult cuLaunchKernel<T1, T2, T3, T4, T5, T6>(CudaSharp.nvcuda.CUfunction function, uint gridDimX, uint gridDimY, uint gridDimZ, uint blockDimX, uint blockDimY, uint blockDimZ, uint sharedMemBytes, CudaSharp.nvcuda.CUstream stream, T1 arg1, T2 arg2, T3 arg3, T4 arg4, T5 arg5, T6 arg6)
+            where T1 :  unmanaged
+            where T2 :  unmanaged
+            where T3 :  unmanaged
+            where T4 :  unmanaged
+            where T5 :  unmanaged
+            where T6 :  unmanaged { }
         [System.Runtime.CompilerServices.SkipLocalsInit]
         [System.Runtime.InteropServices.LibraryImport("nvcuda")]
         public static CudaSharp.nvcuda.CUresult cuMemAlloc(out CudaSharp.nvcuda.CUdeviceptr dptr, nuint bytesize) { }

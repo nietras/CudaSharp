@@ -62,11 +62,8 @@ public static partial class nvcuda
         where T1 : unmanaged
         where T2 : unmanaged
     {
-        var kernelParams = stackalloc IntPtr[]
-        {
-            (IntPtr)(&arg1),
-            (IntPtr)(&arg2),
-        };
+        var kernelParams = stackalloc void*[]
+        { &arg1, &arg2 };
         return cuLaunchKernel(function,
             gridDimX, gridDimY, gridDimZ,
             blockDimX, blockDimY, blockDimZ,
@@ -84,12 +81,8 @@ public static partial class nvcuda
         where T2 : unmanaged
         where T3 : unmanaged
     {
-        var kernelParams = stackalloc IntPtr[]
-        {
-            (IntPtr)(&arg1),
-            (IntPtr)(&arg2),
-            (IntPtr)(&arg3),
-        };
+        var kernelParams = stackalloc void*[]
+        { &arg1, &arg2, &arg3 };
         return cuLaunchKernel(function,
             gridDimX, gridDimY, gridDimZ,
             blockDimX, blockDimY, blockDimZ,
@@ -108,13 +101,8 @@ public static partial class nvcuda
         where T3 : unmanaged
         where T4 : unmanaged
     {
-        var kernelParams = stackalloc IntPtr[]
-        {
-            (IntPtr)(&arg1),
-            (IntPtr)(&arg2),
-            (IntPtr)(&arg3),
-            (IntPtr)(&arg4),
-        };
+        var kernelParams = stackalloc void*[]
+        { &arg1, &arg2, &arg3, &arg4 };
         return cuLaunchKernel(function,
             gridDimX, gridDimY, gridDimZ,
             blockDimX, blockDimY, blockDimZ,
@@ -134,14 +122,30 @@ public static partial class nvcuda
         where T4 : unmanaged
         where T5 : unmanaged
     {
-        var kernelParams = stackalloc IntPtr[]
-        {
-            (IntPtr)(&arg1),
-            (IntPtr)(&arg2),
-            (IntPtr)(&arg3),
-            (IntPtr)(&arg4),
-            (IntPtr)(&arg5),
-        };
+        var kernelParams = stackalloc void*[]
+        { &arg1,&arg2, &arg3, &arg4, &arg5 };
+        return cuLaunchKernel(function,
+            gridDimX, gridDimY, gridDimZ,
+            blockDimX, blockDimY, blockDimZ,
+            sharedMemBytes, stream,
+            kernelParams, null);
+    }
+
+    [SkipLocalsInit]
+    public unsafe static CUresult cuLaunchKernel<T1, T2, T3, T4, T5, T6>(CUfunction function,
+        uint gridDimX, uint gridDimY, uint gridDimZ,
+        uint blockDimX, uint blockDimY, uint blockDimZ,
+        uint sharedMemBytes, CUstream stream,
+        T1 arg1, T2 arg2, T3 arg3, T4 arg4, T5 arg5, T6 arg6)
+        where T1 : unmanaged
+        where T2 : unmanaged
+        where T3 : unmanaged
+        where T4 : unmanaged
+        where T5 : unmanaged
+        where T6 : unmanaged
+    {
+        var kernelParams = stackalloc void*[]
+        { &arg1, &arg2, &arg3, &arg4, &arg5, &arg6 };
         return cuLaunchKernel(function,
             gridDimX, gridDimY, gridDimZ,
             blockDimX, blockDimY, blockDimZ,

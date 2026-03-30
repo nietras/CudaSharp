@@ -554,7 +554,7 @@ public static partial class nvcuda
         uint gridDimX, uint gridDimY, uint gridDimZ,
         uint blockDimX, uint blockDimY, uint blockDimZ,
         uint sharedMemBytes, CUstream hStream,
-        IntPtr* kernelParams, IntPtr* extra);
+        void** kernelParams, void** extra);
 
     [LibraryImport(LibName)]
     public static partial CUresult cuOccupancyMaxActiveBlocksPerMultiprocessor(
