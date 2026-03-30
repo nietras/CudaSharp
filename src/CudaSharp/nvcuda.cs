@@ -550,11 +550,11 @@ public static partial class nvcuda
     public static partial CUresult cuSurfObjectGetResourceDesc(out CUDA_RESOURCE_DESC pResDesc, CUsurfObject surfObject);
 
     [LibraryImport(LibName)]
-    public static partial CUresult cuLaunchKernel(
-        CUfunction f, uint gridDimX, uint gridDimY, uint gridDimZ,
+    public unsafe static partial CUresult cuLaunchKernel(CUfunction f,
+        uint gridDimX, uint gridDimY, uint gridDimZ,
         uint blockDimX, uint blockDimY, uint blockDimZ,
         uint sharedMemBytes, CUstream hStream,
-        ReadOnlySpan<IntPtr> kernelParams, ReadOnlySpan<IntPtr> extra);
+        void** kernelParams, void** extra);
 
     [LibraryImport(LibName)]
     public static partial CUresult cuOccupancyMaxActiveBlocksPerMultiprocessor(
