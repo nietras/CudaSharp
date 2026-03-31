@@ -46,14 +46,10 @@ public unsafe class LaunchKernelBench
     }
 
     [Benchmark(Baseline = true)]
-    public void DriverApi_Raw()
+    public void cuLaunchKernel_Raw_CtxSync()
     {
-        var args = stackalloc int[2];
-        var kernelParams = stackalloc void*[2];
-        kernelParams[0] = &args[0];
-        kernelParams[1] = &args[1];
-        args[0] = 1;
-        args[1] = 2;
+        var args = stackalloc int[] { 1, 2 };
+        var kernelParams = stackalloc void*[] { &args[0], &args[1] };
 
         cuLaunchKernel(_function,
             1, 1, 1,
@@ -65,13 +61,41 @@ public unsafe class LaunchKernelBench
     }
 
     [Benchmark]
-    public void DriverApi_Overload()
+    public void cuLaunchKernel_Overload_CtxSync()
     {
         cuLaunchKernel(_function,
             1, 1, 1,
             1, 1, 1,
             0, default,
             1, 2).Ok();
+
+        cuCtxSynchronize().Ok();
+    }
+
+    [Benchmark]
+    public void cuLaunchKernelEx_CtxSync()
+    {
+        var args = stackalloc int[] { 1, 2 };
+        var kernelParams = stackalloc void*[] { &args[0], &args[1] };
+
+        var config = new CUlaunchConfig
+        {
+            gridDimX = 1,
+            gridDimY = 1,
+            gridDimZ = 1,
+            blockDimX = 1,
+            blockDimY = 1,
+            blockDimZ = 1,
+            sharedMemBytes = 0,
+            hStream = default,
+            attrs = null,
+            numAttrs = 0,
+        };
+
+        cuLaunchKernelEx(config,
+            _function,
+            kernelParams,
+            null).Ok();
 
         cuCtxSynchronize().Ok();
     }

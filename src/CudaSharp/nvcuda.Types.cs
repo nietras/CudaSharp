@@ -18,6 +18,7 @@ public static partial class nvcuda
     public readonly record struct CUarray(IntPtr Value);
     public readonly record struct CUgraph(IntPtr Value);
     public readonly record struct CUgraphNode(IntPtr Value);
+    public readonly record struct CUgraphDeviceNode(IntPtr Value);
     public readonly record struct CUgraphExec(IntPtr Value);
     public readonly record struct CUexternalMemory(IntPtr Value);
     public readonly record struct CUexternalSemaphore(IntPtr Value);
@@ -83,6 +84,23 @@ public static partial class nvcuda
         CU_MEMHOSTALLOC_PORTABLE = 0x01,
         CU_MEMHOSTALLOC_DEVICEMAP = 0x02,
         CU_MEMHOSTALLOC_WRITECOMBINED = 0x04,
+    }
+
+    public enum CUaccessProperty
+    {
+        CU_ACCESS_PROPERTY_NORMAL = 0,
+        CU_ACCESS_PROPERTY_STREAMING = 1,
+        CU_ACCESS_PROPERTY_PERSISTING = 2,
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct CUaccessPolicyWindow
+    {
+        public IntPtr base_ptr;
+        public nuint num_bytes;
+        public float hitRatio;
+        public CUaccessProperty hitProp;
+        public CUaccessProperty missProp;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -376,6 +394,128 @@ public static partial class nvcuda
         CU_MEMORYTYPE_DEVICE = 0x02,
         CU_MEMORYTYPE_ARRAY = 0x03,
         CU_MEMORYTYPE_UNIFIED = 0x04,
+    }
+
+    public enum CUsynchronizationPolicy
+    {
+        CU_SYNC_POLICY_AUTO = 1,
+        CU_SYNC_POLICY_SPIN = 2,
+        CU_SYNC_POLICY_YIELD = 3,
+        CU_SYNC_POLICY_BLOCKING_SYNC = 4,
+    }
+
+    public enum CUclusterSchedulingPolicy
+    {
+        CU_CLUSTER_SCHEDULING_POLICY_DEFAULT = 0,
+        CU_CLUSTER_SCHEDULING_POLICY_SPREAD = 1,
+        CU_CLUSTER_SCHEDULING_POLICY_LOAD_BALANCING = 2,
+    }
+
+    public enum CUlaunchMemSyncDomain
+    {
+        CU_LAUNCH_MEM_SYNC_DOMAIN_DEFAULT = 0,
+        CU_LAUNCH_MEM_SYNC_DOMAIN_REMOTE = 1,
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct CUlaunchMemSyncDomainMap
+    {
+        public byte default_;
+        public byte remote;
+    }
+
+    public enum CUlaunchAttributeID
+    {
+        CU_LAUNCH_ATTRIBUTE_IGNORE = 0,
+        CU_LAUNCH_ATTRIBUTE_ACCESS_POLICY_WINDOW = 1,
+        CU_LAUNCH_ATTRIBUTE_COOPERATIVE = 2,
+        CU_LAUNCH_ATTRIBUTE_SYNCHRONIZATION_POLICY = 3,
+        CU_LAUNCH_ATTRIBUTE_CLUSTER_DIMENSION = 4,
+        CU_LAUNCH_ATTRIBUTE_CLUSTER_SCHEDULING_POLICY_PREFERENCE = 5,
+        CU_LAUNCH_ATTRIBUTE_PROGRAMMATIC_STREAM_SERIALIZATION = 6,
+        CU_LAUNCH_ATTRIBUTE_PROGRAMMATIC_EVENT = 7,
+        CU_LAUNCH_ATTRIBUTE_PRIORITY = 8,
+        CU_LAUNCH_ATTRIBUTE_MEM_SYNC_DOMAIN_MAP = 9,
+        CU_LAUNCH_ATTRIBUTE_MEM_SYNC_DOMAIN = 10,
+        CU_LAUNCH_ATTRIBUTE_PREFERRED_CLUSTER_DIMENSION = 11,
+        CU_LAUNCH_ATTRIBUTE_LAUNCH_COMPLETION_EVENT = 12,
+        CU_LAUNCH_ATTRIBUTE_DEVICE_UPDATABLE_KERNEL_NODE = 13,
+        CU_LAUNCH_ATTRIBUTE_PREFERRED_SHARED_MEMORY_CARVEOUT = 14,
+        CU_LAUNCH_ATTRIBUTE_NVLINK_UTIL_CENTRIC_SCHEDULING = 16,
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct CUlaunchAttributeDim3
+    {
+        public uint x;
+        public uint y;
+        public uint z;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct CUlaunchAttributeProgrammaticEvent
+    {
+        public CUevent event_;
+        public int flags;
+        public int triggerAtBlockStart;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct CUlaunchAttributeLaunchCompletionEvent
+    {
+        public CUevent event_;
+        public int flags;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct CUlaunchAttributeDeviceUpdatableKernelNode
+    {
+        public int deviceUpdatable;
+        public CUgraphDeviceNode devNode;
+    }
+
+    [StructLayout(LayoutKind.Explicit, Size = 64)]
+    public struct CUlaunchAttributeValue
+    {
+        [FieldOffset(0)] public CUaccessPolicyWindow accessPolicyWindow;
+        [FieldOffset(0)] public int cooperative;
+        [FieldOffset(0)] public CUsynchronizationPolicy syncPolicy;
+        [FieldOffset(0)] public CUlaunchAttributeDim3 clusterDim;
+        [FieldOffset(0)] public CUclusterSchedulingPolicy clusterSchedulingPolicyPreference;
+        [FieldOffset(0)] public int programmaticStreamSerializationAllowed;
+        [FieldOffset(0)] public CUlaunchAttributeProgrammaticEvent programmaticEvent;
+        [FieldOffset(0)] public int priority;
+        [FieldOffset(0)] public CUlaunchMemSyncDomainMap memSyncDomainMap;
+        [FieldOffset(0)] public CUlaunchMemSyncDomain memSyncDomain;
+        [FieldOffset(0)] public CUlaunchAttributeDim3 preferredClusterDim;
+        [FieldOffset(0)] public CUlaunchAttributeLaunchCompletionEvent launchCompletionEvent;
+        [FieldOffset(0)] public CUlaunchAttributeDeviceUpdatableKernelNode deviceUpdatableKernelNode;
+        [FieldOffset(0)] public uint sharedMemCarveout;
+        [FieldOffset(0)] public uint nvlinkUtilCentricScheduling;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct CUlaunchAttribute
+    {
+        public CUlaunchAttributeID id;
+        public int pad0;
+        public int pad1;
+        public CUlaunchAttributeValue value;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public unsafe struct CUlaunchConfig
+    {
+        public uint gridDimX;
+        public uint gridDimY;
+        public uint gridDimZ;
+        public uint blockDimX;
+        public uint blockDimY;
+        public uint blockDimZ;
+        public uint sharedMemBytes;
+        public CUstream hStream;
+        public CUlaunchAttribute* attrs;
+        public uint numAttrs;
     }
 
     [StructLayout(LayoutKind.Sequential)]

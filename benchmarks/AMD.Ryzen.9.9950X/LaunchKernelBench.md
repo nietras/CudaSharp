@@ -11,7 +11,8 @@ Toolchain=net10.0  IterationTime=350ms  MaxIterationCount=15
 MinIterationCount=5  WarmupCount=6  
 
 ```
-| Method             | Mean     | Ratio | Allocated | Alloc Ratio |
-|------------------- |---------:|------:|----------:|------------:|
-| DriverApi_Raw      | 24.73 μs |  1.00 |         - |          NA |
-| DriverApi_Overload | 24.78 μs |  1.00 |         - |          NA |
+| Method                          | Mean     | Ratio | Allocated | Alloc Ratio |
+|-------------------------------- |---------:|------:|----------:|------------:|
+| cuLaunchKernel_Raw_CtxSync      | 26.71 μs |  1.00 |         - |          NA |
+| cuLaunchKernel_Overload_CtxSync | 26.59 μs |  1.00 |         - |          NA |
+| cuLaunchKernelEx_CtxSync        | 26.28 μs |  0.98 |         - |          NA |
