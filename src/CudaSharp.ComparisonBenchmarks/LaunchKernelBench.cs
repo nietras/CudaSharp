@@ -48,12 +48,8 @@ public unsafe class LaunchKernelBench
     [Benchmark(Baseline = true)]
     public void cuLaunchKernel_Raw_CtxSync()
     {
-        var args = stackalloc int[2];
-        var kernelParams = stackalloc void*[2];
-        kernelParams[0] = &args[0];
-        kernelParams[1] = &args[1];
-        args[0] = 1;
-        args[1] = 2;
+        var args = stackalloc int[] { 1, 2 };
+        var kernelParams = stackalloc void*[] { &args[0], &args[1] };
 
         cuLaunchKernel(_function,
             1, 1, 1,
@@ -79,12 +75,8 @@ public unsafe class LaunchKernelBench
     [Benchmark]
     public void cuLaunchKernelEx_CtxSync()
     {
-        var args = stackalloc int[2];
-        var kernelParams = stackalloc void*[2];
-        kernelParams[0] = &args[0];
-        kernelParams[1] = &args[1];
-        args[0] = 1;
-        args[1] = 2;
+        var args = stackalloc int[] { 1, 2 };
+        var kernelParams = stackalloc void*[] { &args[0], &args[1] };
 
         var config = new CUlaunchConfig
         {
