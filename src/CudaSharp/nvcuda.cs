@@ -557,6 +557,13 @@ public static partial class nvcuda
         void** kernelParams, void** extra);
 
     [LibraryImport(LibName)]
+    public unsafe static partial CUresult cuLaunchKernelEx(
+        in CUlaunchConfig config,
+        CUfunction f,
+        void** kernelParams,
+        void** extra);
+
+    [LibraryImport(LibName)]
     public static partial CUresult cuOccupancyMaxActiveBlocksPerMultiprocessor(
         out int numBlocks, CUfunction func,
         int blockSize, nuint dynamicSMemSize);
