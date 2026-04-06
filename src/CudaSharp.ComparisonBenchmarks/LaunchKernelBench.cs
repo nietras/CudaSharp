@@ -30,8 +30,8 @@ public unsafe class LaunchKernelBench
         cuCtxCreate(out _context, CUctx_flags.CU_CTX_SCHED_AUTO, device).Ok();
         cuCtxSetCurrent(_context).Ok();
 
-        var ptx = CompileKernel(KernelSource, KernelName);
-        cuModuleLoadData(out _module, ptx).Ok();
+        var image = CompileKernel(device, KernelSource, KernelName);
+        cuModuleLoadData(out _module, image).Ok();
         cuModuleGetFunction(out _function, _module, KernelName).Ok();
     }
 
@@ -100,28 +100,59 @@ public unsafe class LaunchKernelBench
         cuCtxSynchronize().Ok();
     }
 
-    static byte[] CompileKernel(string source, string kernelName)
+    static byte[] CompileKernel(CUdevice device, string source, string kernelName)
     {
+        cuDeviceComputeCapability(out var major, out var minor, device).Ok();
+        var targetArchitecture = $"sm_{major}{minor}";
+
         nvrtcCreateProgram(out var program, source, kernelName, 0, [], []).Ok();
         try
         {
-            var result = nvrtcCompileProgram(program, 0, []);
-            if (result.IsError())
+            var optionBytes = Encoding.UTF8.GetBytes($"--gpu-architecture={targetArchitecture}\0");
+            nvrtcResult result;
+            fixed (byte* optionPtr = optionBytes)
             {
-                throw new InvalidOperationException(
-                    $"Kernel compilation failed with {result.ToStringFast()}:\n{GetCompileLog(program)}");
+                var optionPointers = stackalloc byte*[1];
+                optionPointers[0] = optionPtr;
+                result = nvrtcCompileProgram(program, 1, optionPointers);
             }
 
-            nvrtcGetPTXSize(program, out var ptxSize).Ok();
-            var ptx = new byte[ptxSize];
-            nvrtcGetPTX(program, ptx).Ok();
-            return ptx;
+            if (result.IsError())
+            {
+                var log = GetCompileLog(program);
+                if (!IsUnsupportedArchitecture(result, log))
+                {
+                    throw new InvalidOperationException(
+                        $"Kernel compilation failed with {result.ToStringFast()}:\n{log}");
+                }
+
+                result = nvrtcCompileProgram(program, 0, []);
+                if (result.IsError())
+                {
+                    throw new InvalidOperationException(
+                        $"Kernel compilation fallback failed with {result.ToStringFast()}:\n{GetCompileLog(program)}");
+                }
+
+                nvrtcGetPTXSize(program, out var ptxSize).Ok();
+                var ptx = new byte[ptxSize];
+                nvrtcGetPTX(program, ptx).Ok();
+                return ptx;
+            }
+
+            nvrtcGetCUBINSize(program, out var cubinSize).Ok();
+            var cubin = new byte[cubinSize];
+            nvrtcGetCUBIN(program, cubin).Ok();
+            return cubin;
         }
         finally
         {
             nvrtcDestroyProgram(ref program).Ok();
         }
     }
+
+    static bool IsUnsupportedArchitecture(nvrtcResult result, string log) =>
+        result == nvrtcResult.NVRTC_ERROR_INVALID_OPTION &&
+        log.Contains("unsupported gpu architecture", StringComparison.OrdinalIgnoreCase);
 
     static string GetCompileLog(nvrtcProgram program)
     {
