@@ -60,7 +60,7 @@ public unsafe class SerialLaunchKernelBench
     public void Setup()
     {
         cuDeviceGet(out var device, 0).Ok();
-        cuCtxCreate(out _context, CUctx_flags.CU_CTX_SCHED_AUTO, device).Ok();
+        cuCtxCreate(out _context, CUctx_flags.CU_CTX_SCHED_SPIN, device).Ok();
         cuCtxSetCurrent(_context).Ok();
         cuStreamCreate(out _stream, 0).Ok();
 
