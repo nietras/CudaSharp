@@ -75,6 +75,8 @@ public unsafe class SerialLaunchKernelBench
         cuMemAlloc(out _accumulator, bufferSize).Ok();
 
         BuildSerialGraph();
+        cuGraphUpload(_graphExec, _stream).Ok();
+        cuStreamSynchronize(_stream).Ok();
         ValidateImplementations();
     }
 
@@ -84,6 +86,9 @@ public unsafe class SerialLaunchKernelBench
         if (_context.Value == IntPtr.Zero) { return; }
 
         cuCtxSetCurrent(_context).Ok();
+
+        if (_graphExec.Value != IntPtr.Zero)
+        { cuGraphExecDestroy(_graphExec).Ok(); }
 
         if (_graph.Value != IntPtr.Zero)
         { cuGraphDestroy(_graph).Ok(); }

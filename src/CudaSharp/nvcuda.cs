@@ -857,6 +857,21 @@ public static partial class nvcuda
         Span<byte> logBuffer, nuint bufferSize);
 
     /// <summary>
+    /// Destroys an executable graph.
+    /// </summary>
+    /// <param name="hGraphExec">Executable graph to destroy.</param>
+    [LibraryImport(LibName)]
+    public static partial CUresult cuGraphExecDestroy(CUgraphExec hGraphExec);
+
+    /// <summary>
+    /// Uploads an executable graph to a stream.
+    /// </summary>
+    /// <param name="hGraphExec">Executable graph.</param>
+    /// <param name="hStream">Stream used for the upload.</param>
+    [LibraryImport(LibName)]
+    public static partial CUresult cuGraphUpload(CUgraphExec hGraphExec, CUstream hStream);
+
+    /// <summary>
     /// Launches an executable graph.
     /// </summary>
     /// <param name="hGraphExec">Executable graph.</param>
