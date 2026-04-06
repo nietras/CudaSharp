@@ -93,6 +93,45 @@ public static partial class nvcuda
         CU_STREAM_CAPTURE_MODE_RELAXED = 2,
     }
 
+    /// <summary>
+    /// Flags for instantiating a graph.
+    /// </summary>
+    /// <seealso href="https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__TYPES.html#group__CUDA__TYPES_1g070bf5517d3a7915667c256eefce4956"/>
+    public enum CUgraphInstantiate_flags : ulong
+    {
+        CUDA_GRAPH_INSTANTIATE_FLAG_AUTO_FREE_ON_LAUNCH = 1,
+        CUDA_GRAPH_INSTANTIATE_FLAG_UPLOAD = 2,
+        CUDA_GRAPH_INSTANTIATE_FLAG_DEVICE_LAUNCH = 4,
+        CUDA_GRAPH_INSTANTIATE_FLAG_USE_NODE_PRIORITY = 8,
+    }
+
+    /// <summary>
+    /// Graph instantiation results.
+    /// </summary>
+    /// <seealso href="https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__TYPES.html#group__CUDA__TYPES_1g863484740f7d9f82c908d228f791cc56"/>
+    public enum CUgraphInstantiateResult
+    {
+        CUDA_GRAPH_INSTANTIATE_SUCCESS = 0,
+        CUDA_GRAPH_INSTANTIATE_ERROR = 1,
+        CUDA_GRAPH_INSTANTIATE_INVALID_STRUCTURE = 2,
+        CUDA_GRAPH_INSTANTIATE_NODE_OPERATION_NOT_SUPPORTED = 3,
+        CUDA_GRAPH_INSTANTIATE_MULTIPLE_CTXS_NOT_SUPPORTED = 4,
+        CUDA_GRAPH_INSTANTIATE_CONDITIONAL_HANDLE_UNUSED = 5,
+    }
+
+    /// <summary>
+    /// Graph instantiation parameters.
+    /// </summary>
+    /// <seealso href="https://docs.nvidia.com/cuda/cuda-driver-api/structCUDA__GRAPH__INSTANTIATE__PARAMS.html"/>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct CUDA_GRAPH_INSTANTIATE_PARAMS
+    {
+        public ulong flags;
+        public CUstream hUploadStream;
+        public CUgraphNode hErrNode_out;
+        public CUgraphInstantiateResult result_out;
+    }
+
     public enum CUaccessProperty
     {
         CU_ACCESS_PROPERTY_NORMAL = 0,

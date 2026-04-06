@@ -41,6 +41,7 @@ public unsafe class SerialLaunchKernelBench
     CUstream _stream;
     CUgraph _graph;
     CUgraphExec _graphExec;
+    CUgraphExec _deviceLaunchGraphExec;
     CUgraph _capturedGraph;
     CUgraphExec _capturedGraphExec;
     CUdeviceptr _buffer0;
@@ -79,6 +80,7 @@ public unsafe class SerialLaunchKernelBench
         BuildSerialGraph();
         BuildCapturedGraph();
         cuGraphUpload(_graphExec, _stream).Ok();
+        cuGraphUpload(_deviceLaunchGraphExec, _stream).Ok();
         cuGraphUpload(_capturedGraphExec, _stream).Ok();
         cuStreamSynchronize(_stream).Ok();
         ValidateImplementations();
@@ -99,6 +101,9 @@ public unsafe class SerialLaunchKernelBench
 
         if (_graphExec.Value != IntPtr.Zero)
         { cuGraphExecDestroy(_graphExec).Ok(); }
+
+        if (_deviceLaunchGraphExec.Value != IntPtr.Zero)
+        { cuGraphExecDestroy(_deviceLaunchGraphExec).Ok(); }
 
         if (_graph.Value != IntPtr.Zero)
         { cuGraphDestroy(_graph).Ok(); }
@@ -133,6 +138,13 @@ public unsafe class SerialLaunchKernelBench
     public void cuGraphLaunch_SerialTripleBuffer_StreamSync()
     {
         cuGraphLaunch(_graphExec, _stream).Ok();
+        cuStreamSynchronize(_stream).Ok();
+    }
+
+    [Benchmark]
+    public void cuGraphLaunch_DeviceLaunchCapableSerialTripleBuffer_StreamSync()
+    {
+        cuGraphLaunch(_deviceLaunchGraphExec, _stream).Ok();
         cuStreamSynchronize(_stream).Ok();
     }
 
@@ -301,6 +313,23 @@ public unsafe class SerialLaunchKernelBench
             throw new InvalidOperationException(
                 $"Graph instantiation failed with {instantiateResult.ToStringFast()} at node {errorNode.Value}:\n{log}");
         }
+
+        var instantiateParams = new CUDA_GRAPH_INSTANTIATE_PARAMS
+        {
+            flags = (ulong)CUgraphInstantiate_flags.CUDA_GRAPH_INSTANTIATE_FLAG_DEVICE_LAUNCH,
+            hUploadStream = default,
+            hErrNode_out = default,
+            result_out = default,
+        };
+        instantiateResult = cuGraphInstantiateWithParams(
+            out _deviceLaunchGraphExec,
+            _graph,
+            ref instantiateParams);
+        if (instantiateResult.IsError())
+        {
+            throw new InvalidOperationException(
+                $"Device-launch-capable graph instantiation failed with {instantiateResult.ToStringFast()} and {instantiateParams.result_out} at node {instantiateParams.hErrNode_out.Value}.");
+        }
     }
 
     void ValidateImplementations()
@@ -312,6 +341,10 @@ public unsafe class SerialLaunchKernelBench
         cuGraphLaunch(_graphExec, _stream).Ok();
         cuStreamSynchronize(_stream).Ok();
         ValidateResults(nameof(cuGraphLaunch_SerialTripleBuffer_StreamSync));
+
+        cuGraphLaunch(_deviceLaunchGraphExec, _stream).Ok();
+        cuStreamSynchronize(_stream).Ok();
+        ValidateResults(nameof(cuGraphLaunch_DeviceLaunchCapableSerialTripleBuffer_StreamSync));
 
         cuGraphLaunch(_capturedGraphExec, _stream).Ok();
         cuStreamSynchronize(_stream).Ok();

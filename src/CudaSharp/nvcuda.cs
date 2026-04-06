@@ -857,6 +857,30 @@ public static partial class nvcuda
         Span<byte> logBuffer, nuint bufferSize);
 
     /// <summary>
+    /// Instantiates a graph with explicit instantiation parameters.
+    /// </summary>
+    /// <param name="phGraphExec">Returned executable graph.</param>
+    /// <param name="hGraph">Graph to instantiate.</param>
+    /// <param name="instantiateParams">Instantiation parameters and result details.</param>
+    [LibraryImport(LibName)]
+    public static partial CUresult cuGraphInstantiateWithParams(
+        out CUgraphExec phGraphExec,
+        CUgraph hGraph,
+        ref CUDA_GRAPH_INSTANTIATE_PARAMS instantiateParams);
+
+    /// <summary>
+    /// Sets the parameters of a kernel node in an executable graph.
+    /// </summary>
+    /// <param name="hGraphExec">Executable graph containing the node.</param>
+    /// <param name="hNode">Kernel node from the source graph.</param>
+    /// <param name="nodeParams">Updated kernel node parameters.</param>
+    [LibraryImport(LibName)]
+    public static partial CUresult cuGraphExecKernelNodeSetParams(
+        CUgraphExec hGraphExec,
+        CUgraphNode hNode,
+        in CUDA_KERNEL_NODE_PARAMS nodeParams);
+
+    /// <summary>
     /// Destroys an executable graph.
     /// </summary>
     /// <param name="hGraphExec">Executable graph to destroy.</param>
