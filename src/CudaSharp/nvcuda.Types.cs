@@ -86,6 +86,13 @@ public static partial class nvcuda
         CU_MEMHOSTALLOC_WRITECOMBINED = 0x04,
     }
 
+    public enum CUstreamCaptureMode
+    {
+        CU_STREAM_CAPTURE_MODE_GLOBAL = 0,
+        CU_STREAM_CAPTURE_MODE_THREAD_LOCAL = 1,
+        CU_STREAM_CAPTURE_MODE_RELAXED = 2,
+    }
+
     public enum CUaccessProperty
     {
         CU_ACCESS_PROPERTY_NORMAL = 0,

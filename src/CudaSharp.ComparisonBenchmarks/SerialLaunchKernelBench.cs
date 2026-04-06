@@ -41,6 +41,8 @@ public unsafe class SerialLaunchKernelBench
     CUstream _stream;
     CUgraph _graph;
     CUgraphExec _graphExec;
+    CUgraph _capturedGraph;
+    CUgraphExec _capturedGraphExec;
     CUdeviceptr _buffer0;
     CUdeviceptr _buffer1;
     CUdeviceptr _accumulator;
@@ -53,7 +55,7 @@ public unsafe class SerialLaunchKernelBench
 
     public SerialLaunchKernelBench() => CuInit.EnsureInit();
 
-    [Params(1, 2, 4, 8, 16, 32, 64, 128, 256)]
+    [Params(256)]
     public int SerialLaunchCount { get; set; }
 
     [GlobalSetup]
@@ -75,7 +77,9 @@ public unsafe class SerialLaunchKernelBench
         cuMemAlloc(out _accumulator, bufferSize).Ok();
 
         BuildSerialGraph();
+        BuildCapturedGraph();
         cuGraphUpload(_graphExec, _stream).Ok();
+        cuGraphUpload(_capturedGraphExec, _stream).Ok();
         cuStreamSynchronize(_stream).Ok();
         ValidateImplementations();
     }
@@ -86,6 +90,12 @@ public unsafe class SerialLaunchKernelBench
         if (_context.Value == IntPtr.Zero) { return; }
 
         cuCtxSetCurrent(_context).Ok();
+
+        if (_capturedGraphExec.Value != IntPtr.Zero)
+        { cuGraphExecDestroy(_capturedGraphExec).Ok(); }
+
+        if (_capturedGraph.Value != IntPtr.Zero)
+        { cuGraphDestroy(_capturedGraph).Ok(); }
 
         if (_graphExec.Value != IntPtr.Zero)
         { cuGraphExecDestroy(_graphExec).Ok(); }
@@ -126,6 +136,13 @@ public unsafe class SerialLaunchKernelBench
         cuStreamSynchronize(_stream).Ok();
     }
 
+    [Benchmark]
+    public void cuGraphLaunch_CapturedSerialTripleBuffer_StreamSync()
+    {
+        cuGraphLaunch(_capturedGraphExec, _stream).Ok();
+        cuStreamSynchronize(_stream).Ok();
+    }
+
     void LaunchSerialRaw()
     {
         LaunchInitRaw();
@@ -152,6 +169,26 @@ public unsafe class SerialLaunchKernelBench
                 1, 1, 1,
                 0, _stream,
                 kernelParams, null).Ok();
+        }
+    }
+
+    void BuildCapturedGraph()
+    {
+        cuStreamBeginCapture(_stream, CUstreamCaptureMode.CU_STREAM_CAPTURE_MODE_GLOBAL).Ok();
+        LaunchSerialRaw();
+        cuStreamEndCapture(_stream, out _capturedGraph).Ok();
+
+        Span<byte> logBuffer = stackalloc byte[2048];
+        var instantiateResult = cuGraphInstantiate(out _capturedGraphExec,
+            _capturedGraph,
+            out var errorNode,
+            logBuffer,
+            (nuint)logBuffer.Length);
+        if (instantiateResult.IsError())
+        {
+            var log = Encoding.UTF8.GetString(logBuffer).TrimEnd('\0');
+            throw new InvalidOperationException(
+                $"Captured graph instantiation failed with {instantiateResult.ToStringFast()} at node {errorNode.Value}:\n{log}");
         }
     }
 
@@ -275,6 +312,10 @@ public unsafe class SerialLaunchKernelBench
         cuGraphLaunch(_graphExec, _stream).Ok();
         cuStreamSynchronize(_stream).Ok();
         ValidateResults(nameof(cuGraphLaunch_SerialTripleBuffer_StreamSync));
+
+        cuGraphLaunch(_capturedGraphExec, _stream).Ok();
+        cuStreamSynchronize(_stream).Ok();
+        ValidateResults(nameof(cuGraphLaunch_CapturedSerialTripleBuffer_StreamSync));
     }
 
     void ValidateResults(string benchmarkName)

@@ -886,6 +886,12 @@ public static partial class nvcuda
     public static partial CUresult cuStreamCreate(out CUstream pStream, uint Flags);
 
     [LibraryImport(LibName)]
+    public static partial CUresult cuStreamBeginCapture(CUstream hStream, CUstreamCaptureMode mode);
+
+    [LibraryImport(LibName)]
+    public static partial CUresult cuStreamEndCapture(CUstream hStream, out CUgraph phGraph);
+
+    [LibraryImport(LibName)]
     public static partial CUresult cuStreamSynchronize(CUstream hStream);
 
     [LibraryImport(LibName)]
