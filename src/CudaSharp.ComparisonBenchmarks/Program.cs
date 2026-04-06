@@ -57,6 +57,7 @@ if (args.Length > 0)
     var nameToBenchTypesSet = new Dictionary<string, Type[]>()
     {
         { nameof(LaunchKernelBench), new[] { typeof(LaunchKernelBench), } },
+        { nameof(SerialLaunchKernelBench), new[] { typeof(SerialLaunchKernelBench), } },
         { nameof(TestBench), new[] { typeof(TestBench), } },
     };
     foreach (var (name, benchTypes) in nameToBenchTypesSet)
