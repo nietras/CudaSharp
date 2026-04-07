@@ -302,6 +302,163 @@ public static partial class nvcuda
     public static partial CUresult cuModuleLoadData(out CUmodule module, ReadOnlySpan<byte> image);
 
     /// <summary>
+    /// Loads a compute module from a memory buffer with JIT options.
+    /// </summary>
+    /// <param name="module">Returned module.</param>
+    /// <param name="image">Module data to load.</param>
+    /// <param name="numOptions">Number of JIT options.</param>
+    /// <param name="options">JIT options.</param>
+    /// <param name="optionValues">JIT option values.</param>
+    /// <seealso href="https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__MODULE.html#group__CUDA__MODULE_1g04ce266ce03720f479eab76136b90c0b"/>
+    [LibraryImport(LibName)]
+    public unsafe static partial CUresult cuModuleLoadDataEx(
+        out CUmodule module,
+        ReadOnlySpan<byte> image,
+        uint numOptions,
+        CUjit_option* options,
+        void** optionValues);
+
+    /// <summary>
+    /// Loads a CUDA library from a memory buffer.
+    /// </summary>
+    /// <param name="library">Returned library handle.</param>
+    /// <param name="code">Library image data.</param>
+    /// <param name="jitOptions">JIT options.</param>
+    /// <param name="jitOptionValues">JIT option values.</param>
+    /// <param name="numJitOptions">Number of JIT options.</param>
+    /// <param name="libraryOptions">Library loading options.</param>
+    /// <param name="libraryOptionValues">Library loading option values.</param>
+    /// <param name="numLibraryOptions">Number of library loading options.</param>
+    /// <seealso href="https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__MODULE.html#group__CUDA__MODULE_1g1ceda3d5439f0f307c4617f3f144ed39"/>
+    [LibraryImport(LibName)]
+    public unsafe static partial CUresult cuLibraryLoadData(
+        out CUlibrary library,
+        ReadOnlySpan<byte> code,
+        CUjit_option* jitOptions,
+        void** jitOptionValues,
+        uint numJitOptions,
+        CUlibraryOption* libraryOptions,
+        void** libraryOptionValues,
+        uint numLibraryOptions);
+
+    /// <summary>
+    /// Unloads a CUDA library.
+    /// </summary>
+    /// <param name="library">Library handle to unload.</param>
+    /// <seealso href="https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__MODULE.html#group__CUDA__MODULE_1gff7274f8d79f5f1b28ee1daeedfe52c"/>
+    [LibraryImport(LibName)]
+    public static partial CUresult cuLibraryUnload(CUlibrary library);
+
+    /// <summary>
+    /// Gets a kernel handle from a CUDA library.
+    /// </summary>
+    /// <param name="kernel">Returned kernel handle.</param>
+    /// <param name="library">Library handle.</param>
+    /// <param name="name">Kernel name.</param>
+    /// <seealso href="https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__MODULE.html#group__CUDA__MODULE_1g6f8f15f71bb32e4505d0952f392e143c"/>
+    [LibraryImport(LibName, StringMarshalling = StringMarshalling.Utf8)]
+    public static partial CUresult cuLibraryGetKernel(
+        out CUkernel kernel,
+        CUlibrary library,
+        string name);
+
+    /// <summary>
+    /// Gets a module handle for the current context from a CUDA library.
+    /// </summary>
+    /// <param name="module">Returned module handle.</param>
+    /// <param name="library">Library handle.</param>
+    /// <seealso href="https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__MODULE.html#group__CUDA__MODULE_1gcf52df4b6ca93511d7a6ff4827fd9fb6"/>
+    [LibraryImport(LibName)]
+    public static partial CUresult cuLibraryGetModule(out CUmodule module, CUlibrary library);
+
+    /// <summary>
+    /// Gets a function handle for a kernel in the current context.
+    /// </summary>
+    /// <param name="function">Returned function handle.</param>
+    /// <param name="kernel">Kernel handle.</param>
+    /// <seealso href="https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__MODULE.html#group__CUDA__MODULE_1g67df7712e6c0aef0f3b731f17df0ee06"/>
+    [LibraryImport(LibName)]
+    public static partial CUresult cuKernelGetFunction(out CUfunction function, CUkernel kernel);
+
+    /// <summary>
+    /// Creates a pending JIT linker invocation.
+    /// </summary>
+    /// <param name="numOptions">Number of linker options.</param>
+    /// <param name="options">Linker options.</param>
+    /// <param name="optionValues">Option values cast to pointers.</param>
+    /// <param name="stateOut">Returned linker state.</param>
+    /// <seealso href="https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__MODULE.html#group__CUDA__MODULE_1g66f3f648936f2d1a4469af044bb6877f"/>
+    [LibraryImport(LibName)]
+    public unsafe static partial CUresult cuLinkCreate(
+        uint numOptions,
+        CUjit_option* options,
+        void** optionValues,
+        out CUlinkState stateOut);
+
+    /// <summary>
+    /// Adds an input buffer to a pending JIT linker invocation.
+    /// </summary>
+    /// <param name="state">Linker state.</param>
+    /// <param name="type">Input type.</param>
+    /// <param name="data">Input data pointer.</param>
+    /// <param name="size">Input size in bytes.</param>
+    /// <param name="name">Optional input name for diagnostics.</param>
+    /// <param name="numOptions">Number of input-specific options.</param>
+    /// <param name="options">Input-specific options.</param>
+    /// <param name="optionValues">Input-specific option values.</param>
+    /// <seealso href="https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__MODULE.html#group__CUDA__MODULE_1g8b1d53da30f3bfda52d58a3b16130ad9"/>
+    [LibraryImport(LibName, StringMarshalling = StringMarshalling.Utf8)]
+    public unsafe static partial CUresult cuLinkAddData(
+        CUlinkState state,
+        CUjitInputType type,
+        void* data,
+        nuint size,
+        string name,
+        uint numOptions,
+        CUjit_option* options,
+        void** optionValues);
+
+    /// <summary>
+    /// Adds a file input to a pending JIT linker invocation.
+    /// </summary>
+    /// <param name="state">Linker state.</param>
+    /// <param name="type">Input type.</param>
+    /// <param name="path">Input file path.</param>
+    /// <param name="numOptions">Number of input-specific options.</param>
+    /// <param name="options">Input-specific options.</param>
+    /// <param name="optionValues">Input-specific option values.</param>
+    /// <seealso href="https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__MODULE.html#group__CUDA__MODULE_1g07f1b6ee4635b2a31337c289f4c5ca2e"/>
+    [LibraryImport(LibName, StringMarshalling = StringMarshalling.Utf8)]
+    public unsafe static partial CUresult cuLinkAddFile(
+        CUlinkState state,
+        CUjitInputType type,
+        string path,
+        uint numOptions,
+        CUjit_option* options,
+        void** optionValues);
+
+    /// <summary>
+    /// Completes a pending JIT linker invocation.
+    /// </summary>
+    /// <param name="state">Linker state.</param>
+    /// <param name="cubinOut">Returned linked cubin pointer.</param>
+    /// <param name="sizeOut">Returned linked cubin size.</param>
+    /// <seealso href="https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__MODULE.html#group__CUDA__MODULE_1g3d5adfca26af1022ac7565594343e9f6"/>
+    [LibraryImport(LibName)]
+    public static partial CUresult cuLinkComplete(
+        CUlinkState state,
+        out IntPtr cubinOut,
+        out nuint sizeOut);
+
+    /// <summary>
+    /// Destroys a pending JIT linker invocation.
+    /// </summary>
+    /// <param name="state">Linker state.</param>
+    /// <seealso href="https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__MODULE.html#group__CUDA__MODULE_1g66d5ea4b2d3fd3dfc9af1d9305f22f63"/>
+    [LibraryImport(LibName)]
+    public static partial CUresult cuLinkDestroy(CUlinkState state);
+
+    /// <summary>
     /// Returns a function handle.
     /// </summary>
     /// <param name="hfunc">Returned function handle.</param>
