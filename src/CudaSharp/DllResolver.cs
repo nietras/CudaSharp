@@ -1,4 +1,5 @@
-﻿using System.IO;
+﻿using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Threading;
@@ -65,27 +66,32 @@ public static class DllResolver
             var cudaPath = Environment.GetEnvironmentVariable("CUDA_PATH");
             if (!string.IsNullOrEmpty(cudaPath))
             {
-                var binPath = Path.Combine(cudaPath, "bin");
-                if (Directory.Exists(binPath))
+                foreach (var binPath in GetCudaNvrtcSearchPaths(cudaPath))
                 {
+                    if (!Directory.Exists(binPath))
+                    {
+                        continue;
+                    }
+
                     var dll = Directory.GetFiles(binPath, "nvrtc64_*.dll")
                                        .OrderByDescending(f => f)
                                        .FirstOrDefault();
-                    if (dll != null)
+                    if (dll == null)
                     {
-                        // Preload builtins if present
-                        var builtins = Directory.GetFiles(binPath, "nvrtc-builtins64_*.dll")
-                                                .OrderByDescending(f => f)
-                                                .FirstOrDefault();
-                        if (builtins != null)
-                        {
-                            NativeLibrary.TryLoad(builtins, out _);
-                        }
+                        continue;
+                    }
 
-                        if (NativeLibrary.TryLoad(dll, out var handle))
-                        {
-                            return handle;
-                        }
+                    var builtins = Directory.GetFiles(binPath, "nvrtc-builtins64_*.dll")
+                                            .OrderByDescending(f => f)
+                                            .FirstOrDefault();
+                    if (builtins != null)
+                    {
+                        NativeLibrary.TryLoad(builtins, out _);
+                    }
+
+                    if (NativeLibrary.TryLoad(dll, out var handle))
+                    {
+                        return handle;
                     }
                 }
             }
@@ -101,31 +107,87 @@ public static class DllResolver
                                         .ToList();
                 foreach (var version in versions)
                 {
-                    var binPath = Path.Combine(defaultPath, version!, "bin");
-                    if (Directory.Exists(binPath))
+                    foreach (var binPath in GetCudaNvrtcSearchPaths(Path.Combine(defaultPath, version!)))
                     {
+                        if (!Directory.Exists(binPath))
+                        {
+                            continue;
+                        }
+
                         var dll = Directory.GetFiles(binPath, "nvrtc64_*.dll")
                                            .OrderByDescending(f => f)
                                            .FirstOrDefault();
-                        if (dll != null)
+                        if (dll == null)
                         {
-                            var builtins = Directory.GetFiles(binPath, "nvrtc-builtins64_*.dll")
-                                                    .OrderByDescending(f => f)
-                                                    .FirstOrDefault();
-                            if (builtins != null)
-                            {
-                                NativeLibrary.TryLoad(builtins, out _);
-                            }
+                            continue;
+                        }
 
-                            if (NativeLibrary.TryLoad(dll, out var handle))
-                            {
-                                return handle;
-                            }
+                        var builtins = Directory.GetFiles(binPath, "nvrtc-builtins64_*.dll")
+                                                .OrderByDescending(f => f)
+                                                .FirstOrDefault();
+                        if (builtins != null)
+                        {
+                            NativeLibrary.TryLoad(builtins, out _);
+                        }
+
+                        if (NativeLibrary.TryLoad(dll, out var handle))
+                        {
+                            return handle;
                         }
                     }
                 }
             }
         }
+        else if (libraryName == "nvJitLink")
+        {
+            var cudaPath = Environment.GetEnvironmentVariable("CUDA_PATH");
+            if (!string.IsNullOrEmpty(cudaPath))
+            {
+                var binPath = Path.Combine(cudaPath, "bin", "x64");
+                if (Directory.Exists(binPath))
+                {
+                    var dll = Directory.GetFiles(binPath, "nvJitLink_*.dll")
+                                       .OrderByDescending(f => f)
+                                       .FirstOrDefault();
+                    if (dll != null && NativeLibrary.TryLoad(dll, out var handle))
+                    {
+                        return handle;
+                    }
+                }
+            }
+
+            var defaultPath = @"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA";
+            if (Directory.Exists(defaultPath))
+            {
+                var versions = Directory.GetDirectories(defaultPath, "v*.*")
+                                        .Select(Path.GetFileName)
+                                        .Where(v => v is not null)
+                                        .OrderByDescending(v => v)
+                                        .ToList();
+                foreach (var version in versions)
+                {
+                    var binPath = Path.Combine(defaultPath, version!, "bin", "x64");
+                    if (!Directory.Exists(binPath))
+                    {
+                        continue;
+                    }
+
+                    var dll = Directory.GetFiles(binPath, "nvJitLink_*.dll")
+                                       .OrderByDescending(f => f)
+                                       .FirstOrDefault();
+                    if (dll != null && NativeLibrary.TryLoad(dll, out var handle))
+                    {
+                        return handle;
+                    }
+                }
+            }
+        }
         return IntPtr.Zero;
+    }
+
+    static IEnumerable<string> GetCudaNvrtcSearchPaths(string cudaRoot)
+    {
+        yield return Path.Combine(cudaRoot, "bin", "x64");
+        yield return Path.Combine(cudaRoot, "bin");
     }
 }
