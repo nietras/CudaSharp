@@ -22,7 +22,7 @@ public static partial class nvJitLink
     /// <param name="numOptions">Number of linker options.</param>
     /// <param name="options">Linker options.</param>
     /// <seealso href="https://docs.nvidia.com/cuda/nvjitlink/index.html#linking"/>
-    [LibraryImport(LibName, EntryPoint = "__nvJitLinkCreate_13_1")]
+    [LibraryImport(LibName)]
     public static unsafe partial nvJitLinkResult nvJitLinkCreate(
         out nvJitLinkHandle handle,
         uint numOptions,
@@ -33,7 +33,7 @@ public static partial class nvJitLink
     /// </summary>
     /// <param name="handle">Handle to destroy.</param>
     /// <seealso href="https://docs.nvidia.com/cuda/nvjitlink/index.html#linking"/>
-    [LibraryImport(LibName, EntryPoint = "__nvJitLinkDestroy_13_1")]
+    [LibraryImport(LibName)]
     public static partial nvJitLinkResult nvJitLinkDestroy(ref nvJitLinkHandle handle);
 
     /// <summary>
@@ -45,7 +45,7 @@ public static partial class nvJitLink
     /// <param name="size">Input buffer size in bytes.</param>
     /// <param name="name">Optional input name.</param>
     /// <seealso href="https://docs.nvidia.com/cuda/nvjitlink/index.html#linking"/>
-    [LibraryImport(LibName, EntryPoint = "__nvJitLinkAddData_13_1", StringMarshalling = StringMarshalling.Utf8)]
+    [LibraryImport(LibName, StringMarshalling = StringMarshalling.Utf8)]
     public static unsafe partial nvJitLinkResult nvJitLinkAddData(
         nvJitLinkHandle handle,
         nvJitLinkInputType inputType,
@@ -60,7 +60,7 @@ public static partial class nvJitLink
     /// <param name="inputType">Input kind.</param>
     /// <param name="fileName">Path to the input file.</param>
     /// <seealso href="https://docs.nvidia.com/cuda/nvjitlink/index.html#linking"/>
-    [LibraryImport(LibName, EntryPoint = "__nvJitLinkAddFile_13_1", StringMarshalling = StringMarshalling.Utf8)]
+    [LibraryImport(LibName, StringMarshalling = StringMarshalling.Utf8)]
     public static partial nvJitLinkResult nvJitLinkAddFile(
         nvJitLinkHandle handle,
         nvJitLinkInputType inputType,
@@ -71,7 +71,7 @@ public static partial class nvJitLink
     /// </summary>
     /// <param name="handle">Linker handle.</param>
     /// <seealso href="https://docs.nvidia.com/cuda/nvjitlink/index.html#linking"/>
-    [LibraryImport(LibName, EntryPoint = "__nvJitLinkComplete_13_1")]
+    [LibraryImport(LibName)]
     public static partial nvJitLinkResult nvJitLinkComplete(nvJitLinkHandle handle);
 
     /// <summary>
@@ -80,7 +80,7 @@ public static partial class nvJitLink
     /// <param name="handle">Linker handle.</param>
     /// <param name="size">Returned cubin size.</param>
     /// <seealso href="https://docs.nvidia.com/cuda/nvjitlink/index.html#linking"/>
-    [LibraryImport(LibName, EntryPoint = "__nvJitLinkGetLinkedCubinSize_13_1")]
+    [LibraryImport(LibName)]
     public static partial nvJitLinkResult nvJitLinkGetLinkedCubinSize(
         nvJitLinkHandle handle,
         out nuint size);
@@ -91,7 +91,7 @@ public static partial class nvJitLink
     /// <param name="handle">Linker handle.</param>
     /// <param name="cubin">Destination cubin buffer.</param>
     /// <seealso href="https://docs.nvidia.com/cuda/nvjitlink/index.html#linking"/>
-    [LibraryImport(LibName, EntryPoint = "__nvJitLinkGetLinkedCubin_13_1")]
+    [LibraryImport(LibName)]
     public static partial nvJitLinkResult nvJitLinkGetLinkedCubin(
         nvJitLinkHandle handle,
         Span<byte> cubin);
@@ -102,7 +102,7 @@ public static partial class nvJitLink
     /// <param name="handle">Linker handle.</param>
     /// <param name="size">Returned error log size.</param>
     /// <seealso href="https://docs.nvidia.com/cuda/nvjitlink/index.html#linking"/>
-    [LibraryImport(LibName, EntryPoint = "__nvJitLinkGetErrorLogSize_13_1")]
+    [LibraryImport(LibName)]
     public static partial nvJitLinkResult nvJitLinkGetErrorLogSize(
         nvJitLinkHandle handle,
         out nuint size);
@@ -113,7 +113,7 @@ public static partial class nvJitLink
     /// <param name="handle">Linker handle.</param>
     /// <param name="log">Destination error log buffer.</param>
     /// <seealso href="https://docs.nvidia.com/cuda/nvjitlink/index.html#linking"/>
-    [LibraryImport(LibName, EntryPoint = "__nvJitLinkGetErrorLog_13_1")]
+    [LibraryImport(LibName)]
     public static unsafe partial nvJitLinkResult nvJitLinkGetErrorLog(
         nvJitLinkHandle handle,
         byte* log);
@@ -124,7 +124,7 @@ public static partial class nvJitLink
     /// <param name="handle">Linker handle.</param>
     /// <param name="size">Returned info log size.</param>
     /// <seealso href="https://docs.nvidia.com/cuda/nvjitlink/index.html#linking"/>
-    [LibraryImport(LibName, EntryPoint = "__nvJitLinkGetInfoLogSize_13_1")]
+    [LibraryImport(LibName)]
     public static partial nvJitLinkResult nvJitLinkGetInfoLogSize(
         nvJitLinkHandle handle,
         out nuint size);
@@ -135,7 +135,7 @@ public static partial class nvJitLink
     /// <param name="handle">Linker handle.</param>
     /// <param name="log">Destination info log buffer.</param>
     /// <seealso href="https://docs.nvidia.com/cuda/nvjitlink/index.html#linking"/>
-    [LibraryImport(LibName, EntryPoint = "__nvJitLinkGetInfoLog_13_1")]
+    [LibraryImport(LibName)]
     public static unsafe partial nvJitLinkResult nvJitLinkGetInfoLog(
         nvJitLinkHandle handle,
         byte* log);
