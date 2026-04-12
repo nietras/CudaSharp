@@ -13,7 +13,7 @@ MinIterationCount=5  WarmupCount=6
 ```
 | Method                                                         | SerialLaunchCount | Mean     | Ratio | Allocated | Alloc Ratio |
 |--------------------------------------------------------------- |------------------ |---------:|------:|----------:|------------:|
-| cuLaunchKernel_Raw_SerialTripleBuffer_StreamSync               | 256               | 816.9 μs |  1.00 |         - |          NA |
-| cuGraphLaunch_SerialTripleBuffer_StreamSync                    | 256               | 256.6 μs |  0.31 |         - |          NA |
-| cuGraphLaunch_DeviceLaunchCapableSerialTripleBuffer_StreamSync | 256               | 218.5 μs |  0.27 |         - |          NA |
-| cuGraphLaunch_CapturedSerialTripleBuffer_StreamSync            | 256               | 256.7 μs |  0.31 |         - |          NA |
+| cuLaunchKernel_Raw_SerialTripleBuffer_StreamSync               | 256               | 820.9 μs |  1.00 |         - |          NA |
+| cuGraphLaunch_SerialTripleBuffer_StreamSync                    | 256               | 257.8 μs |  0.31 |         - |          NA |
+| cuGraphLaunch_DeviceLaunchCapableSerialTripleBuffer_StreamSync | 256               | 216.3 μs |  0.26 |         - |          NA |
+| cuGraphLaunch_CapturedSerialTripleBuffer_StreamSync            | 256               | 256.5 μs |  0.31 |         - |          NA |

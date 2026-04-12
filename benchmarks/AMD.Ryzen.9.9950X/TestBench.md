@@ -14,6 +14,6 @@ Reader=String
 ```
 | Method                      | Scope | Count | Mean               | Ratio         | Allocated | Alloc Ratio |
 |---------------------------- |------ |------ |-------------------:|--------------:|----------:|------------:|
-| CudaSharp_cuInit            | Test  | 25000 |         27.2133 ns |         1.000 |         - |          NA |
-| CudaSharp_CuInit_EnsureInit | Test  | 25000 |          0.0097 ns |         0.000 |         - |          NA |
-| CudaSharp_CtxCreateDestroy  | Test  | 25000 | 50,797,173.3333 ns | 1,866,632.010 |         - |          NA |
+| CudaSharp_cuInit            | Test  | 25000 |         27.5055 ns |         1.000 |         - |          NA |
+| CudaSharp_CuInit_EnsureInit | Test  | 25000 |          0.0073 ns |         0.000 |         - |          NA |
+| CudaSharp_CtxCreateDestroy  | Test  | 25000 | 51,021,153.0612 ns | 1,854,940.571 |         - |          NA |
