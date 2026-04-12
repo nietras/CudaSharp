@@ -130,13 +130,13 @@ Benchmarks.
 
 ##### TestBench Benchmark Results
 
-###### AMD.Ryzen.9.9950X - TestBench Benchmark Results (CudaSharp 0.0.4.0, System 10.0.526.15411)
+###### AMD.Ryzen.9.9950X - TestBench Benchmark Results (CudaSharp 0.0.5.0, System 10.0.526.15411)
 
 | Method                      | Scope | Count | Mean               | Ratio         | Allocated | Alloc Ratio |
 |---------------------------- |------ |------ |-------------------:|--------------:|----------:|------------:|
-| CudaSharp_cuInit            | Test  | 25000 |         27.3211 ns |         1.000 |         - |          NA |
-| CudaSharp_CuInit_EnsureInit | Test  | 25000 |          0.0126 ns |         0.000 |         - |          NA |
-| CudaSharp_CtxCreateDestroy  | Test  | 25000 | 60,732,426.6667 ns | 2,222,917.574 |         - |          NA |
+| CudaSharp_cuInit            | Test  | 25000 |         26.4834 ns |         1.000 |         - |          NA |
+| CudaSharp_CuInit_EnsureInit | Test  | 25000 |          0.0078 ns |         0.000 |         - |          NA |
+| CudaSharp_CtxCreateDestroy  | Test  | 25000 | 50,671,734.6939 ns | 1,913,350.578 |         - |          NA |
 
 
 ## Example Catalogue
@@ -182,6 +182,87 @@ namespace CudaSharp
     public static class DllResolver
     {
         public static void Register() { }
+    }
+    public static class nvJitLink
+    {
+        [System.Runtime.CompilerServices.SkipLocalsInit]
+        [System.Runtime.InteropServices.LibraryImport("nvJitLink", StringMarshalling=System.Runtime.InteropServices.StringMarshalling.Utf8)]
+        public static unsafe CudaSharp.nvJitLink.nvJitLinkResult nvJitLinkAddData(CudaSharp.nvJitLink.nvJitLinkHandle handle, CudaSharp.nvJitLink.nvJitLinkInputType inputType, void* data, nuint size, string? name) { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
+        [System.Runtime.InteropServices.LibraryImport("nvJitLink", StringMarshalling=System.Runtime.InteropServices.StringMarshalling.Utf8)]
+        public static CudaSharp.nvJitLink.nvJitLinkResult nvJitLinkAddFile(CudaSharp.nvJitLink.nvJitLinkHandle handle, CudaSharp.nvJitLink.nvJitLinkInputType inputType, string fileName) { }
+        [System.Runtime.InteropServices.LibraryImport("nvJitLink")]
+        public static CudaSharp.nvJitLink.nvJitLinkResult nvJitLinkComplete(CudaSharp.nvJitLink.nvJitLinkHandle handle) { }
+        public static CudaSharp.nvJitLink.nvJitLinkResult nvJitLinkCreate(out CudaSharp.nvJitLink.nvJitLinkHandle handle, System.ReadOnlySpan<string> options) { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
+        [System.Runtime.InteropServices.LibraryImport("nvJitLink")]
+        public static unsafe CudaSharp.nvJitLink.nvJitLinkResult nvJitLinkCreate(out CudaSharp.nvJitLink.nvJitLinkHandle handle, uint numOptions, byte** options) { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
+        [System.Runtime.InteropServices.LibraryImport("nvJitLink")]
+        public static CudaSharp.nvJitLink.nvJitLinkResult nvJitLinkDestroy(ref CudaSharp.nvJitLink.nvJitLinkHandle handle) { }
+        [System.Runtime.InteropServices.LibraryImport("nvJitLink")]
+        public static unsafe CudaSharp.nvJitLink.nvJitLinkResult nvJitLinkGetErrorLog(CudaSharp.nvJitLink.nvJitLinkHandle handle, byte* log) { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
+        [System.Runtime.InteropServices.LibraryImport("nvJitLink")]
+        public static CudaSharp.nvJitLink.nvJitLinkResult nvJitLinkGetErrorLogSize(CudaSharp.nvJitLink.nvJitLinkHandle handle, out System.UIntPtr size) { }
+        public static string nvJitLinkGetErrorLogString(CudaSharp.nvJitLink.nvJitLinkHandle handle) { }
+        [System.Runtime.InteropServices.LibraryImport("nvJitLink")]
+        public static unsafe CudaSharp.nvJitLink.nvJitLinkResult nvJitLinkGetInfoLog(CudaSharp.nvJitLink.nvJitLinkHandle handle, byte* log) { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
+        [System.Runtime.InteropServices.LibraryImport("nvJitLink")]
+        public static CudaSharp.nvJitLink.nvJitLinkResult nvJitLinkGetInfoLogSize(CudaSharp.nvJitLink.nvJitLinkHandle handle, out System.UIntPtr size) { }
+        public static string nvJitLinkGetInfoLogString(CudaSharp.nvJitLink.nvJitLinkHandle handle) { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
+        [System.Runtime.InteropServices.LibraryImport("nvJitLink")]
+        public static CudaSharp.nvJitLink.nvJitLinkResult nvJitLinkGetLinkedCubin(CudaSharp.nvJitLink.nvJitLinkHandle handle, System.Span<byte> cubin) { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
+        [System.Runtime.InteropServices.LibraryImport("nvJitLink")]
+        public static CudaSharp.nvJitLink.nvJitLinkResult nvJitLinkGetLinkedCubinSize(CudaSharp.nvJitLink.nvJitLinkHandle handle, out System.UIntPtr size) { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
+        [System.Runtime.InteropServices.LibraryImport("nvJitLink")]
+        public static CudaSharp.nvJitLink.nvJitLinkResult nvJitLinkVersion(out uint major, out uint minor) { }
+        public readonly struct nvJitLinkHandle : System.IEquatable<CudaSharp.nvJitLink.nvJitLinkHandle>
+        {
+            public nvJitLinkHandle(nint Value) { }
+            public System.IntPtr Value { get; init; }
+        }
+        public enum nvJitLinkInputType
+        {
+            NVJITLINK_INPUT_NONE = 0,
+            NVJITLINK_INPUT_CUBIN = 1,
+            NVJITLINK_INPUT_PTX = 2,
+            NVJITLINK_INPUT_LTOIR = 3,
+            NVJITLINK_INPUT_FATBIN = 4,
+            NVJITLINK_INPUT_OBJECT = 5,
+            NVJITLINK_INPUT_LIBRARY = 6,
+            NVJITLINK_INPUT_INDEX = 7,
+            NVJITLINK_INPUT_ANY = 10,
+        }
+        public enum nvJitLinkResult
+        {
+            NVJITLINK_SUCCESS = 0,
+            NVJITLINK_ERROR_UNRECOGNIZED_OPTION = 1,
+            NVJITLINK_ERROR_MISSING_ARCH = 2,
+            NVJITLINK_ERROR_INVALID_INPUT = 3,
+            NVJITLINK_ERROR_PTX_COMPILE = 4,
+            NVJITLINK_ERROR_NVVM_COMPILE = 5,
+            NVJITLINK_ERROR_INTERNAL = 6,
+            NVJITLINK_ERROR_THREADPOOL = 7,
+            NVJITLINK_ERROR_UNRECOGNIZED_INPUT = 8,
+            NVJITLINK_ERROR_FINALIZE = 9,
+            NVJITLINK_ERROR_NULL_INPUT = 10,
+            NVJITLINK_ERROR_INCOMPATIBLE_OPTIONS = 11,
+            NVJITLINK_ERROR_INCORRECT_INPUT_TYPE = 12,
+            NVJITLINK_ERROR_ARCH_MISMATCH = 13,
+            NVJITLINK_ERROR_OUTDATED_LIBRARY = 14,
+            NVJITLINK_ERROR_MISSING_FATBIN = 15,
+            NVJITLINK_ERROR_UNRECOGNIZED_ARCH = 16,
+            NVJITLINK_ERROR_UNSUPPORTED_ARCH = 17,
+            NVJITLINK_ERROR_LTO_NOT_ENABLED = 18,
+        }
+        extension(CudaSharp.nvJitLink.nvJitLinkResult result)
+        {
+        }
     }
     public static class nvcuda
     {
@@ -301,11 +382,21 @@ namespace CudaSharp
         public static CudaSharp.nvcuda.CUresult cuGraphCreate(out CudaSharp.nvcuda.CUgraph phGraph, uint flags) { }
         [System.Runtime.InteropServices.LibraryImport("nvcuda")]
         public static CudaSharp.nvcuda.CUresult cuGraphDestroy(CudaSharp.nvcuda.CUgraph hGraph) { }
+        [System.Runtime.InteropServices.LibraryImport("nvcuda")]
+        public static CudaSharp.nvcuda.CUresult cuGraphExecDestroy(CudaSharp.nvcuda.CUgraphExec hGraphExec) { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
+        [System.Runtime.InteropServices.LibraryImport("nvcuda")]
+        public static CudaSharp.nvcuda.CUresult cuGraphExecKernelNodeSetParams(CudaSharp.nvcuda.CUgraphExec hGraphExec, CudaSharp.nvcuda.CUgraphNode hNode, in CudaSharp.nvcuda.CUDA_KERNEL_NODE_PARAMS nodeParams) { }
         [System.Runtime.CompilerServices.SkipLocalsInit]
         [System.Runtime.InteropServices.LibraryImport("nvcuda")]
         public static CudaSharp.nvcuda.CUresult cuGraphInstantiate(out CudaSharp.nvcuda.CUgraphExec phGraphExec, CudaSharp.nvcuda.CUgraph hGraph, out CudaSharp.nvcuda.CUgraphNode phErrorNode, System.Span<byte> logBuffer, nuint bufferSize) { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
+        [System.Runtime.InteropServices.LibraryImport("nvcuda")]
+        public static CudaSharp.nvcuda.CUresult cuGraphInstantiateWithParams(out CudaSharp.nvcuda.CUgraphExec phGraphExec, CudaSharp.nvcuda.CUgraph hGraph, ref CudaSharp.nvcuda.CUDA_GRAPH_INSTANTIATE_PARAMS instantiateParams) { }
         [System.Runtime.InteropServices.LibraryImport("nvcuda")]
         public static CudaSharp.nvcuda.CUresult cuGraphLaunch(CudaSharp.nvcuda.CUgraphExec hGraphExec, CudaSharp.nvcuda.CUstream hStream) { }
+        [System.Runtime.InteropServices.LibraryImport("nvcuda")]
+        public static CudaSharp.nvcuda.CUresult cuGraphUpload(CudaSharp.nvcuda.CUgraphExec hGraphExec, CudaSharp.nvcuda.CUstream hStream) { }
         [System.Runtime.CompilerServices.SkipLocalsInit]
         [System.Runtime.InteropServices.LibraryImport("nvcuda")]
         public static CudaSharp.nvcuda.CUresult cuImportExternalMemory(out CudaSharp.nvcuda.CUexternalMemory extMem, in CudaSharp.nvcuda.CUDA_EXTERNAL_MEMORY_HANDLE_DESC memHandleDesc) { }
@@ -314,6 +405,9 @@ namespace CudaSharp
         public static CudaSharp.nvcuda.CUresult cuImportExternalSemaphore(out CudaSharp.nvcuda.CUexternalSemaphore extSem, in CudaSharp.nvcuda.CUDA_EXTERNAL_SEMAPHORE_HANDLE_DESC semHandleDesc) { }
         [System.Runtime.InteropServices.LibraryImport("nvcuda")]
         public static CudaSharp.nvcuda.CUresult cuInit(uint flags = 0) { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
+        [System.Runtime.InteropServices.LibraryImport("nvcuda")]
+        public static CudaSharp.nvcuda.CUresult cuKernelGetFunction(out CudaSharp.nvcuda.CUfunction function, CudaSharp.nvcuda.CUkernel kernel) { }
         [System.Runtime.InteropServices.LibraryImport("nvcuda")]
         public static unsafe CudaSharp.nvcuda.CUresult cuLaunchKernel(CudaSharp.nvcuda.CUfunction f, uint gridDimX, uint gridDimY, uint gridDimZ, uint blockDimX, uint blockDimY, uint blockDimZ, uint sharedMemBytes, CudaSharp.nvcuda.CUstream hStream, void** kernelParams, void** extra) { }
         [System.Runtime.CompilerServices.SkipLocalsInit]
@@ -346,6 +440,34 @@ namespace CudaSharp
             where T4 :  unmanaged
             where T5 :  unmanaged
             where T6 :  unmanaged { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
+        [System.Runtime.InteropServices.LibraryImport("nvcuda")]
+        public static unsafe CudaSharp.nvcuda.CUresult cuLaunchKernelEx(in CudaSharp.nvcuda.CUlaunchConfig config, CudaSharp.nvcuda.CUfunction f, void** kernelParams, void** extra) { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
+        [System.Runtime.InteropServices.LibraryImport("nvcuda", StringMarshalling=System.Runtime.InteropServices.StringMarshalling.Utf8)]
+        public static CudaSharp.nvcuda.CUresult cuLibraryGetKernel(out CudaSharp.nvcuda.CUkernel kernel, CudaSharp.nvcuda.CUlibrary library, string name) { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
+        [System.Runtime.InteropServices.LibraryImport("nvcuda")]
+        public static CudaSharp.nvcuda.CUresult cuLibraryGetModule(out CudaSharp.nvcuda.CUmodule module, CudaSharp.nvcuda.CUlibrary library) { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
+        [System.Runtime.InteropServices.LibraryImport("nvcuda")]
+        public static unsafe CudaSharp.nvcuda.CUresult cuLibraryLoadData(out CudaSharp.nvcuda.CUlibrary library, System.ReadOnlySpan<byte> code, CudaSharp.nvcuda.CUjit_option* jitOptions, void** jitOptionValues, uint numJitOptions, CudaSharp.nvcuda.CUlibraryOption* libraryOptions, void** libraryOptionValues, uint numLibraryOptions) { }
+        [System.Runtime.InteropServices.LibraryImport("nvcuda")]
+        public static CudaSharp.nvcuda.CUresult cuLibraryUnload(CudaSharp.nvcuda.CUlibrary library) { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
+        [System.Runtime.InteropServices.LibraryImport("nvcuda", StringMarshalling=System.Runtime.InteropServices.StringMarshalling.Utf8)]
+        public static unsafe CudaSharp.nvcuda.CUresult cuLinkAddData(CudaSharp.nvcuda.CUlinkState state, CudaSharp.nvcuda.CUjitInputType type, void* data, nuint size, string name, uint numOptions, CudaSharp.nvcuda.CUjit_option* options, void** optionValues) { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
+        [System.Runtime.InteropServices.LibraryImport("nvcuda", StringMarshalling=System.Runtime.InteropServices.StringMarshalling.Utf8)]
+        public static unsafe CudaSharp.nvcuda.CUresult cuLinkAddFile(CudaSharp.nvcuda.CUlinkState state, CudaSharp.nvcuda.CUjitInputType type, string path, uint numOptions, CudaSharp.nvcuda.CUjit_option* options, void** optionValues) { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
+        [System.Runtime.InteropServices.LibraryImport("nvcuda")]
+        public static CudaSharp.nvcuda.CUresult cuLinkComplete(CudaSharp.nvcuda.CUlinkState state, out System.IntPtr cubinOut, out System.UIntPtr sizeOut) { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
+        [System.Runtime.InteropServices.LibraryImport("nvcuda")]
+        public static unsafe CudaSharp.nvcuda.CUresult cuLinkCreate(uint numOptions, CudaSharp.nvcuda.CUjit_option* options, void** optionValues, out CudaSharp.nvcuda.CUlinkState stateOut) { }
+        [System.Runtime.InteropServices.LibraryImport("nvcuda")]
+        public static CudaSharp.nvcuda.CUresult cuLinkDestroy(CudaSharp.nvcuda.CUlinkState state) { }
         [System.Runtime.CompilerServices.SkipLocalsInit]
         [System.Runtime.InteropServices.LibraryImport("nvcuda")]
         public static CudaSharp.nvcuda.CUresult cuMemAlloc(out CudaSharp.nvcuda.CUdeviceptr dptr, nuint bytesize) { }
@@ -417,6 +539,9 @@ namespace CudaSharp
         [System.Runtime.CompilerServices.SkipLocalsInit]
         [System.Runtime.InteropServices.LibraryImport("nvcuda")]
         public static CudaSharp.nvcuda.CUresult cuModuleLoadData(out CudaSharp.nvcuda.CUmodule module, System.ReadOnlySpan<byte> image) { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
+        [System.Runtime.InteropServices.LibraryImport("nvcuda")]
+        public static unsafe CudaSharp.nvcuda.CUresult cuModuleLoadDataEx(out CudaSharp.nvcuda.CUmodule module, System.ReadOnlySpan<byte> image, uint numOptions, CudaSharp.nvcuda.CUjit_option* options, void** optionValues) { }
         [System.Runtime.InteropServices.LibraryImport("nvcuda")]
         public static CudaSharp.nvcuda.CUresult cuModuleUnload(CudaSharp.nvcuda.CUmodule hmod) { }
         [System.Runtime.CompilerServices.SkipLocalsInit]
@@ -438,11 +563,16 @@ namespace CudaSharp
         [System.Runtime.CompilerServices.SkipLocalsInit]
         [System.Runtime.InteropServices.LibraryImport("nvcuda")]
         public static CudaSharp.nvcuda.CUresult cuStreamBatchMemOp(CudaSharp.nvcuda.CUstream stream, uint count, System.ReadOnlySpan<CudaSharp.nvcuda.CUstreamBatchMemOpParams> paramArray, uint flags) { }
+        [System.Runtime.InteropServices.LibraryImport("nvcuda")]
+        public static CudaSharp.nvcuda.CUresult cuStreamBeginCapture(CudaSharp.nvcuda.CUstream hStream, CudaSharp.nvcuda.CUstreamCaptureMode mode) { }
         [System.Runtime.CompilerServices.SkipLocalsInit]
         [System.Runtime.InteropServices.LibraryImport("nvcuda")]
         public static CudaSharp.nvcuda.CUresult cuStreamCreate(out CudaSharp.nvcuda.CUstream pStream, uint Flags) { }
         [System.Runtime.InteropServices.LibraryImport("nvcuda")]
         public static CudaSharp.nvcuda.CUresult cuStreamDestroy(CudaSharp.nvcuda.CUstream hStream) { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
+        [System.Runtime.InteropServices.LibraryImport("nvcuda")]
+        public static CudaSharp.nvcuda.CUresult cuStreamEndCapture(CudaSharp.nvcuda.CUstream hStream, out CudaSharp.nvcuda.CUgraph phGraph) { }
         [System.Runtime.InteropServices.LibraryImport("nvcuda")]
         public static CudaSharp.nvcuda.CUresult cuStreamSynchronize(CudaSharp.nvcuda.CUstream hStream) { }
         [System.Runtime.InteropServices.LibraryImport("nvcuda")]
@@ -634,6 +764,13 @@ namespace CudaSharp
             public CudaSharp.nvcuda.CUDA_EXTERNAL_SEMAPHORE_WAIT_PARAMS_KEYED_MUTEX keyedMutex;
             public System.IntPtr nvSciSyncObj;
         }
+        public struct CUDA_GRAPH_INSTANTIATE_PARAMS
+        {
+            public ulong flags;
+            public CudaSharp.nvcuda.CUgraphNode hErrNode_out;
+            public CudaSharp.nvcuda.CUstream hUploadStream;
+            public CudaSharp.nvcuda.CUgraphInstantiateResult result_out;
+        }
         public struct CUDA_KERNEL_NODE_PARAMS
         {
             public uint blockDimX;
@@ -778,6 +915,20 @@ namespace CudaSharp
             [System.Runtime.CompilerServices.FixedBuffer(typeof(int), 15)]
             public CudaSharp.nvcuda.CUDA_TEXTURE_DESC.<reserved>e__FixedBuffer reserved;
         }
+        public struct CUaccessPolicyWindow
+        {
+            public System.IntPtr base_ptr;
+            public CudaSharp.nvcuda.CUaccessProperty hitProp;
+            public float hitRatio;
+            public CudaSharp.nvcuda.CUaccessProperty missProp;
+            public System.UIntPtr num_bytes;
+        }
+        public enum CUaccessProperty
+        {
+            CU_ACCESS_PROPERTY_NORMAL = 0,
+            CU_ACCESS_PROPERTY_STREAMING = 1,
+            CU_ACCESS_PROPERTY_PERSISTING = 2,
+        }
         public enum CUaddress_mode
         {
             CU_TR_ADDRESS_MODE_WRAP = 0,
@@ -800,6 +951,12 @@ namespace CudaSharp
             CU_AD_FORMAT_SIGNED_INT32 = 10,
             CU_AD_FORMAT_HALF = 16,
             CU_AD_FORMAT_FLOAT = 32,
+        }
+        public enum CUclusterSchedulingPolicy
+        {
+            CU_CLUSTER_SCHEDULING_POLICY_DEFAULT = 0,
+            CU_CLUSTER_SCHEDULING_POLICY_SPREAD = 1,
+            CU_CLUSTER_SCHEDULING_POLICY_LOAD_BALANCING = 2,
         }
         public readonly struct CUcontext : System.IEquatable<CudaSharp.nvcuda.CUcontext>
         {
@@ -933,15 +1090,163 @@ namespace CudaSharp
             public CUgraph(nint Value) { }
             public System.IntPtr Value { get; init; }
         }
+        public readonly struct CUgraphDeviceNode : System.IEquatable<CudaSharp.nvcuda.CUgraphDeviceNode>
+        {
+            public CUgraphDeviceNode(nint Value) { }
+            public System.IntPtr Value { get; init; }
+        }
         public readonly struct CUgraphExec : System.IEquatable<CudaSharp.nvcuda.CUgraphExec>
         {
             public CUgraphExec(nint Value) { }
             public System.IntPtr Value { get; init; }
         }
+        public enum CUgraphInstantiateResult
+        {
+            CUDA_GRAPH_INSTANTIATE_SUCCESS = 0,
+            CUDA_GRAPH_INSTANTIATE_ERROR = 1,
+            CUDA_GRAPH_INSTANTIATE_INVALID_STRUCTURE = 2,
+            CUDA_GRAPH_INSTANTIATE_NODE_OPERATION_NOT_SUPPORTED = 3,
+            CUDA_GRAPH_INSTANTIATE_MULTIPLE_CTXS_NOT_SUPPORTED = 4,
+            CUDA_GRAPH_INSTANTIATE_CONDITIONAL_HANDLE_UNUSED = 5,
+        }
+        public enum CUgraphInstantiate_flags : ulong
+        {
+            CUDA_GRAPH_INSTANTIATE_FLAG_AUTO_FREE_ON_LAUNCH = 1ul,
+            CUDA_GRAPH_INSTANTIATE_FLAG_UPLOAD = 2ul,
+            CUDA_GRAPH_INSTANTIATE_FLAG_DEVICE_LAUNCH = 4ul,
+            CUDA_GRAPH_INSTANTIATE_FLAG_USE_NODE_PRIORITY = 8ul,
+        }
         public readonly struct CUgraphNode : System.IEquatable<CudaSharp.nvcuda.CUgraphNode>
         {
             public CUgraphNode(nint Value) { }
             public System.IntPtr Value { get; init; }
+        }
+        public enum CUjitInputType
+        {
+            CU_JIT_INPUT_CUBIN = 0,
+            CU_JIT_INPUT_PTX = 1,
+            CU_JIT_INPUT_FATBINARY = 2,
+            CU_JIT_INPUT_OBJECT = 3,
+            CU_JIT_INPUT_LIBRARY = 4,
+            CU_JIT_INPUT_NVVM = 5,
+        }
+        public enum CUjit_option
+        {
+            CU_JIT_MAX_REGISTERS = 0,
+            CU_JIT_THREADS_PER_BLOCK = 1,
+            CU_JIT_WALL_TIME = 2,
+            CU_JIT_INFO_LOG_BUFFER = 3,
+            CU_JIT_INFO_LOG_BUFFER_SIZE_BYTES = 4,
+            CU_JIT_ERROR_LOG_BUFFER = 5,
+            CU_JIT_ERROR_LOG_BUFFER_SIZE_BYTES = 6,
+            CU_JIT_OPTIMIZATION_LEVEL = 7,
+            CU_JIT_TARGET_FROM_CUCONTEXT = 8,
+            CU_JIT_TARGET = 9,
+        }
+        public readonly struct CUkernel : System.IEquatable<CudaSharp.nvcuda.CUkernel>
+        {
+            public CUkernel(nint Value) { }
+            public System.IntPtr Value { get; init; }
+        }
+        public struct CUlaunchAttribute
+        {
+            public CudaSharp.nvcuda.CUlaunchAttributeID id;
+            public int pad0;
+            public int pad1;
+            public CudaSharp.nvcuda.CUlaunchAttributeValue value;
+        }
+        public struct CUlaunchAttributeDeviceUpdatableKernelNode
+        {
+            public CudaSharp.nvcuda.CUgraphDeviceNode devNode;
+            public int deviceUpdatable;
+        }
+        public struct CUlaunchAttributeDim3
+        {
+            public uint x;
+            public uint y;
+            public uint z;
+        }
+        public enum CUlaunchAttributeID
+        {
+            CU_LAUNCH_ATTRIBUTE_IGNORE = 0,
+            CU_LAUNCH_ATTRIBUTE_ACCESS_POLICY_WINDOW = 1,
+            CU_LAUNCH_ATTRIBUTE_COOPERATIVE = 2,
+            CU_LAUNCH_ATTRIBUTE_SYNCHRONIZATION_POLICY = 3,
+            CU_LAUNCH_ATTRIBUTE_CLUSTER_DIMENSION = 4,
+            CU_LAUNCH_ATTRIBUTE_CLUSTER_SCHEDULING_POLICY_PREFERENCE = 5,
+            CU_LAUNCH_ATTRIBUTE_PROGRAMMATIC_STREAM_SERIALIZATION = 6,
+            CU_LAUNCH_ATTRIBUTE_PROGRAMMATIC_EVENT = 7,
+            CU_LAUNCH_ATTRIBUTE_PRIORITY = 8,
+            CU_LAUNCH_ATTRIBUTE_MEM_SYNC_DOMAIN_MAP = 9,
+            CU_LAUNCH_ATTRIBUTE_MEM_SYNC_DOMAIN = 10,
+            CU_LAUNCH_ATTRIBUTE_PREFERRED_CLUSTER_DIMENSION = 11,
+            CU_LAUNCH_ATTRIBUTE_LAUNCH_COMPLETION_EVENT = 12,
+            CU_LAUNCH_ATTRIBUTE_DEVICE_UPDATABLE_KERNEL_NODE = 13,
+            CU_LAUNCH_ATTRIBUTE_PREFERRED_SHARED_MEMORY_CARVEOUT = 14,
+            CU_LAUNCH_ATTRIBUTE_NVLINK_UTIL_CENTRIC_SCHEDULING = 16,
+        }
+        public struct CUlaunchAttributeLaunchCompletionEvent
+        {
+            public CudaSharp.nvcuda.CUevent event_;
+            public int flags;
+        }
+        public struct CUlaunchAttributeProgrammaticEvent
+        {
+            public CudaSharp.nvcuda.CUevent event_;
+            public int flags;
+            public int triggerAtBlockStart;
+        }
+        public struct CUlaunchAttributeValue
+        {
+            public CudaSharp.nvcuda.CUaccessPolicyWindow accessPolicyWindow;
+            public CudaSharp.nvcuda.CUlaunchAttributeDim3 clusterDim;
+            public CudaSharp.nvcuda.CUclusterSchedulingPolicy clusterSchedulingPolicyPreference;
+            public int cooperative;
+            public CudaSharp.nvcuda.CUlaunchAttributeDeviceUpdatableKernelNode deviceUpdatableKernelNode;
+            public CudaSharp.nvcuda.CUlaunchAttributeLaunchCompletionEvent launchCompletionEvent;
+            public CudaSharp.nvcuda.CUlaunchMemSyncDomain memSyncDomain;
+            public CudaSharp.nvcuda.CUlaunchMemSyncDomainMap memSyncDomainMap;
+            public uint nvlinkUtilCentricScheduling;
+            public CudaSharp.nvcuda.CUlaunchAttributeDim3 preferredClusterDim;
+            public int priority;
+            public CudaSharp.nvcuda.CUlaunchAttributeProgrammaticEvent programmaticEvent;
+            public int programmaticStreamSerializationAllowed;
+            public uint sharedMemCarveout;
+            public CudaSharp.nvcuda.CUsynchronizationPolicy syncPolicy;
+        }
+        public struct CUlaunchConfig
+        {
+            public unsafe CudaSharp.nvcuda.CUlaunchAttribute* attrs;
+            public uint blockDimX;
+            public uint blockDimY;
+            public uint blockDimZ;
+            public uint gridDimX;
+            public uint gridDimY;
+            public uint gridDimZ;
+            public CudaSharp.nvcuda.CUstream hStream;
+            public uint numAttrs;
+            public uint sharedMemBytes;
+        }
+        public enum CUlaunchMemSyncDomain
+        {
+            CU_LAUNCH_MEM_SYNC_DOMAIN_DEFAULT = 0,
+            CU_LAUNCH_MEM_SYNC_DOMAIN_REMOTE = 1,
+        }
+        public struct CUlaunchMemSyncDomainMap
+        {
+            public byte default_;
+            public byte remote;
+        }
+        public readonly struct CUlibrary : System.IEquatable<CudaSharp.nvcuda.CUlibrary>
+        {
+            public CUlibrary(nint Value) { }
+            public System.IntPtr Value { get; init; }
+        }
+        public enum CUlibraryOption
+        {
+            CU_LIBRARY_HOST_UNIVERSAL_FUNCTION_AND_DATA_TABLE = 0,
+            CU_LIBRARY_BINARY_IS_PRESERVED = 1,
+            CU_LIBRARY_NUM_OPTIONS = 2,
         }
         public enum CUlimit
         {
@@ -952,6 +1257,11 @@ namespace CudaSharp
             CU_LIMIT_DEV_RUNTIME_PENDING_LAUNCH_COUNT = 4,
             CU_LIMIT_MAX_L2_FETCH_GRANULARITY = 5,
             CU_LIMIT_PERSISTENT_L2_CACHE_SIZE = 6,
+        }
+        public readonly struct CUlinkState : System.IEquatable<CudaSharp.nvcuda.CUlinkState>
+        {
+            public CUlinkState(nint Value) { }
+            public System.IntPtr Value { get; init; }
         }
         public enum CUmemhostalloc_flags
         {
@@ -1063,6 +1373,12 @@ namespace CudaSharp
             CU_STREAM_MEM_OP_BARRIER = 6,
             CU_STREAM_MEM_OP_FLUSH_REMOTE_WRITES = 3,
         }
+        public enum CUstreamCaptureMode
+        {
+            CU_STREAM_CAPTURE_MODE_GLOBAL = 0,
+            CU_STREAM_CAPTURE_MODE_THREAD_LOCAL = 1,
+            CU_STREAM_CAPTURE_MODE_RELAXED = 2,
+        }
         public struct CUstreamFlushRemoteWrites_params
         {
             public uint flags;
@@ -1122,6 +1438,13 @@ namespace CudaSharp
             public CUsurfref(nint Value) { }
             public System.IntPtr Value { get; init; }
         }
+        public enum CUsynchronizationPolicy
+        {
+            CU_SYNC_POLICY_AUTO = 1,
+            CU_SYNC_POLICY_SPIN = 2,
+            CU_SYNC_POLICY_YIELD = 3,
+            CU_SYNC_POLICY_BLOCKING_SYNC = 4,
+        }
         public readonly struct CUtexObject : System.IEquatable<CudaSharp.nvcuda.CUtexObject>
         {
             public CUtexObject(ulong Value) { }
@@ -1150,6 +1473,8 @@ namespace CudaSharp
         [System.Runtime.CompilerServices.SkipLocalsInit]
         [System.Runtime.InteropServices.LibraryImport("nvrtc", StringMarshalling=System.Runtime.InteropServices.StringMarshalling.Utf8)]
         public static CudaSharp.nvrtc.nvrtcResult nvrtcAddNameExpression(CudaSharp.nvrtc.nvrtcProgram prog, string name_expression) { }
+        [System.Runtime.InteropServices.LibraryImport("nvrtc")]
+        public static unsafe CudaSharp.nvrtc.nvrtcResult nvrtcCompileProgram(CudaSharp.nvrtc.nvrtcProgram prog, int numOptions, byte** options) { }
         [System.Runtime.CompilerServices.SkipLocalsInit]
         [System.Runtime.InteropServices.LibraryImport("nvrtc", StringMarshalling=System.Runtime.InteropServices.StringMarshalling.Utf8)]
         public static CudaSharp.nvrtc.nvrtcResult nvrtcCompileProgram(CudaSharp.nvrtc.nvrtcProgram prog, int numOptions, in System.ReadOnlySpan<string> options) { }

@@ -34,6 +34,11 @@ if (TryRunSerialLaunchProfile(args))
     return;
 }
 
+if (TryRunStraightLineGraphProfile(args))
+{
+    return;
+}
+
 // Use args as switch to run BDN or not e.g. BDN only run when using script
 if (args.Length > 0)
 {
@@ -126,9 +131,10 @@ static bool TryRunSerialLaunchProfile(string[] args)
         "raw" => nameof(SerialLaunchKernelBench.cuLaunchKernel_Raw_SerialTripleBuffer_StreamSync),
         "graph" => nameof(SerialLaunchKernelBench.cuGraphLaunch_SerialTripleBuffer_StreamSync),
         "device-graph" => nameof(SerialLaunchKernelBench.cuGraphLaunch_DeviceLaunchCapableSerialTripleBuffer_StreamSync),
+        "device-launch" => nameof(SerialLaunchKernelBench.cuGraphLaunch_TrueDeviceTailLaunchSerialTripleBuffer_StreamSync),
         "captured" => nameof(SerialLaunchKernelBench.cuGraphLaunch_CapturedSerialTripleBuffer_StreamSync),
         _ => throw new ArgumentOutOfRangeException(nameof(args),
-            $"Unsupported serial profile variant '{variant}'. Use raw, graph, device-graph, or captured."),
+            $"Unsupported serial profile variant '{variant}'. Use raw, graph, device-graph, device-launch, or captured."),
     };
 
     Action run = benchmarkName switch
@@ -139,6 +145,8 @@ static bool TryRunSerialLaunchProfile(string[] args)
             bench.cuGraphLaunch_SerialTripleBuffer_StreamSync,
         nameof(SerialLaunchKernelBench.cuGraphLaunch_DeviceLaunchCapableSerialTripleBuffer_StreamSync) =>
             bench.cuGraphLaunch_DeviceLaunchCapableSerialTripleBuffer_StreamSync,
+        nameof(SerialLaunchKernelBench.cuGraphLaunch_TrueDeviceTailLaunchSerialTripleBuffer_StreamSync) =>
+            bench.cuGraphLaunch_TrueDeviceTailLaunchSerialTripleBuffer_StreamSync,
         nameof(SerialLaunchKernelBench.cuGraphLaunch_CapturedSerialTripleBuffer_StreamSync) =>
             bench.cuGraphLaunch_CapturedSerialTripleBuffer_StreamSync,
         _ => throw new UnreachableException(),
@@ -169,6 +177,35 @@ static bool TryRunSerialLaunchProfile(string[] args)
     {
         bench.Cleanup();
     }
+
+    return true;
+}
+
+static bool TryRunStraightLineGraphProfile(string[] args)
+{
+    if (!args.Contains("--profile-straight-line-graph", StringComparer.OrdinalIgnoreCase))
+    {
+        return false;
+    }
+
+    var graphLength = GetIntOption(args, "--graph-length", 256);
+    var warmupCount = GetIntOption(args, "--warmup", 10);
+    var repetitionCount = GetIntOption(args, "--repetitions", 1000);
+
+    Console.WriteLine(
+        $"Profiling straight-line graph with GraphLength={graphLength}, warmup={warmupCount}, repetitions={repetitionCount}.");
+
+    using var perf = new StraightLineGraphPerf(graphLength);
+    var metrics = perf.Measure(warmupCount, repetitionCount);
+
+    Console.WriteLine($"instantiation_ms={metrics.InstantiationMilliseconds:F3}");
+    Console.WriteLine($"upload_api_us={metrics.UploadApiMicroseconds:F3}");
+    Console.WriteLine($"upload_total_us={metrics.UploadTotalMicroseconds:F3}");
+    Console.WriteLine($"first_launch_api_us={metrics.FirstLaunchApiMicroseconds:F3}");
+    Console.WriteLine($"first_launch_total_us={metrics.FirstLaunchTotalMicroseconds:F3}");
+    Console.WriteLine($"repeat_launch_api_us={metrics.RepeatLaunchApiMicroseconds:F3}");
+    Console.WriteLine($"repeat_launch_total_us={metrics.RepeatLaunchTotalMicroseconds:F3}");
+    Console.WriteLine($"repeat_launch_device_us={metrics.RepeatLaunchDeviceMicroseconds:F3}");
 
     return true;
 }

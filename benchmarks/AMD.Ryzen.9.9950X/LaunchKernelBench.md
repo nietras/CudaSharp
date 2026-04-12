@@ -13,6 +13,6 @@ MinIterationCount=5  WarmupCount=6  RatioSD=0.02
 ```
 | Method                          | Mean     | Ratio | Allocated | Alloc Ratio |
 |-------------------------------- |---------:|------:|----------:|------------:|
-| cuLaunchKernel_Raw_CtxSync      | 25.18 μs |  1.00 |         - |          NA |
-| cuLaunchKernel_Overload_CtxSync | 25.20 μs |  1.00 |         - |          NA |
-| cuLaunchKernelEx_CtxSync        | 25.17 μs |  1.00 |         - |          NA |
+| cuLaunchKernel_Raw_CtxSync      | 25.35 μs |  1.00 |         - |          NA |
+| cuLaunchKernel_Overload_CtxSync | 25.47 μs |  1.01 |         - |          NA |
+| cuLaunchKernelEx_CtxSync        | 25.28 μs |  1.00 |         - |          NA |
