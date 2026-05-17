@@ -134,9 +134,9 @@ Benchmarks.
 
 | Method                      | Scope | Count | Mean               | Ratio         | Allocated | Alloc Ratio |
 |---------------------------- |------ |------ |-------------------:|--------------:|----------:|------------:|
-| CudaSharp_cuInit            | Test  | 25000 |         26.4834 ns |         1.000 |         - |          NA |
-| CudaSharp_CuInit_EnsureInit | Test  | 25000 |          0.0078 ns |         0.000 |         - |          NA |
-| CudaSharp_CtxCreateDestroy  | Test  | 25000 | 50,671,734.6939 ns | 1,913,350.578 |         - |          NA |
+| CudaSharp_cuInit            | Test  | 25000 |         27.0299 ns |         1.000 |         - |          NA |
+| CudaSharp_CuInit_EnsureInit | Test  | 25000 |          0.0047 ns |         0.000 |         - |          NA |
+| CudaSharp_CtxCreateDestroy  | Test  | 25000 | 51,875,839.5833 ns | 1,919,210.319 |         - |          NA |
 
 
 ## Example Catalogue

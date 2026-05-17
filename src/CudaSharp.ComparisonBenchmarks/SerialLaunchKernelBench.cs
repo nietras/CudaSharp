@@ -11,6 +11,8 @@ namespace CudaSharp.ComparisonBenchmarks;
 [BenchmarkCategory("LaunchKernel")]
 public unsafe class SerialLaunchKernelBench
 {
+    const string dumpRoot = "dumps";
+
     const string InitKernelName = "serial_init";
     const string KernelName = "serial_accumulate";
     const string DeviceLaunchSchedulerKernelName = "serial_device_graph_tail_launch";
@@ -83,7 +85,7 @@ public unsafe class SerialLaunchKernelBench
     public SerialLaunchKernelBench() => CuInit.EnsureInit();
 
     [Params(256)]
-    public int SerialLaunchCount { get; set; }
+    public int SerialLaunchCount { get; set; } = 256;
 
     [GlobalSetup]
     public void Setup()
@@ -265,23 +267,58 @@ public unsafe class SerialLaunchKernelBench
 
     void BuildTrueDeviceLaunchSchedulerGraph(CUdevice device)
     {
+        var compileMode = GetLinkedKernelCompileMode();
+        GetComputeCapability(device, out var major, out var minor);
+        var compileArchitecture = $"compute_{major}{minor}";
+        var linkArchitecture = $"sm_{major}{minor}";
+        var deviceRuntimeLibraryPath = GetCudaDeviceRuntimeLibraryPath();
         var image = CompileLinkedKernel(
             device,
             DeviceLaunchSchedulerSource,
             DeviceLaunchSchedulerKernelName,
-            GetCudaDeviceRuntimeLibraryPath());
+            deviceRuntimeLibraryPath);
 
-        var result = cuModuleLoadDataEx(out _deviceLaunchSchedulerModule, image, 0, null, null);
-        if (result.IsError())
+        try
         {
-            if (result == CUresult.CUDA_ERROR_INVALID_IMAGE)
+            LoadModule(out _deviceLaunchSchedulerModule, image, nameof(BuildTrueDeviceLaunchSchedulerGraph));
+        }
+        catch (InvalidOperationException exception) when (exception.Message.Contains(CUresult.CUDA_ERROR_INVALID_IMAGE.ToStringFast(), StringComparison.Ordinal))
+        {
+
+            cuDriverGetVersion(out var driverVersion).Ok();
+
+            Console.WriteLine(
+                $"Module load failed for {DeviceLaunchSchedulerKernelName} with {CUresult.CUDA_ERROR_INVALID_IMAGE.ToStringFast()}. " +
+                $"driverVersion={driverVersion}, CUDA_PATH='{Environment.GetEnvironmentVariable("CUDA_PATH")}', " +
+                $"compileMode={compileMode}, compileArchitecture={compileArchitecture}, linkArchitecture={linkArchitecture}, " +
+                $"deviceRuntimeLibraryPath='{deviceRuntimeLibraryPath}', artifactDumpRoot='{dumpRoot}'.");
+
+            if (dumpRoot != "<not set>")
             {
-                Console.WriteLine($"Module load failed for {DeviceLaunchSchedulerKernelName} with {result.ToStringFast()}. Skipping true device launch.");
+                var artifactPrefix = Path.Combine(dumpRoot, $"{GetSafeArtifactKernelName(DeviceLaunchSchedulerKernelName)}.{compileMode}");
+                Console.WriteLine(Path.GetFullPath(artifactPrefix));
+                Console.WriteLine(
+                    $"Inspect linked artifacts with: cuobjdump --dump-elf '{artifactPrefix}.cubin', " +
+                    $"cuobjdump --dump-sass '{artifactPrefix}.cubin', nvdisasm '{artifactPrefix}.cubin'.");
+                Console.WriteLine(
+                    $"Linked artifact files: '{artifactPrefix}.ptx', '{artifactPrefix}.cubin', '{artifactPrefix}.link.log'.");
+            }
+
+            if (exception.Message.Contains("No driver log output.", StringComparison.Ordinal))
+            {
+                Console.WriteLine(
+                    "The CUDA driver returned no module-load diagnostics, which usually points to a malformed or incompatible cubin, or a toolkit/driver mismatch.");
+            }
+
+            if (exception.Message.Contains("No driver log output.", StringComparison.Ordinal))
+            {
                 _deviceGraphLaunchSupported = false;
                 return;
             }
-            throw new InvalidOperationException($"Module load failed for {DeviceLaunchSchedulerKernelName} with {result.ToStringFast()}");
+
+            throw;
         }
+
         cuModuleGetFunction(out _deviceLaunchSchedulerFunction, _deviceLaunchSchedulerModule, DeviceLaunchSchedulerKernelName).Ok();
 
         _deviceLaunchSchedulerGraphExecArgument =
@@ -353,7 +390,8 @@ public unsafe class SerialLaunchKernelBench
         _graphOutputs = (CUdeviceptr*)NativeMemory.Alloc((nuint)SerialLaunchCount, (nuint)sizeof(CUdeviceptr));
         _graphAccumulator = (CUdeviceptr*)NativeMemory.Alloc(1, (nuint)sizeof(CUdeviceptr));
         _graphIncrements = (int*)NativeMemory.Alloc((nuint)SerialLaunchCount, (nuint)sizeof(int));
-        _graphKernelParams = (void**)NativeMemory.Alloc((nuint)(2 + ((SerialLaunchCount - 1) * 4)), (nuint)sizeof(void*));
+        var kernelParamsCount = (nuint)(2 + ((SerialLaunchCount - 1) * 4));
+        _graphKernelParams = (void**)NativeMemory.Alloc(kernelParamsCount, (nuint)sizeof(void*));
 
         *_graphAccumulator = _accumulator;
 
@@ -909,14 +947,23 @@ public unsafe class SerialLaunchKernelBench
         byte[] cubin,
         string linkLog)
     {
-        var dumpRoot = Environment.GetEnvironmentVariable("CUDASHARP_DUMP_LINKED_KERNELS");
-        if (string.IsNullOrWhiteSpace(dumpRoot))
-        {
-            return;
-        }
-
         Directory.CreateDirectory(dumpRoot);
 
+        var artifactPrefix = GetLinkedKernelArtifactPrefix(dumpRoot, kernelName, compileMode);
+
+        File.WriteAllBytes($"{artifactPrefix}.ptx", ptx);
+        File.WriteAllBytes($"{artifactPrefix}.cubin", cubin);
+        File.WriteAllText($"{artifactPrefix}.link.log", linkLog);
+    }
+
+    static string GetLinkedKernelArtifactPrefix(string dumpRoot, string kernelName, string compileMode)
+    {
+        var safeKernelName = GetSafeArtifactKernelName(kernelName);
+        return Path.Combine(dumpRoot, $"{safeKernelName}.{compileMode}");
+    }
+
+    static string GetSafeArtifactKernelName(string kernelName)
+    {
         var safeKernelNameChars = kernelName.ToCharArray();
         var invalidFileNameChars = Path.GetInvalidFileNameChars();
         for (var i = 0; i < safeKernelNameChars.Length; i++)
@@ -927,12 +974,7 @@ public unsafe class SerialLaunchKernelBench
             }
         }
 
-        var safeKernelName = new string(safeKernelNameChars);
-        var artifactPrefix = Path.Combine(dumpRoot, $"{safeKernelName}.{compileMode}");
-
-        File.WriteAllBytes($"{artifactPrefix}.ptx", ptx);
-        File.WriteAllBytes($"{artifactPrefix}.cubin", cubin);
-        File.WriteAllText($"{artifactPrefix}.link.log", linkLog);
+        return new string(safeKernelNameChars);
     }
 
     static string GetCudaDeviceRuntimeLibraryPath()

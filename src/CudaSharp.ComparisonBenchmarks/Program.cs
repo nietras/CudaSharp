@@ -29,6 +29,13 @@ Action<string> log = t => { Console.WriteLine(t); Trace.WriteLine(t); };
 
 log($"{Environment.Version} args: {args.Length} versions: {GetVersions()}");
 
+var bench = new SerialLaunchKernelBench
+{
+};
+bench.Setup();
+bench.cuGraphLaunch_TrueDeviceTailLaunchSerialTripleBuffer_StreamSync();
+
+
 if (TryRunSerialLaunchProfile(args))
 {
     return;
