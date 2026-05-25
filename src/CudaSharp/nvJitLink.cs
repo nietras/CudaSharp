@@ -1,4 +1,4 @@
-namespace CudaSharp;
+﻿namespace CudaSharp;
 
 /// <summary>
 /// NVIDIA JIT Link API.

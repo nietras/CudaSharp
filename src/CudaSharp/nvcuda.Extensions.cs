@@ -123,7 +123,7 @@ public static partial class nvcuda
         where T5 : unmanaged
     {
         var kernelParams = stackalloc void*[]
-        { &arg1,&arg2, &arg3, &arg4, &arg5 };
+        { &arg1, &arg2, &arg3, &arg4, &arg5 };
         return cuLaunchKernel(function,
             gridDimX, gridDimY, gridDimZ,
             blockDimX, blockDimY, blockDimZ,
