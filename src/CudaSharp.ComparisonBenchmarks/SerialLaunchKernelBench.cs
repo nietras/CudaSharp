@@ -117,12 +117,17 @@ public unsafe class SerialLaunchKernelBench
     CUmodule _deviceLaunchSchedulerModule;
     CUlibrary _deviceLaunchSchedulerLibrary;
     CUfunction _deviceLaunchSchedulerFunction;
+    CUmodule _deviceFireAndForgetSchedulerModule;
+    CUlibrary _deviceFireAndForgetSchedulerLibrary;
+    CUfunction _deviceFireAndForgetSchedulerFunction;
     CUstream _stream;
     CUgraph _graph;
     CUgraphExec _graphExec;
     CUgraphExec _deviceLaunchGraphExec;
     CUgraph _trueDeviceLaunchGraph;
     CUgraphExec _trueDeviceLaunchGraphExec;
+    CUgraph _trueDeviceFireAndForgetLaunchGraph;
+    CUgraphExec _trueDeviceFireAndForgetLaunchGraphExec;
     CUgraph _capturedGraph;
     CUgraphExec _capturedGraphExec;
     CUdeviceptr _buffer0;
@@ -138,6 +143,7 @@ public unsafe class SerialLaunchKernelBench
     CUgraphExec* _deviceLaunchSchedulerGraphExecArgument;
     CUdeviceptr* _deviceLaunchSchedulerStatusArgument;
     void** _deviceLaunchSchedulerKernelParams;
+    void** _deviceFireAndForgetSchedulerKernelParams;
 
     bool _deviceGraphLaunchSupported;
 
@@ -190,6 +196,7 @@ public unsafe class SerialLaunchKernelBench
         if (_deviceGraphLaunchSupported)
         {
             BuildTrueDeviceLaunchSchedulerGraph(device);
+            BuildTrueDeviceFireAndForgetSchedulerGraph(device);
         }
         BuildCapturedGraph();
         cuGraphUpload(_graphExec, _stream).Ok();
@@ -197,6 +204,7 @@ public unsafe class SerialLaunchKernelBench
         if (_deviceGraphLaunchSupported)
         {
             cuGraphUpload(_trueDeviceLaunchGraphExec, _stream).Ok();
+            cuGraphUpload(_trueDeviceFireAndForgetLaunchGraphExec, _stream).Ok();
         }
         cuGraphUpload(_capturedGraphExec, _stream).Ok();
         cuStreamSynchronize(_stream).Ok();
@@ -221,6 +229,12 @@ public unsafe class SerialLaunchKernelBench
 
         if (_trueDeviceLaunchGraph.Value != IntPtr.Zero)
         { cuGraphDestroy(_trueDeviceLaunchGraph).Ok(); }
+
+        if (_trueDeviceFireAndForgetLaunchGraphExec.Value != IntPtr.Zero)
+        { cuGraphExecDestroy(_trueDeviceFireAndForgetLaunchGraphExec).Ok(); }
+
+        if (_trueDeviceFireAndForgetLaunchGraph.Value != IntPtr.Zero)
+        { cuGraphDestroy(_trueDeviceFireAndForgetLaunchGraph).Ok(); }
 
         if (_graphExec.Value != IntPtr.Zero)
         { cuGraphExecDestroy(_graphExec).Ok(); }
@@ -250,6 +264,11 @@ public unsafe class SerialLaunchKernelBench
         { cuLibraryUnload(_deviceLaunchSchedulerLibrary).Ok(); }
         else if (_deviceLaunchSchedulerModule.Value != IntPtr.Zero)
         { cuModuleUnload(_deviceLaunchSchedulerModule).Ok(); }
+
+        if (_deviceFireAndForgetSchedulerLibrary.Value != IntPtr.Zero)
+        { cuLibraryUnload(_deviceFireAndForgetSchedulerLibrary).Ok(); }
+        else if (_deviceFireAndForgetSchedulerModule.Value != IntPtr.Zero)
+        { cuModuleUnload(_deviceFireAndForgetSchedulerModule).Ok(); }
 
         if (_module.Value != IntPtr.Zero)
         { cuModuleUnload(_module).Ok(); }
@@ -291,6 +310,17 @@ public unsafe class SerialLaunchKernelBench
             throw new PlatformNotSupportedException("Device-side graph launch is not supported on this platform/configuration (e.g., Windows WDDM driver mode).");
         }
         cuGraphLaunch(_trueDeviceLaunchGraphExec, _stream).Ok();
+        cuStreamSynchronize(_stream).Ok();
+    }
+
+    [Benchmark]
+    public void cuGraphLaunch_TrueDeviceFireAndForgetSerialTripleBuffer_StreamSync()
+    {
+        if (!_deviceGraphLaunchSupported)
+        {
+            throw new PlatformNotSupportedException("Device-side graph launch is not supported on this platform/configuration (e.g., Windows WDDM driver mode).");
+        }
+        cuGraphLaunch(_trueDeviceFireAndForgetLaunchGraphExec, _stream).Ok();
         cuStreamSynchronize(_stream).Ok();
     }
 
@@ -646,6 +676,15 @@ public unsafe class SerialLaunchKernelBench
             ValidateResults(nameof(cuGraphLaunch_TrueDeviceTailLaunchSerialTripleBuffer_StreamSync));
         }
 
+        ResetDeviceLaunchStatus();
+        if (_deviceGraphLaunchSupported)
+        {
+            cuGraphLaunch(_trueDeviceFireAndForgetLaunchGraphExec, _stream).Ok();
+            cuStreamSynchronize(_stream).Ok();
+            ValidateDeviceLaunchStatus(nameof(cuGraphLaunch_TrueDeviceFireAndForgetSerialTripleBuffer_StreamSync));
+            ValidateResults(nameof(cuGraphLaunch_TrueDeviceFireAndForgetSerialTripleBuffer_StreamSync));
+        }
+
         cuGraphLaunch(_capturedGraphExec, _stream).Ok();
         cuStreamSynchronize(_stream).Ok();
         ValidateResults(nameof(cuGraphLaunch_CapturedSerialTripleBuffer_StreamSync));
@@ -736,6 +775,12 @@ public unsafe class SerialLaunchKernelBench
         {
             NativeMemory.Free(_deviceLaunchSchedulerKernelParams);
             _deviceLaunchSchedulerKernelParams = null;
+        }
+
+        if (_deviceFireAndForgetSchedulerKernelParams != null)
+        {
+            NativeMemory.Free(_deviceFireAndForgetSchedulerKernelParams);
+            _deviceFireAndForgetSchedulerKernelParams = null;
         }
     }
 
@@ -1245,5 +1290,61 @@ public unsafe class SerialLaunchKernelBench
         var logBuffer = new byte[logSize];
         nvrtcGetProgramLog(program, logBuffer).Ok();
         return Encoding.UTF8.GetString(logBuffer).TrimEnd('\0');
+    }
+
+    void BuildTrueDeviceFireAndForgetSchedulerGraph(CUdevice device)
+    {
+        var compileMode = GetLinkedKernelCompileMode();
+        var deviceRuntimeLibraryPath = GetCudaDeviceRuntimeLibraryPath();
+        var image = CompileLinkedKernel(
+            device,
+            DeviceLaunchSchedulerFireAndForgetSource,
+            DeviceLaunchSchedulerFireAndForgetKernelName,
+            deviceRuntimeLibraryPath,
+            compileMode);
+
+        LoadLibraryModule(out _deviceFireAndForgetSchedulerModule, out _deviceFireAndForgetSchedulerLibrary, image, nameof(BuildTrueDeviceFireAndForgetSchedulerGraph));
+        cuModuleGetFunction(out _deviceFireAndForgetSchedulerFunction, _deviceFireAndForgetSchedulerModule, DeviceLaunchSchedulerFireAndForgetKernelName).Ok();
+
+        _deviceFireAndForgetSchedulerKernelParams =
+            (void**)NativeMemory.Alloc(2, (nuint)sizeof(void*));
+
+        _deviceFireAndForgetSchedulerKernelParams[0] = _deviceLaunchSchedulerGraphExecArgument;
+        _deviceFireAndForgetSchedulerKernelParams[1] = _deviceLaunchSchedulerStatusArgument;
+
+        cuGraphCreate(out _trueDeviceFireAndForgetLaunchGraph, 0).Ok();
+
+        var nodeParams = new CUDA_KERNEL_NODE_PARAMS
+        {
+            func = _deviceFireAndForgetSchedulerFunction,
+            gridDimX = 1,
+            gridDimY = 1,
+            gridDimZ = 1,
+            blockDimX = 1,
+            blockDimY = 1,
+            blockDimZ = 1,
+            sharedMemBytes = 0,
+            kernelParams = (IntPtr)_deviceFireAndForgetSchedulerKernelParams,
+            extra = IntPtr.Zero,
+        };
+
+        cuGraphAddKernelNode(out _,
+            _trueDeviceFireAndForgetLaunchGraph,
+            [],
+            0,
+            nodeParams).Ok();
+
+        Span<byte> logBuffer = stackalloc byte[2048];
+        var instantiateResult = cuGraphInstantiate(out _trueDeviceFireAndForgetLaunchGraphExec,
+            _trueDeviceFireAndForgetLaunchGraph,
+            out var errorNode,
+            logBuffer,
+            (nuint)logBuffer.Length);
+        if (instantiateResult.IsError())
+        {
+            var log = Encoding.UTF8.GetString(logBuffer).TrimEnd('\0');
+            throw new InvalidOperationException(
+                $"True device fire-and-forget scheduler graph instantiation failed with {instantiateResult.ToStringFast()} at node {errorNode.Value}:\n{log}");
+        }
     }
 }

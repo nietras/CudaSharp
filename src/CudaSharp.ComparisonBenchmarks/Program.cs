@@ -134,9 +134,10 @@ static bool TryRunSerialLaunchProfile(string[] args)
         "graph" => nameof(SerialLaunchKernelBench.cuGraphLaunch_SerialTripleBuffer_StreamSync),
         "device-graph" => nameof(SerialLaunchKernelBench.cuGraphLaunch_DeviceLaunchCapableSerialTripleBuffer_StreamSync),
         "device-launch" => nameof(SerialLaunchKernelBench.cuGraphLaunch_TrueDeviceTailLaunchSerialTripleBuffer_StreamSync),
+        "device-fire-and-forget" => nameof(SerialLaunchKernelBench.cuGraphLaunch_TrueDeviceFireAndForgetSerialTripleBuffer_StreamSync),
         "captured" => nameof(SerialLaunchKernelBench.cuGraphLaunch_CapturedSerialTripleBuffer_StreamSync),
         _ => throw new ArgumentOutOfRangeException(nameof(args),
-            $"Unsupported serial profile variant '{variant}'. Use raw, graph, device-graph, device-launch, or captured."),
+            $"Unsupported serial profile variant '{variant}'. Use raw, graph, device-graph, device-launch, device-fire-and-forget, or captured."),
     };
 
     Action run = benchmarkName switch
@@ -149,6 +150,8 @@ static bool TryRunSerialLaunchProfile(string[] args)
             bench.cuGraphLaunch_DeviceLaunchCapableSerialTripleBuffer_StreamSync,
         nameof(SerialLaunchKernelBench.cuGraphLaunch_TrueDeviceTailLaunchSerialTripleBuffer_StreamSync) =>
             bench.cuGraphLaunch_TrueDeviceTailLaunchSerialTripleBuffer_StreamSync,
+        nameof(SerialLaunchKernelBench.cuGraphLaunch_TrueDeviceFireAndForgetSerialTripleBuffer_StreamSync) =>
+            bench.cuGraphLaunch_TrueDeviceFireAndForgetSerialTripleBuffer_StreamSync,
         nameof(SerialLaunchKernelBench.cuGraphLaunch_CapturedSerialTripleBuffer_StreamSync) =>
             bench.cuGraphLaunch_CapturedSerialTripleBuffer_StreamSync,
         _ => throw new UnreachableException(),

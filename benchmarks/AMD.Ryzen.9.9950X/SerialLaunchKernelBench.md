@@ -11,10 +11,11 @@ Toolchain=net10.0  IterationTime=350ms  MaxIterationCount=15
 MinIterationCount=5  WarmupCount=6  
 
 ```
-| Method                                                          | SerialLaunchCount | Mean     | Ratio | Allocated | Alloc Ratio |
-|---------------------------------------------------------------- |------------------ |---------:|------:|----------:|------------:|
-| cuLaunchKernel_Raw_SerialTripleBuffer_StreamSync                | 256               | 815.6 μs |  1.00 |         - |          NA |
-| cuGraphLaunch_SerialTripleBuffer_StreamSync                     | 256               | 256.3 μs |  0.31 |         - |          NA |
-| cuGraphLaunch_DeviceLaunchCapableSerialTripleBuffer_StreamSync  | 256               | 216.7 μs |  0.27 |         - |          NA |
-| cuGraphLaunch_TrueDeviceTailLaunchSerialTripleBuffer_StreamSync | 256               | 225.2 μs |  0.28 |         - |          NA |
-| cuGraphLaunch_CapturedSerialTripleBuffer_StreamSync             | 256               | 256.1 μs |  0.31 |         - |          NA |
+| Method                                                             | SerialLaunchCount | Mean     | Ratio | Allocated | Alloc Ratio |
+|------------------------------------------------------------------- |------------------ |---------:|------:|----------:|------------:|
+| cuLaunchKernel_Raw_SerialTripleBuffer_StreamSync                   | 256               | 813.3 μs |  1.00 |         - |          NA |
+| cuGraphLaunch_SerialTripleBuffer_StreamSync                        | 256               | 257.3 μs |  0.32 |         - |          NA |
+| cuGraphLaunch_DeviceLaunchCapableSerialTripleBuffer_StreamSync     | 256               | 220.9 μs |  0.27 |         - |          NA |
+| cuGraphLaunch_TrueDeviceTailLaunchSerialTripleBuffer_StreamSync    | 256               | 223.1 μs |  0.27 |         - |          NA |
+| cuGraphLaunch_TrueDeviceFireAndForgetSerialTripleBuffer_StreamSync | 256               | 218.7 μs |  0.27 |         - |          NA |
+| cuGraphLaunch_CapturedSerialTripleBuffer_StreamSync                | 256               | 255.7 μs |  0.31 |         - |          NA |
