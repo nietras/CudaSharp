@@ -11,11 +11,31 @@ namespace CudaSharp.ComparisonBenchmarks;
 [BenchmarkCategory("LaunchKernel")]
 public unsafe class SerialLaunchKernelBench
 {
+    [DllImport("cudart64_13.dll", EntryPoint = "cudaFree", CallingConvention = CallingConvention.Cdecl)]
+    static extern int cudaFree(IntPtr devPtr);
+
+    [DllImport("nvcuda.dll", EntryPoint = "cuCtxCreate_v2", CallingConvention = CallingConvention.Cdecl)]
+    static extern CUresult cuCtxCreate_v2(out CUcontext pctx, CUctx_flags flags, CUdevice dev);
+
+    [DllImport("nvcuda.dll", EntryPoint = "cuMemAlloc_v2", CallingConvention = CallingConvention.Cdecl)]
+    static extern CUresult cuMemAlloc_v2(out CUdeviceptr dptr, nuint bytesize);
+
+    [DllImport("nvcuda.dll", EntryPoint = "cuMemFree_v2", CallingConvention = CallingConvention.Cdecl)]
+    static extern CUresult cuMemFree_v2(CUdeviceptr dptr);
+
+    [DllImport("nvcuda.dll", EntryPoint = "cuMemcpyDtoH_v2", CallingConvention = CallingConvention.Cdecl)]
+    static extern CUresult cuMemcpyDtoH_v2(IntPtr dstHost, CUdeviceptr srcDevice, nuint bytesize);
+
+    [DllImport("nvcuda.dll", EntryPoint = "cuMemsetD32_v2", CallingConvention = CallingConvention.Cdecl)]
+    static extern CUresult cuMemsetD32_v2(CUdeviceptr dstDevice, uint ui, nuint N);
+
     const string dumpRoot = "dumps";
 
     const string InitKernelName = "serial_init";
     const string KernelName = "serial_accumulate";
     const string DeviceLaunchSchedulerKernelName = "serial_device_graph_tail_launch";
+    const string DeviceLaunchSchedulerFireAndForgetKernelName = "serial_device_graph_fire_and_forget_launch";
+    const string DeviceLaunchSchedulerNoOpKernelName = "serial_device_graph_tail_launch_noop";
     const string KernelSource =
         """
         extern "C" __global__ void serial_init(
@@ -39,6 +59,7 @@ public unsafe class SerialLaunchKernelBench
         """;
     const string DeviceLaunchSchedulerSource =
         """
+        #include <cuda_device_runtime_api.h>
         extern "C" __global__ void serial_device_graph_tail_launch(
             cudaGraphExec_t graphExec,
             int* launchStatus)
@@ -51,12 +72,50 @@ public unsafe class SerialLaunchKernelBench
             launchStatus[0] = (int)cudaGraphLaunch(graphExec, cudaStreamGraphTailLaunch);
         }
         """;
+    const string DeviceLaunchSchedulerFireAndForgetSource =
+        """
+        #include <cuda_device_runtime_api.h>
+        extern "C" __global__ void serial_device_graph_fire_and_forget_launch(
+            cudaGraphExec_t graphExec,
+            int* launchStatus)
+        {
+            if ((blockIdx.x | blockIdx.y | blockIdx.z | threadIdx.x | threadIdx.y | threadIdx.z) != 0)
+            {
+                return;
+            }
 
+            launchStatus[0] = (int)cudaGraphLaunch(graphExec, cudaStreamGraphFireAndForget);
+        }
+        """;
+    const string DeviceLaunchSchedulerNoOpSource =
+        """
+        #include <cuda_device_runtime_api.h>
+        extern "C" __global__ void serial_device_graph_tail_launch_noop(
+            cudaGraphExec_t graphExec,
+            int* launchStatus)
+        {
+            if ((blockIdx.x | blockIdx.y | blockIdx.z | threadIdx.x | threadIdx.y | threadIdx.z) != 0)
+            {
+                return;
+            }
+
+            if (graphExec == nullptr)
+            {
+                launchStatus[0] = -1;
+                return;
+            }
+
+            launchStatus[0] = 0;
+        }
+        """;
+
+    CUdevice _device;
     CUcontext _context;
     CUmodule _module;
     CUfunction _initFunction;
     CUfunction _function;
     CUmodule _deviceLaunchSchedulerModule;
+    CUlibrary _deviceLaunchSchedulerLibrary;
     CUfunction _deviceLaunchSchedulerFunction;
     CUstream _stream;
     CUgraph _graph;
@@ -90,25 +149,42 @@ public unsafe class SerialLaunchKernelBench
     [GlobalSetup]
     public void Setup()
     {
+        try
+        {
+            cudaFree(IntPtr.Zero);
+            Console.WriteLine("[DEBUG] CUDA Runtime initialized successfully.");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[WARNING] Failed to load CUDA Runtime DLL: {ex.Message}");
+        }
+
         cuDeviceGet(out var device, 0).Ok();
+        _device = device;
         cuDeviceComputeCapability(out var major, out var minor, device).Ok();
         Console.WriteLine($"DEVICE ARCH: sm_{major}{minor}");
         _deviceGraphLaunchSupported = major >= 9;
 
-        cuCtxCreate(out _context, CUctx_flags.CU_CTX_SCHED_SPIN, device).Ok();
+        cuCtxCreate_v2(out _context, CUctx_flags.CU_CTX_SCHED_SPIN, device).Ok();
         cuCtxSetCurrent(_context).Ok();
         cuStreamCreate(out _stream, 0).Ok();
 
         var image = CompileKernel(device, KernelSource, KernelName);
+        Console.WriteLine($"[DEBUG] Kernel compiled.");
         LoadModule(out _module, image, nameof(SerialLaunchKernelBench));
+        Console.WriteLine($"[DEBUG] Module loaded: {_module.Value}");
         cuModuleGetFunction(out _initFunction, _module, InitKernelName).Ok();
         cuModuleGetFunction(out _function, _module, KernelName).Ok();
+        Console.WriteLine($"[DEBUG] Functions obtained.");
 
         const nuint bufferSize = sizeof(int);
-        cuMemAlloc(out _buffer0, bufferSize).Ok();
-        cuMemAlloc(out _buffer1, bufferSize).Ok();
-        cuMemAlloc(out _accumulator, bufferSize).Ok();
-        cuMemAlloc(out _deviceLaunchStatus, bufferSize).Ok();
+        cuCtxGetCurrent(out var activeCtx).Ok();
+        Console.WriteLine($"[DEBUG] Active context before alloc: {activeCtx.Value}");
+        Console.WriteLine($"[DEBUG] Allocating buffer0...");
+        cuMemAlloc_v2(out _buffer0, bufferSize).Ok();
+        cuMemAlloc_v2(out _buffer1, bufferSize).Ok();
+        cuMemAlloc_v2(out _accumulator, bufferSize).Ok();
+        cuMemAlloc_v2(out _deviceLaunchStatus, bufferSize).Ok();
 
         BuildSerialGraph();
         if (_deviceGraphLaunchSupported)
@@ -159,25 +235,31 @@ public unsafe class SerialLaunchKernelBench
         { cuStreamDestroy(_stream).Ok(); }
 
         if (_buffer0.Value != IntPtr.Zero)
-        { cuMemFree(_buffer0).Ok(); }
+        { cuMemFree_v2(_buffer0).Ok(); }
 
         if (_buffer1.Value != IntPtr.Zero)
-        { cuMemFree(_buffer1).Ok(); }
+        { cuMemFree_v2(_buffer1).Ok(); }
 
         if (_accumulator.Value != IntPtr.Zero)
-        { cuMemFree(_accumulator).Ok(); }
+        { cuMemFree_v2(_accumulator).Ok(); }
 
         if (_deviceLaunchStatus.Value != IntPtr.Zero)
-        { cuMemFree(_deviceLaunchStatus).Ok(); }
+        { cuMemFree_v2(_deviceLaunchStatus).Ok(); }
 
-        if (_deviceLaunchSchedulerModule.Value != IntPtr.Zero)
+        if (_deviceLaunchSchedulerLibrary.Value != IntPtr.Zero)
+        { cuLibraryUnload(_deviceLaunchSchedulerLibrary).Ok(); }
+        else if (_deviceLaunchSchedulerModule.Value != IntPtr.Zero)
         { cuModuleUnload(_deviceLaunchSchedulerModule).Ok(); }
 
         if (_module.Value != IntPtr.Zero)
         { cuModuleUnload(_module).Ok(); }
 
         FreeGraphStorage();
-        cuCtxDestroy(_context).Ok();
+        if (_context.Value != IntPtr.Zero)
+        {
+            cuCtxSetCurrent(default).Ok();
+            cuCtxDestroy(_context).Ok();
+        }
     }
 
     [Benchmark(Baseline = true)]
@@ -204,7 +286,10 @@ public unsafe class SerialLaunchKernelBench
     [Benchmark]
     public void cuGraphLaunch_TrueDeviceTailLaunchSerialTripleBuffer_StreamSync()
     {
-        if (!_deviceGraphLaunchSupported) { return; }
+        if (!_deviceGraphLaunchSupported)
+        {
+            throw new PlatformNotSupportedException("Device-side graph launch is not supported on this platform/configuration (e.g., Windows WDDM driver mode).");
+        }
         cuGraphLaunch(_trueDeviceLaunchGraphExec, _stream).Ok();
         cuStreamSynchronize(_stream).Ok();
     }
@@ -229,13 +314,18 @@ public unsafe class SerialLaunchKernelBench
         var input = _buffer1;
         var output = _buffer0;
         var increment = 0;
-        var kernelParams = stackalloc void*[] { &input, &output, &accumulator, &increment };
+        var kernelParams = stackalloc void*[4];
 
         for (var i = 1; i < SerialLaunchCount; i++)
         {
             input = (i & 1) == 1 ? _buffer1 : _buffer0;
             output = (i & 1) == 1 ? _buffer0 : _buffer1;
             increment = i + 1;
+
+            kernelParams[0] = &input;
+            kernelParams[1] = &output;
+            kernelParams[2] = &accumulator;
+            kernelParams[3] = &increment;
 
             cuLaunchKernel(_function,
                 1, 1, 1,
@@ -272,37 +362,72 @@ public unsafe class SerialLaunchKernelBench
         var compileArchitecture = $"compute_{major}{minor}";
         var linkArchitecture = $"sm_{major}{minor}";
         var deviceRuntimeLibraryPath = GetCudaDeviceRuntimeLibraryPath();
+        var artifactPrefix = GetFullLinkedKernelArtifactPrefix(DeviceLaunchSchedulerKernelName, compileMode);
         var image = CompileLinkedKernel(
             device,
             DeviceLaunchSchedulerSource,
             DeviceLaunchSchedulerKernelName,
-            deviceRuntimeLibraryPath);
+            deviceRuntimeLibraryPath,
+            compileMode);
 
         try
         {
-            LoadModule(out _deviceLaunchSchedulerModule, image, nameof(BuildTrueDeviceLaunchSchedulerGraph));
+            LoadLibraryModule(out _deviceLaunchSchedulerModule, out _deviceLaunchSchedulerLibrary, image, nameof(BuildTrueDeviceLaunchSchedulerGraph));
         }
         catch (InvalidOperationException exception) when (exception.Message.Contains(CUresult.CUDA_ERROR_INVALID_IMAGE.ToStringFast(), StringComparison.Ordinal))
         {
-
             cuDriverGetVersion(out var driverVersion).Ok();
+            var alternateCompileMode = GetAlternateLinkedKernelCompileMode(compileMode);
+            var alternateProblematicProbeDiagnostic = ProbeLinkedKernelLoad(
+                device,
+                DeviceLaunchSchedulerSource,
+                DeviceLaunchSchedulerKernelName,
+                deviceRuntimeLibraryPath,
+                alternateCompileMode);
+            var noOpSameModeProbeDiagnostic = ProbeLinkedKernelLoad(
+                device,
+                DeviceLaunchSchedulerNoOpSource,
+                DeviceLaunchSchedulerNoOpKernelName,
+                deviceRuntimeLibraryPath,
+                compileMode);
+            var noOpAlternateModeProbeDiagnostic = ProbeLinkedKernelLoad(
+                device,
+                DeviceLaunchSchedulerNoOpSource,
+                DeviceLaunchSchedulerNoOpKernelName,
+                deviceRuntimeLibraryPath,
+                alternateCompileMode);
+            var fireAndForgetSameModeProbeDiagnostic = ProbeLinkedKernelLoad(
+                device,
+                DeviceLaunchSchedulerFireAndForgetSource,
+                DeviceLaunchSchedulerFireAndForgetKernelName,
+                deviceRuntimeLibraryPath,
+                compileMode);
+            var fireAndForgetAlternateModeProbeDiagnostic = ProbeLinkedKernelLoad(
+                device,
+                DeviceLaunchSchedulerFireAndForgetSource,
+                DeviceLaunchSchedulerFireAndForgetKernelName,
+                deviceRuntimeLibraryPath,
+                alternateCompileMode);
 
             Console.WriteLine(
                 $"Module load failed for {DeviceLaunchSchedulerKernelName} with {CUresult.CUDA_ERROR_INVALID_IMAGE.ToStringFast()}. " +
                 $"driverVersion={driverVersion}, CUDA_PATH='{Environment.GetEnvironmentVariable("CUDA_PATH")}', " +
                 $"compileMode={compileMode}, compileArchitecture={compileArchitecture}, linkArchitecture={linkArchitecture}, " +
                 $"deviceRuntimeLibraryPath='{deviceRuntimeLibraryPath}', artifactDumpRoot='{dumpRoot}'.");
-
-            if (dumpRoot != "<not set>")
-            {
-                var artifactPrefix = Path.Combine(dumpRoot, $"{GetSafeArtifactKernelName(DeviceLaunchSchedulerKernelName)}.{compileMode}");
-                Console.WriteLine(Path.GetFullPath(artifactPrefix));
-                Console.WriteLine(
-                    $"Inspect linked artifacts with: cuobjdump --dump-elf '{artifactPrefix}.cubin', " +
-                    $"cuobjdump --dump-sass '{artifactPrefix}.cubin', nvdisasm '{artifactPrefix}.cubin'.");
-                Console.WriteLine(
-                    $"Linked artifact files: '{artifactPrefix}.ptx', '{artifactPrefix}.cubin', '{artifactPrefix}.link.log'.");
-            }
+            Console.WriteLine($"Module load exception: {exception.Message}");
+            Console.WriteLine($"Primary linked artifact prefix: '{artifactPrefix}'");
+            Console.WriteLine(
+                $"Inspect linked artifacts with: cuobjdump --dump-elf '{artifactPrefix}.cubin', " +
+                $"cuobjdump --dump-sass '{artifactPrefix}.cubin', nvdisasm '{artifactPrefix}.cubin'.");
+            Console.WriteLine(
+                $"Linked artifact files: '{artifactPrefix}.ptx', '{artifactPrefix}.cubin', '{artifactPrefix}.link.log'.");
+            Console.WriteLine(
+                "Probe interpretation: no-op success means linked cudadevrt images load; fire-and-forget success isolates the failure to tail launch; fire-and-forget failure means any device-side cudaGraphLaunch is being rejected.");
+            Console.WriteLine(alternateProblematicProbeDiagnostic);
+            Console.WriteLine(noOpSameModeProbeDiagnostic);
+            Console.WriteLine(noOpAlternateModeProbeDiagnostic);
+            Console.WriteLine(fireAndForgetSameModeProbeDiagnostic);
+            Console.WriteLine(fireAndForgetAlternateModeProbeDiagnostic);
 
             if (exception.Message.Contains("No driver log output.", StringComparison.Ordinal))
             {
@@ -395,9 +520,9 @@ public unsafe class SerialLaunchKernelBench
 
         *_graphAccumulator = _accumulator;
 
-        var initOutput = _buffer1;
+        _graphOutputs[0] = _buffer1;
         var initKernelParams = _graphKernelParams;
-        initKernelParams[0] = &initOutput;
+        initKernelParams[0] = &_graphOutputs[0];
         initKernelParams[1] = _graphAccumulator;
 
         var initNodeParams = new CUDA_KERNEL_NODE_PARAMS
@@ -527,12 +652,12 @@ public unsafe class SerialLaunchKernelBench
     }
 
     void ResetDeviceLaunchStatus() =>
-        cuMemsetD32(_deviceLaunchStatus, unchecked((uint)-1), 1).Ok();
+        cuMemsetD32_v2(_deviceLaunchStatus, unchecked((uint)-1), 1).Ok();
 
     void ValidateDeviceLaunchStatus(string benchmarkName)
     {
         var launchStatus = -1;
-        cuMemcpyDtoH((IntPtr)(&launchStatus), _deviceLaunchStatus, sizeof(int)).Ok();
+        cuMemcpyDtoH_v2((IntPtr)(&launchStatus), _deviceLaunchStatus, sizeof(int)).Ok();
 
         if (launchStatus != 0)
         {
@@ -549,8 +674,8 @@ public unsafe class SerialLaunchKernelBench
         var actualState = 0;
         var actualAccumulator = 0;
 
-        cuMemcpyDtoH((IntPtr)(&actualState), GetFinalStateBuffer(), sizeof(int)).Ok();
-        cuMemcpyDtoH((IntPtr)(&actualAccumulator), _accumulator, sizeof(int)).Ok();
+        cuMemcpyDtoH_v2((IntPtr)(&actualState), GetFinalStateBuffer(), sizeof(int)).Ok();
+        cuMemcpyDtoH_v2((IntPtr)(&actualAccumulator), _accumulator, sizeof(int)).Ok();
 
         if (actualState != expectedState || actualAccumulator != expectedAccumulator)
         {
@@ -692,12 +817,23 @@ public unsafe class SerialLaunchKernelBench
         string kernelName,
         string deviceRuntimeLibraryPath)
     {
+        return CompileLinkedKernel(device, source, kernelName, deviceRuntimeLibraryPath, GetLinkedKernelCompileMode());
+    }
+
+    static unsafe byte[] CompileLinkedKernel(
+        CUdevice device,
+        string source,
+        string kernelName,
+        string deviceRuntimeLibraryPath,
+        string compileMode)
+    {
         GetComputeCapability(device, out var major, out var minor);
 
-        var compileMode = GetLinkedKernelCompileMode();
         var compileArchitecture = $"compute_{major}{minor}";
         var linkArchitecture = $"sm_{major}{minor}";
         var compileOptions = GetLinkedKernelCompileOptions(compileArchitecture, compileMode);
+
+        Console.WriteLine($"[DEBUG] NVRTC Options: {string.Join(" ", compileOptions)}");
 
         nvrtcCreateProgram(out var program, source, kernelName, 0, [], []).Ok();
         try
@@ -864,6 +1000,48 @@ public unsafe class SerialLaunchKernelBench
         cuModuleGetFunction(out function, module, kernelName).Ok();
     }
 
+    static unsafe void LoadLibraryModule(out CUmodule module, out CUlibrary library, ReadOnlySpan<byte> image, string moduleName)
+    {
+        Span<byte> infoLogBuffer = stackalloc byte[8192];
+        Span<byte> errorLogBuffer = stackalloc byte[8192];
+
+        fixed (byte* infoLogPtr = infoLogBuffer)
+        fixed (byte* errorLogPtr = errorLogBuffer)
+        {
+            var options = stackalloc CUjit_option[4];
+            var optionValues = stackalloc void*[4];
+
+            options[0] = CUjit_option.CU_JIT_INFO_LOG_BUFFER;
+            optionValues[0] = infoLogPtr;
+            options[1] = CUjit_option.CU_JIT_INFO_LOG_BUFFER_SIZE_BYTES;
+            optionValues[1] = (void*)(nuint)infoLogBuffer.Length;
+            options[2] = CUjit_option.CU_JIT_ERROR_LOG_BUFFER;
+            optionValues[2] = errorLogPtr;
+            options[3] = CUjit_option.CU_JIT_ERROR_LOG_BUFFER_SIZE_BYTES;
+            optionValues[3] = (void*)(nuint)errorLogBuffer.Length;
+
+            var result = cuLibraryLoadData(out library, image, options, optionValues, 4, null, null, 0);
+            if (result.IsError())
+            {
+                var infoLog = Encoding.UTF8.GetString(infoLogBuffer).TrimEnd('\0');
+                var errorLog = Encoding.UTF8.GetString(errorLogBuffer).TrimEnd('\0');
+                throw new InvalidOperationException(
+                    $"Library load failed for '{moduleName}' with {result.ToStringFast()}:\n{FormatModuleLoadLog(infoLog, errorLog)}");
+            }
+
+            var moduleResult = cuLibraryGetModule(out module, library);
+            if (moduleResult.IsError())
+            {
+                cuLibraryUnload(library).Ok();
+                library = default;
+                var infoLog = Encoding.UTF8.GetString(infoLogBuffer).TrimEnd('\0');
+                var errorLog = Encoding.UTF8.GetString(errorLogBuffer).TrimEnd('\0');
+                throw new InvalidOperationException(
+                    $"Library GetModule failed for '{moduleName}' with {moduleResult.ToStringFast()}:\n{FormatModuleLoadLog(infoLog, errorLog)}");
+            }
+        }
+    }
+
     static unsafe void LoadModule(out CUmodule module, ReadOnlySpan<byte> image, string moduleName)
     {
         Span<byte> infoLogBuffer = stackalloc byte[8192];
@@ -887,6 +1065,26 @@ public unsafe class SerialLaunchKernelBench
             var result = cuModuleLoadDataEx(out module, image, 4, options, optionValues);
             if (result.IsError())
             {
+                var tempPath = Path.Combine(Path.GetTempPath(), $"{moduleName}_{Guid.NewGuid()}.cubin");
+                try
+                {
+                    File.WriteAllBytes(tempPath, image.ToArray());
+                    var fallbackResult = cuModuleLoad(out module, tempPath);
+                    if (fallbackResult == CUresult.CUDA_SUCCESS)
+                    {
+                        Console.WriteLine($"[INFO] Successfully loaded '{moduleName}' via cuModuleLoad file-fallback.");
+                        return;
+                    }
+                }
+                catch
+                {
+                    // Ignore fallback write errors
+                }
+                finally
+                {
+                    try { if (File.Exists(tempPath)) { File.Delete(tempPath); } } catch { }
+                }
+
                 var infoLog = Encoding.UTF8.GetString(infoLogBuffer).TrimEnd('\0');
                 var errorLog = Encoding.UTF8.GetString(errorLogBuffer).TrimEnd('\0');
                 throw new InvalidOperationException(
@@ -921,8 +1119,14 @@ public unsafe class SerialLaunchKernelBench
         return string.Equals(mode, "rdc", StringComparison.OrdinalIgnoreCase) ? "rdc" : "ewp";
     }
 
+    static string GetAlternateLinkedKernelCompileMode(string compileMode) =>
+        string.Equals(compileMode, "rdc", StringComparison.OrdinalIgnoreCase) ? "ewp" : "rdc";
+
     static string[] GetLinkedKernelCompileOptions(string compileArchitecture, string compileMode)
     {
+        var cudaPath = Environment.GetEnvironmentVariable("CUDA_PATH");
+        var includeOption = string.IsNullOrWhiteSpace(cudaPath) ? "" : $"-I{Path.Combine(cudaPath, "include")}";
+
         return compileMode switch
         {
             "rdc" =>
@@ -930,12 +1134,14 @@ public unsafe class SerialLaunchKernelBench
                 $"--gpu-architecture={compileArchitecture}",
                 "--relocatable-device-code=true",
                 "--std=c++17",
+                includeOption,
             ],
             _ =>
             [
                 $"--gpu-architecture={compileArchitecture}",
                 "--extensible-whole-program",
                 "--std=c++17",
+                includeOption,
             ],
         };
     }
@@ -961,6 +1167,9 @@ public unsafe class SerialLaunchKernelBench
         var safeKernelName = GetSafeArtifactKernelName(kernelName);
         return Path.Combine(dumpRoot, $"{safeKernelName}.{compileMode}");
     }
+
+    static string GetFullLinkedKernelArtifactPrefix(string kernelName, string compileMode) =>
+        Path.GetFullPath(GetLinkedKernelArtifactPrefix(dumpRoot, kernelName, compileMode));
 
     static string GetSafeArtifactKernelName(string kernelName)
     {
@@ -993,6 +1202,37 @@ public unsafe class SerialLaunchKernelBench
         }
 
         return deviceRuntimeLibraryPath;
+    }
+
+    static string ProbeLinkedKernelLoad(
+        CUdevice device,
+        string source,
+        string kernelName,
+        string deviceRuntimeLibraryPath,
+        string compileMode)
+    {
+        var artifactPrefix = GetFullLinkedKernelArtifactPrefix(kernelName, compileMode);
+
+        try
+        {
+            var image = CompileLinkedKernel(device, source, kernelName, deviceRuntimeLibraryPath, compileMode);
+            LoadLibraryModule(out var module, out var library, image, $"{kernelName}.{compileMode}.probe");
+            try
+            {
+                return $"Alternate linked-kernel load probe succeeded for compileMode={compileMode}. Artifact prefix: '{artifactPrefix}'.";
+            }
+            finally
+            {
+                if (library.Value != IntPtr.Zero)
+                {
+                    cuLibraryUnload(library).Ok();
+                }
+            }
+        }
+        catch (Exception probeException)
+        {
+            return $"Alternate linked-kernel load probe failed for compileMode={compileMode}. Artifact prefix: '{artifactPrefix}'. {probeException.Message}";
+        }
     }
 
     static bool IsUnsupportedArchitecture(nvrtcResult result, string log) =>

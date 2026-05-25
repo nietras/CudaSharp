@@ -11,10 +11,10 @@ Toolchain=net10.0  IterationTime=350ms  MaxIterationCount=15
 MinIterationCount=5  WarmupCount=6  
 
 ```
-| Method                                                          | SerialLaunchCount | Mean            | Ratio | Allocated | Alloc Ratio |
-|---------------------------------------------------------------- |------------------ |----------------:|------:|----------:|------------:|
-| cuLaunchKernel_Raw_SerialTripleBuffer_StreamSync                | 256               | 844,191.6552 ns | 1.000 |         - |          NA |
-| cuGraphLaunch_SerialTripleBuffer_StreamSync                     | 256               | 261,881.7794 ns | 0.310 |         - |          NA |
-| cuGraphLaunch_DeviceLaunchCapableSerialTripleBuffer_StreamSync  | 256               | 225,031.1764 ns | 0.267 |         - |          NA |
-| cuGraphLaunch_TrueDeviceTailLaunchSerialTripleBuffer_StreamSync | 256               |       0.1777 ns | 0.000 |         - |          NA |
-| cuGraphLaunch_CapturedSerialTripleBuffer_StreamSync             | 256               | 259,463.5882 ns | 0.307 |         - |          NA |
+| Method                                                          | SerialLaunchCount | Mean     | Ratio | Allocated | Alloc Ratio |
+|---------------------------------------------------------------- |------------------ |---------:|------:|----------:|------------:|
+| cuLaunchKernel_Raw_SerialTripleBuffer_StreamSync                | 256               | 815.6 μs |  1.00 |         - |          NA |
+| cuGraphLaunch_SerialTripleBuffer_StreamSync                     | 256               | 256.3 μs |  0.31 |         - |          NA |
+| cuGraphLaunch_DeviceLaunchCapableSerialTripleBuffer_StreamSync  | 256               | 216.7 μs |  0.27 |         - |          NA |
+| cuGraphLaunch_TrueDeviceTailLaunchSerialTripleBuffer_StreamSync | 256               | 225.2 μs |  0.28 |         - |          NA |
+| cuGraphLaunch_CapturedSerialTripleBuffer_StreamSync             | 256               | 256.1 μs |  0.31 |         - |          NA |

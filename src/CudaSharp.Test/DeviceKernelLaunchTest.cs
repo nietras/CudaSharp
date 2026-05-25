@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Text;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using static CudaSharp.nvcuda;
@@ -41,7 +41,7 @@ public class DeviceKernelLaunchTest
         // Target Blackwell GPU compute capability 100/120.
         // For RTX 50 series, we check either compute_120 or compute_100.
         string[] options = [
-            "--gpu-architecture=compute_100", 
+            "--gpu-architecture=compute_100",
             "-rdc=true"
         ];
 
@@ -57,7 +57,7 @@ public class DeviceKernelLaunchTest
                 System.Runtime.InteropServices.Marshal.Copy(optionBytes, 0, allocatedOptions[i], optionBytes.Length);
                 optionPointers[i] = (byte*)allocatedOptions[i];
             }
-            
+
             compileResult = nvrtcCompileProgram(prog, options.Length, optionPointers);
         }
         finally
@@ -75,7 +75,7 @@ public class DeviceKernelLaunchTest
             var logBuffer = new byte[logSize];
             nvrtcGetProgramLog(prog, logBuffer).Ok();
             var log = Encoding.UTF8.GetString(logBuffer).TrimEnd('\0');
-            
+
             if (log.Contains("bad architecture") || log.Contains("unrecognized architecture") || log.Contains("unsupported architecture"))
             {
                 Assert.Inconclusive($"NVRTC doesn't support Blackwell architecture on this machine. Log: {log}");
@@ -112,7 +112,7 @@ public class DeviceKernelLaunchTest
         nvrtcCreateProgram(out var prog, kernelSource, "device_launch_ptr.cu", 0, [], []).Ok();
 
         string[] options = [
-            "--gpu-architecture=compute_100", 
+            "--gpu-architecture=compute_100",
             "-rdc=true"
         ];
 
@@ -128,7 +128,7 @@ public class DeviceKernelLaunchTest
                 System.Runtime.InteropServices.Marshal.Copy(optionBytes, 0, allocatedOptions[i], optionBytes.Length);
                 optionPointers[i] = (byte*)allocatedOptions[i];
             }
-            
+
             compileResult = nvrtcCompileProgram(prog, options.Length, optionPointers);
         }
         finally
@@ -146,7 +146,7 @@ public class DeviceKernelLaunchTest
             var logBuffer = new byte[logSize];
             nvrtcGetProgramLog(prog, logBuffer).Ok();
             var log = Encoding.UTF8.GetString(logBuffer).TrimEnd('\0');
-            
+
             if (log.Contains("bad architecture") || log.Contains("unrecognized architecture") || log.Contains("unsupported architecture"))
             {
                 Assert.Inconclusive($"NVRTC doesn't support Blackwell architecture on this machine. Log: {log}");
