@@ -19,7 +19,6 @@ public unsafe class SerialLaunchKernelBench
     const string KernelName = "serial_accumulate";
     const string DeviceLaunchSchedulerKernelName = "serial_device_graph_tail_launch";
     const string DeviceLaunchSchedulerFireAndForgetKernelName = "serial_device_graph_fire_and_forget_launch";
-    const string DeviceLaunchSchedulerNoOpKernelName = "serial_device_graph_tail_launch_noop";
     const string KernelSource =
         """
         extern "C" __global__ void serial_init(
@@ -69,27 +68,6 @@ public unsafe class SerialLaunchKernelBench
             }
 
             launchStatus[0] = (int)cudaGraphLaunch(graphExec, cudaStreamGraphFireAndForget);
-        }
-        """;
-    const string DeviceLaunchSchedulerNoOpSource =
-        """
-        #include <cuda_device_runtime_api.h>
-        extern "C" __global__ void serial_device_graph_tail_launch_noop(
-            cudaGraphExec_t graphExec,
-            int* launchStatus)
-        {
-            if ((blockIdx.x | blockIdx.y | blockIdx.z | threadIdx.x | threadIdx.y | threadIdx.z) != 0)
-            {
-                return;
-            }
-
-            if (graphExec == nullptr)
-            {
-                launchStatus[0] = -1;
-                return;
-            }
-
-            launchStatus[0] = 0;
         }
         """;
 
@@ -372,11 +350,7 @@ public unsafe class SerialLaunchKernelBench
     void BuildTrueDeviceLaunchSchedulerGraph(CUdevice device)
     {
         var compileMode = GetLinkedKernelCompileMode();
-        GetComputeCapability(device, out var major, out var minor);
-        var compileArchitecture = $"compute_{major}{minor}";
-        var linkArchitecture = $"sm_{major}{minor}";
         var deviceRuntimeLibraryPath = GetCudaDeviceRuntimeLibraryPath();
-        var artifactPrefix = GetFullLinkedKernelArtifactPrefix(DeviceLaunchSchedulerKernelName, compileMode);
         var image = CompileLinkedKernel(
             device,
             DeviceLaunchSchedulerSource,
@@ -384,80 +358,7 @@ public unsafe class SerialLaunchKernelBench
             deviceRuntimeLibraryPath,
             compileMode);
 
-        try
-        {
-            LoadLibraryModule(out _deviceLaunchSchedulerModule, out _deviceLaunchSchedulerLibrary, image, nameof(BuildTrueDeviceLaunchSchedulerGraph));
-        }
-        catch (InvalidOperationException exception) when (exception.Message.Contains(CUresult.CUDA_ERROR_INVALID_IMAGE.ToStringFast(), StringComparison.Ordinal))
-        {
-            cuDriverGetVersion(out var driverVersion).Ok();
-            var alternateCompileMode = GetAlternateLinkedKernelCompileMode(compileMode);
-            var alternateProblematicProbeDiagnostic = ProbeLinkedKernelLoad(
-                device,
-                DeviceLaunchSchedulerSource,
-                DeviceLaunchSchedulerKernelName,
-                deviceRuntimeLibraryPath,
-                alternateCompileMode);
-            var noOpSameModeProbeDiagnostic = ProbeLinkedKernelLoad(
-                device,
-                DeviceLaunchSchedulerNoOpSource,
-                DeviceLaunchSchedulerNoOpKernelName,
-                deviceRuntimeLibraryPath,
-                compileMode);
-            var noOpAlternateModeProbeDiagnostic = ProbeLinkedKernelLoad(
-                device,
-                DeviceLaunchSchedulerNoOpSource,
-                DeviceLaunchSchedulerNoOpKernelName,
-                deviceRuntimeLibraryPath,
-                alternateCompileMode);
-            var fireAndForgetSameModeProbeDiagnostic = ProbeLinkedKernelLoad(
-                device,
-                DeviceLaunchSchedulerFireAndForgetSource,
-                DeviceLaunchSchedulerFireAndForgetKernelName,
-                deviceRuntimeLibraryPath,
-                compileMode);
-            var fireAndForgetAlternateModeProbeDiagnostic = ProbeLinkedKernelLoad(
-                device,
-                DeviceLaunchSchedulerFireAndForgetSource,
-                DeviceLaunchSchedulerFireAndForgetKernelName,
-                deviceRuntimeLibraryPath,
-                alternateCompileMode);
-
-            Console.WriteLine(
-                $"Module load failed for {DeviceLaunchSchedulerKernelName} with {CUresult.CUDA_ERROR_INVALID_IMAGE.ToStringFast()}. " +
-                $"driverVersion={driverVersion}, CUDA_PATH='{Environment.GetEnvironmentVariable("CUDA_PATH")}', " +
-                $"compileMode={compileMode}, compileArchitecture={compileArchitecture}, linkArchitecture={linkArchitecture}, " +
-                $"deviceRuntimeLibraryPath='{deviceRuntimeLibraryPath}', artifactDumpRoot='{dumpRoot}'.");
-            Console.WriteLine($"Module load exception: {exception.Message}");
-            Console.WriteLine($"Primary linked artifact prefix: '{artifactPrefix}'");
-            Console.WriteLine(
-                $"Inspect linked artifacts with: cuobjdump --dump-elf '{artifactPrefix}.cubin', " +
-                $"cuobjdump --dump-sass '{artifactPrefix}.cubin', nvdisasm '{artifactPrefix}.cubin'.");
-            Console.WriteLine(
-                $"Linked artifact files: '{artifactPrefix}.ptx', '{artifactPrefix}.cubin', '{artifactPrefix}.link.log'.");
-            Console.WriteLine(
-                "Probe interpretation: no-op success means linked cudadevrt images load; fire-and-forget success isolates the failure to tail launch; fire-and-forget failure means any device-side cudaGraphLaunch is being rejected.");
-            Console.WriteLine(alternateProblematicProbeDiagnostic);
-            Console.WriteLine(noOpSameModeProbeDiagnostic);
-            Console.WriteLine(noOpAlternateModeProbeDiagnostic);
-            Console.WriteLine(fireAndForgetSameModeProbeDiagnostic);
-            Console.WriteLine(fireAndForgetAlternateModeProbeDiagnostic);
-
-            if (exception.Message.Contains("No driver log output.", StringComparison.Ordinal))
-            {
-                Console.WriteLine(
-                    "The CUDA driver returned no module-load diagnostics, which usually points to a malformed or incompatible cubin, or a toolkit/driver mismatch.");
-            }
-
-            if (exception.Message.Contains("No driver log output.", StringComparison.Ordinal))
-            {
-                _deviceGraphLaunchSupported = false;
-                return;
-            }
-
-            throw;
-        }
-
+        LoadLibraryModule(out _deviceLaunchSchedulerModule, out _deviceLaunchSchedulerLibrary, image, nameof(BuildTrueDeviceLaunchSchedulerGraph));
         cuModuleGetFunction(out _deviceLaunchSchedulerFunction, _deviceLaunchSchedulerModule, DeviceLaunchSchedulerKernelName).Ok();
 
         _deviceLaunchSchedulerGraphExecArgument =
@@ -1148,8 +1049,7 @@ public unsafe class SerialLaunchKernelBench
         return string.Equals(mode, "rdc", StringComparison.OrdinalIgnoreCase) ? "rdc" : "ewp";
     }
 
-    static string GetAlternateLinkedKernelCompileMode(string compileMode) =>
-        string.Equals(compileMode, "rdc", StringComparison.OrdinalIgnoreCase) ? "ewp" : "rdc";
+
 
     static string[] GetLinkedKernelCompileOptions(string compileArchitecture, string compileMode)
     {
@@ -1233,36 +1133,7 @@ public unsafe class SerialLaunchKernelBench
         return deviceRuntimeLibraryPath;
     }
 
-    static string ProbeLinkedKernelLoad(
-        CUdevice device,
-        string source,
-        string kernelName,
-        string deviceRuntimeLibraryPath,
-        string compileMode)
-    {
-        var artifactPrefix = GetFullLinkedKernelArtifactPrefix(kernelName, compileMode);
 
-        try
-        {
-            var image = CompileLinkedKernel(device, source, kernelName, deviceRuntimeLibraryPath, compileMode);
-            LoadLibraryModule(out var module, out var library, image, $"{kernelName}.{compileMode}.probe");
-            try
-            {
-                return $"Alternate linked-kernel load probe succeeded for compileMode={compileMode}. Artifact prefix: '{artifactPrefix}'.";
-            }
-            finally
-            {
-                if (library.Value != IntPtr.Zero)
-                {
-                    cuLibraryUnload(library).Ok();
-                }
-            }
-        }
-        catch (Exception probeException)
-        {
-            return $"Alternate linked-kernel load probe failed for compileMode={compileMode}. Artifact prefix: '{artifactPrefix}'. {probeException.Message}";
-        }
-    }
 
     static bool IsUnsupportedArchitecture(nvrtcResult result, string log) =>
         result == nvrtcResult.NVRTC_ERROR_INVALID_OPTION &&
