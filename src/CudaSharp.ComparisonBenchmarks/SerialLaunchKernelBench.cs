@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -119,6 +119,13 @@ public unsafe class SerialLaunchKernelBench
     {
         try
         {
+            // Bootstrapping: NVIDIA only exposes device-side dynamic scheduling and graph launches
+            // via the CUDA Runtime API (e.g. cudaGraphLaunch in <cuda_device_runtime_api.h> linked with
+            // cudadevrt.lib). There is no "device-side Driver API" equivalent exposed by NVIDIA.
+            // Therefore, device-side graph launch fundamentally requires the host process to load
+            // the CUDA Runtime DLL (cudart) so that the Driver's JIT compiler/linker can resolve
+            // these runtime symbols during image generation. We call cudaFree(IntPtr.Zero) to force-load
+            // and initialize the host-side runtime library in memory.
             cudaFree(IntPtr.Zero);
             Console.WriteLine("[DEBUG] CUDA Runtime initialized successfully.");
         }
