@@ -3,6 +3,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
 using BenchmarkDotNet.Attributes;
+using static CudaSharp.cudart;
 using static CudaSharp.nvcuda;
 using static CudaSharp.nvrtc;
 
@@ -11,23 +12,6 @@ namespace CudaSharp.ComparisonBenchmarks;
 [BenchmarkCategory("LaunchKernel")]
 public unsafe class SerialLaunchKernelBench
 {
-    [DllImport("cudart64_13.dll", EntryPoint = "cudaFree", CallingConvention = CallingConvention.Cdecl)]
-    static extern int cudaFree(IntPtr devPtr);
-
-    [DllImport("nvcuda.dll", EntryPoint = "cuCtxCreate_v2", CallingConvention = CallingConvention.Cdecl)]
-    static extern CUresult cuCtxCreate_v2(out CUcontext pctx, CUctx_flags flags, CUdevice dev);
-
-    [DllImport("nvcuda.dll", EntryPoint = "cuMemAlloc_v2", CallingConvention = CallingConvention.Cdecl)]
-    static extern CUresult cuMemAlloc_v2(out CUdeviceptr dptr, nuint bytesize);
-
-    [DllImport("nvcuda.dll", EntryPoint = "cuMemFree_v2", CallingConvention = CallingConvention.Cdecl)]
-    static extern CUresult cuMemFree_v2(CUdeviceptr dptr);
-
-    [DllImport("nvcuda.dll", EntryPoint = "cuMemcpyDtoH_v2", CallingConvention = CallingConvention.Cdecl)]
-    static extern CUresult cuMemcpyDtoH_v2(IntPtr dstHost, CUdeviceptr srcDevice, nuint bytesize);
-
-    [DllImport("nvcuda.dll", EntryPoint = "cuMemsetD32_v2", CallingConvention = CallingConvention.Cdecl)]
-    static extern CUresult cuMemsetD32_v2(CUdeviceptr dstDevice, uint ui, nuint N);
 
     const string dumpRoot = "dumps";
 

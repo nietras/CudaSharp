@@ -113,6 +113,9 @@ public static partial class nvcuda
     [LibraryImport(LibName)]
     public static partial CUresult cuCtxCreate(out CUcontext pctx, CUctx_flags flags, CUdevice dev);
 
+    [LibraryImport(LibName)]
+    public static partial CUresult cuCtxCreate_v2(out CUcontext pctx, CUctx_flags flags, CUdevice dev);
+
     /// <summary>
     /// Destroy a CUDA context.
     /// </summary>
@@ -734,13 +737,22 @@ public static partial class nvcuda
     public static partial CUresult cuMemAlloc(out CUdeviceptr dptr, nuint bytesize);
 
     [LibraryImport(LibName)]
+    public static partial CUresult cuMemAlloc_v2(out CUdeviceptr dptr, nuint bytesize);
+
+    [LibraryImport(LibName)]
     public static partial CUresult cuMemFree(CUdeviceptr dptr);
+
+    [LibraryImport(LibName)]
+    public static partial CUresult cuMemFree_v2(CUdeviceptr dptr);
 
     [LibraryImport(LibName)]
     public static partial CUresult cuMemcpyHtoD(CUdeviceptr dstDevice, IntPtr srcHost, nuint bytesize);
 
     [LibraryImport(LibName)]
     public static partial CUresult cuMemcpyDtoH(IntPtr dstHost, CUdeviceptr srcDevice, nuint bytesize);
+
+    [LibraryImport(LibName)]
+    public static partial CUresult cuMemcpyDtoH_v2(IntPtr dstHost, CUdeviceptr srcDevice, nuint bytesize);
 
     [LibraryImport(LibName)]
     public static partial CUresult cuMemcpyHtoDAsync(
@@ -791,6 +803,9 @@ public static partial class nvcuda
 
     [LibraryImport(LibName)]
     public static partial CUresult cuMemsetD32(CUdeviceptr dstDevice, uint ui, nuint N);
+
+    [LibraryImport(LibName)]
+    public static partial CUresult cuMemsetD32_v2(CUdeviceptr dstDevice, uint ui, nuint N);
 
     [LibraryImport(LibName)]
     public static partial CUresult cuMemsetD2D8(

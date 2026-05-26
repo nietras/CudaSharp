@@ -182,6 +182,52 @@ public static class DllResolver
                 }
             }
         }
+        else if (libraryName == "cudart")
+        {
+            var cudaPath = Environment.GetEnvironmentVariable("CUDA_PATH");
+            if (!string.IsNullOrEmpty(cudaPath))
+            {
+                foreach (var probePath in new[] { Path.Combine(cudaPath, "bin", "x64"), Path.Combine(cudaPath, "bin") })
+                {
+                    if (Directory.Exists(probePath))
+                    {
+                        var dll = Directory.GetFiles(probePath, "cudart64_*.dll")
+                                           .OrderByDescending(f => f)
+                                           .FirstOrDefault();
+                        if (dll != null && NativeLibrary.TryLoad(dll, out var handle))
+                        {
+                            return handle;
+                        }
+                    }
+                }
+            }
+
+            var defaultPath = @"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA";
+            if (Directory.Exists(defaultPath))
+            {
+                var versions = Directory.GetDirectories(defaultPath, "v*.*")
+                                        .Select(Path.GetFileName)
+                                        .Where(v => v is not null)
+                                        .OrderByDescending(v => v)
+                                        .ToList();
+                foreach (var version in versions)
+                {
+                    foreach (var probePath in new[] { Path.Combine(defaultPath, version!, "bin", "x64"), Path.Combine(defaultPath, version!, "bin") })
+                    {
+                        if (Directory.Exists(probePath))
+                        {
+                            var dll = Directory.GetFiles(probePath, "cudart64_*.dll")
+                                               .OrderByDescending(f => f)
+                                               .FirstOrDefault();
+                            if (dll != null && NativeLibrary.TryLoad(dll, out var handle))
+                            {
+                                return handle;
+                            }
+                        }
+                    }
+                }
+            }
+        }
         return IntPtr.Zero;
     }
 
