@@ -183,6 +183,11 @@ namespace CudaSharp
     {
         public static void Register() { }
     }
+    public static class cudart
+    {
+        [System.Runtime.InteropServices.LibraryImport("cudart")]
+        public static int cudaFree(nint devPtr) { }
+    }
     public static class nvJitLink
     {
         [System.Runtime.CompilerServices.SkipLocalsInit]
@@ -269,6 +274,9 @@ namespace CudaSharp
         [System.Runtime.CompilerServices.SkipLocalsInit]
         [System.Runtime.InteropServices.LibraryImport("nvcuda")]
         public static CudaSharp.nvcuda.CUresult cuCtxCreate(out CudaSharp.nvcuda.CUcontext pctx, CudaSharp.nvcuda.CUctx_flags flags, CudaSharp.nvcuda.CUdevice dev) { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
+        [System.Runtime.InteropServices.LibraryImport("nvcuda")]
+        public static CudaSharp.nvcuda.CUresult cuCtxCreate_v2(out CudaSharp.nvcuda.CUcontext pctx, CudaSharp.nvcuda.CUctx_flags flags, CudaSharp.nvcuda.CUdevice dev) { }
         [System.Runtime.InteropServices.LibraryImport("nvcuda")]
         public static CudaSharp.nvcuda.CUresult cuCtxDestroy(CudaSharp.nvcuda.CUcontext ctx) { }
         [System.Runtime.InteropServices.LibraryImport("nvcuda")]
@@ -474,10 +482,15 @@ namespace CudaSharp
         [System.Runtime.CompilerServices.SkipLocalsInit]
         [System.Runtime.InteropServices.LibraryImport("nvcuda")]
         public static CudaSharp.nvcuda.CUresult cuMemAllocPitch(out CudaSharp.nvcuda.CUdeviceptr dptr, out System.UIntPtr pPitch, nuint WidthInBytes, nuint Height, uint ElementSizeBytes) { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
+        [System.Runtime.InteropServices.LibraryImport("nvcuda")]
+        public static CudaSharp.nvcuda.CUresult cuMemAlloc_v2(out CudaSharp.nvcuda.CUdeviceptr dptr, nuint bytesize) { }
         [System.Runtime.InteropServices.LibraryImport("nvcuda")]
         public static CudaSharp.nvcuda.CUresult cuMemFree(CudaSharp.nvcuda.CUdeviceptr dptr) { }
         [System.Runtime.InteropServices.LibraryImport("nvcuda")]
         public static CudaSharp.nvcuda.CUresult cuMemFreeHost(nint p) { }
+        [System.Runtime.InteropServices.LibraryImport("nvcuda")]
+        public static CudaSharp.nvcuda.CUresult cuMemFree_v2(CudaSharp.nvcuda.CUdeviceptr dptr) { }
         [System.Runtime.CompilerServices.SkipLocalsInit]
         [System.Runtime.InteropServices.LibraryImport("nvcuda")]
         public static CudaSharp.nvcuda.CUresult cuMemGetInfo(out System.UIntPtr free, out System.UIntPtr total) { }
@@ -503,6 +516,8 @@ namespace CudaSharp
         [System.Runtime.InteropServices.LibraryImport("nvcuda")]
         public static CudaSharp.nvcuda.CUresult cuMemcpyDtoHAsync(nint dstHost, CudaSharp.nvcuda.CUdeviceptr srcDevice, nuint bytesize, CudaSharp.nvcuda.CUstream hStream) { }
         [System.Runtime.InteropServices.LibraryImport("nvcuda")]
+        public static CudaSharp.nvcuda.CUresult cuMemcpyDtoH_v2(nint dstHost, CudaSharp.nvcuda.CUdeviceptr srcDevice, nuint bytesize) { }
+        [System.Runtime.InteropServices.LibraryImport("nvcuda")]
         public static CudaSharp.nvcuda.CUresult cuMemcpyHtoD(CudaSharp.nvcuda.CUdeviceptr dstDevice, nint srcHost, nuint bytesize) { }
         [System.Runtime.InteropServices.LibraryImport("nvcuda")]
         public static CudaSharp.nvcuda.CUresult cuMemcpyHtoDAsync(CudaSharp.nvcuda.CUdeviceptr dstDevice, nint srcHost, nuint bytesize, CudaSharp.nvcuda.CUstream hStream) { }
@@ -526,6 +541,8 @@ namespace CudaSharp
         public static CudaSharp.nvcuda.CUresult cuMemsetD32(CudaSharp.nvcuda.CUdeviceptr dstDevice, uint ui, nuint N) { }
         [System.Runtime.InteropServices.LibraryImport("nvcuda")]
         public static CudaSharp.nvcuda.CUresult cuMemsetD32Async(CudaSharp.nvcuda.CUdeviceptr dstDevice, uint ui, nuint N, CudaSharp.nvcuda.CUstream hStream) { }
+        [System.Runtime.InteropServices.LibraryImport("nvcuda")]
+        public static CudaSharp.nvcuda.CUresult cuMemsetD32_v2(CudaSharp.nvcuda.CUdeviceptr dstDevice, uint ui, nuint N) { }
         [System.Runtime.InteropServices.LibraryImport("nvcuda")]
         public static CudaSharp.nvcuda.CUresult cuMemsetD8(CudaSharp.nvcuda.CUdeviceptr dstDevice, byte uc, nuint N) { }
         [System.Runtime.InteropServices.LibraryImport("nvcuda")]
