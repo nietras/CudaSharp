@@ -14,7 +14,7 @@ namespace CudaSharp.Mnist;
 
 public unsafe class Program
 {
-    const int BatchSize = 128;
+    static int BatchSize = 128;
     const int ClassCount = 10;
     const int ImageRows = 28;
     const int ImageCols = 28;
@@ -2129,6 +2129,25 @@ public unsafe class Program
         }
         """;
 
+    static readonly string CudaSourceV4 = CudaSourceV1;
+
+    public static readonly NetworkConfig ConfigV4 = new()
+    {
+        Name = "V4",
+        CudaSource = CudaSourceV4,
+        BatchSize = 128,
+        Conv1FilterCount = 16,
+        Conv1FilterSize = 5,
+        Conv2FilterCount = 16,
+        Conv2FilterSize = 3,
+        Pool2OutSize = 5,
+        HasFC1 = true,
+        FC1Outputs = 256,
+        BatchesPerEpoch = 200,
+        TotalSteps = 390,
+        MaxLR = 0.029f
+    };
+
     public static readonly NetworkConfig ConfigV3 = new()
     {
         Name = "V3",
@@ -2192,7 +2211,8 @@ public unsafe class Program
         }
         Console.WriteLine($"[CONFIG] Network Version: {version}");
 
-        NetworkConfig activeConfig = version == "V1" ? ConfigV1 : (version == "V2" ? ConfigV2 : ConfigV3);
+        NetworkConfig activeConfig = version == "V1" ? ConfigV1 : (version == "V2" ? ConfigV2 : (version == "V3" ? ConfigV3 : ConfigV4));
+        BatchSize = activeConfig.BatchSize;
 
         CuInit.EnsureInit();
 
@@ -2394,6 +2414,10 @@ public unsafe class Program
 
             cuMemAlloc(out var d_step, (nuint)sizeof(int)).Ok();
 
+            int fc1Chunks = 8;
+            int conv2Chunks = 16;
+            int conv1Chunks = 16;
+
             InitializeModelParameters(activeConfig, d_conv1Filters, d_conv1Biases, d_conv2Filters, d_conv2Biases, d_fc1Weights, d_fc1Biases, d_fc2Weights, d_fc2Biases, 42);
 
             Console.WriteLine("[GRAPH] Capturing training loop into a single optimized CUDA Graph...");
@@ -2508,18 +2532,18 @@ public unsafe class Program
 
                     currentDependencies[0] = lastNode;
                     lastNode = AddKernelNode(epochGraph, currentDependencies,
-                        f_fc1_bwd_weights, 8u, 8u, 8u,
+                        f_fc1_bwd_weights, 8u, 8u, (uint)fc1Chunks,
                         128u, 1u, 1u, fc1BwdWeightsParams);
                 }
 
                 currentDependencies[0] = lastNode;
                 lastNode = AddKernelNode(epochGraph, currentDependencies,
-                    f_conv2_bwd, (uint)conv2FilterCount * 16, 1u, 1u,
+                    f_conv2_bwd, (uint)conv2FilterCount * (uint)conv2Chunks, 1u, 1u,
                     128u, 1u, 1u, conv2BwdParams);
 
                 currentDependencies[0] = lastNode;
                 lastNode = AddKernelNode(epochGraph, currentDependencies,
-                    f_conv1_bwd, (uint)conv1FilterCount * 16, 1u, 1u,
+                    f_conv1_bwd, (uint)conv1FilterCount * (uint)conv1Chunks, 1u, 1u,
                     24u, 24u, 1u, conv1BwdParams);
 
                 currentDependencies[0] = lastNode;

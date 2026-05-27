@@ -30,6 +30,7 @@ public sealed class NetworkConfig
     public int FC1Outputs { get; init; } = 256;
 
     // Training schedule
+    public int BatchSize { get; init; } = 128;
     public required int BatchesPerEpoch { get; init; }
     public required int TotalSteps { get; init; }
 
