@@ -1487,6 +1487,663 @@ public unsafe class Program
         }
         """;
 
+    static readonly string CudaSourceV3 =
+        """
+        #include <cuda_fp16.h>
+
+        typedef unsigned int uint32_t;
+        
+        #define BATCH_SIZE 128
+        #define FILTER1_SIZE 5
+        #define FILTER2_SIZE 5
+        #define INPUT_SIZE 28
+        #define POOL1_SIZE 12
+        #define POOL2_SIZE 4
+        #define FC2_INPUTS 256
+        #define FC2_OUTPUTS 10
+
+        #define BATCHES_PER_EPOCH 300
+        #define TOTAL_STEPS 600
+
+        extern "C" __global__ void clear_gradient(__half* __restrict__ d_grad, int num_elements)
+        {
+            int tid = blockIdx.x * blockDim.x + threadIdx.x;
+            int stride = blockDim.x * gridDim.x;
+            __half zero = __float2half(0.0f);
+            for (int i = tid; i < num_elements; i += stride)
+            {
+                d_grad[i] = zero;
+            }
+        }
+
+        extern "C" __global__ void conv1_forward(
+            const uint32_t* __restrict__ d_inputs,
+            const __half* __restrict__ d_filters,
+            const __half* __restrict__ d_biases,
+            __half* __restrict__ d_outputs,
+            __half* __restrict__ d_unpooled_vals,
+            const int* __restrict__ d_step,
+            int is_training)
+        {
+            const int batch_idx = blockIdx.x;
+            const int filter_idx = blockIdx.y;
+            const int out_x = threadIdx.x;
+            const int out_y = threadIdx.y;
+
+            if (out_x >= 12 || out_y >= 12) return;
+
+            int batchOffset = ((*d_step) % BATCHES_PER_EPOCH) * BATCH_SIZE;
+
+            __shared__ __half s_filter[5][5];
+            int tid_flat = threadIdx.y * 12 + threadIdx.x;
+            if (tid_flat < 25)
+            {
+                s_filter[tid_flat / 5][tid_flat % 5] = 
+                    d_filters[filter_idx * 25 + tid_flat];
+            }
+            
+            __shared__ uint32_t s_image[28];
+            if (tid_flat < 28)
+            {
+                s_image[tid_flat] = d_inputs[(batchOffset + batch_idx) * 28 + tid_flat];
+            }
+            __syncthreads();
+
+            const int conv_x_base = out_x * 2;
+            const int conv_y_base = out_y * 2;
+
+            int seed = batch_idx + *d_step;
+            int dx = (is_training == 1) ? ((seed * 1103515245 + 12345) % 3 - 1) : 0;
+            int dy = (is_training == 1) ? (((seed * 1103515245 + 12345) / 3) % 3 - 1) : 0;
+
+            __half max_val = __float2half(-1e9f);
+            __half zero = __float2half(0.0f);
+
+            #pragma unroll
+            for (int py = 0; py < 2; py++)
+            {
+                #pragma unroll
+                for (int px = 0; px < 2; px++)
+                {
+                    const int cx = conv_x_base + px;
+                    const int cy = conv_y_base + py;
+
+                    __half sum = d_biases[filter_idx];
+                    
+                    #pragma unroll
+                    for (int fy = 0; fy < 5; fy++)
+                    {
+                        int shift_y = cy + fy + dy;
+                        uint32_t row_bits = 0;
+                        if (shift_y >= 0 && shift_y < 28)
+                        {
+                            row_bits = s_image[shift_y];
+                        }
+                        #pragma unroll
+                        for (int fx = 0; fx < 5; fx++)
+                        {
+                            int img_x = cx + fx + dx;
+                            uint32_t pixel = 0;
+                            if (img_x >= 0 && img_x < 28)
+                            {
+                                pixel = (row_bits >> img_x) & 1u;
+                            }
+                            if (pixel == 1u)
+                            {
+                                sum += s_filter[fy][fx];
+                            }
+                        }
+                    }
+
+                    int unpooled_idx = (batch_idx * 576 + cy * 24 + cx) * 8 + filter_idx;
+                    d_unpooled_vals[unpooled_idx] = sum;
+
+                    __half activated = __hgt(sum, zero) ? sum : zero;
+                    if (__hgt(activated, max_val))
+                    {
+                        max_val = activated;
+                    }
+                }
+            }
+
+            const int out_idx = batch_idx * (12 * 12 * 8) 
+                                + (out_y * 12 + out_x) * 8 
+                                + filter_idx;
+            d_outputs[out_idx] = max_val;
+        }
+
+        extern "C" __global__ void conv2_forward(
+            const __half* __restrict__ d_inputs,
+            const __half* __restrict__ d_filters,
+            const __half* __restrict__ d_biases,
+            __half* __restrict__ d_outputs,
+            __half* __restrict__ d_unpooled_vals)
+        {
+            const int batch_idx = blockIdx.x;
+            const int tid = threadIdx.x;
+
+            __shared__ __half s_input[1152];
+            __shared__ __half s_filters[3200];
+
+            for (int i = tid; i < 1152; i += 256)
+            {
+                s_input[i] = d_inputs[batch_idx * 1152 + i];
+            }
+
+            for (int i = tid; i < 3200; i += 256)
+            {
+                s_filters[i] = d_filters[i];
+            }
+            __syncthreads();
+
+            if (tid < 256)
+            {
+                int filter_idx = tid / 16;
+                int spatial_idx = tid % 16;
+                int out_x = spatial_idx % 4;
+                int out_y = spatial_idx / 4;
+
+                const int conv_x_base = out_x * 2;
+                const int conv_y_base = out_y * 2;
+
+                __half max_val = __float2half(-1e9f);
+                __half zero = __float2half(0.0f);
+
+                #pragma unroll
+                for (int py = 0; py < 2; py++)
+                {
+                    #pragma unroll
+                    for (int px = 0; px < 2; px++)
+                    {
+                        const int cx = conv_x_base + px;
+                        const int cy = conv_y_base + py;
+
+                        __half sum = d_biases[filter_idx];
+
+                        #pragma unroll
+                        for (int c = 0; c < 8; c++)
+                        {
+                            #pragma unroll
+                            for (int fy = 0; fy < 5; fy++)
+                            {
+                                #pragma unroll
+                                for (int fx = 0; fx < 5; fx++)
+                                {
+                                    int in_x = cx + fx;
+                                    int in_y = cy + fy;
+                                    sum += s_input[(in_y * 12 + in_x) * 8 + c] * s_filters[filter_idx * 200 + (fy * 5 + fx) * 8 + c];
+                                }
+                            }
+                        }
+
+                        int unpooled_idx = (batch_idx * 64 + cy * 8 + cx) * 16 + filter_idx;
+                        d_unpooled_vals[unpooled_idx] = sum;
+
+                        __half activated = __hgt(sum, zero) ? sum : zero;
+                        if (__hgt(activated, max_val))
+                        {
+                            max_val = activated;
+                        }
+                    }
+                }
+
+                const int out_idx_global = batch_idx * 256 + (out_y * 4 + out_x) * 16 + filter_idx;
+                d_outputs[out_idx_global] = max_val;
+            }
+        }
+
+        extern "C" __global__ void fc2_forward(
+            const __half* __restrict__ d_inputs,
+            const __half* __restrict__ d_weights,
+            const __half* __restrict__ d_biases,
+            __half* __restrict__ d_outputs)
+        {
+            const int batch_idx = blockIdx.x;
+            const int tid = threadIdx.x;
+
+            __shared__ __half s_input[256];
+            s_input[tid] = d_inputs[batch_idx * 256 + tid];
+            __syncthreads();
+
+            if (tid < 10)
+            {
+                __half sum = d_biases[tid];
+                #pragma unroll 4
+                for (int i = 0; i < 256; i++)
+                {
+                    sum += s_input[i] * d_weights[i * 10 + tid];
+                }
+                d_outputs[batch_idx * 10 + tid] = sum;
+            }
+        }
+
+        extern "C" __global__ void fc2_backward(
+            const __half* __restrict__ d_fc2_outputs,
+            const int* __restrict__ d_labels,
+            const __half* __restrict__ d_fc2_inputs,
+            const __half* __restrict__ d_fc2_weights,
+            __half* __restrict__ d_fc2_weights_grad,
+            __half* __restrict__ d_fc2_biases_grad,
+            __half* __restrict__ d_fc2_in_grad,
+            const int* __restrict__ d_step)
+        {
+            const int batch_idx = blockIdx.x;
+            const int tid = threadIdx.x;
+
+            __shared__ __half s_grad[10];
+
+            int batchOffset = ((*d_step) % BATCHES_PER_EPOCH) * BATCH_SIZE;
+
+            if (tid < 10)
+            {
+                float max_logit = -1e9f;
+                for (int i = 0; i < 10; i++)
+                {
+                    float logit = __half2float(d_fc2_outputs[batch_idx * 10 + i]);
+                    if (logit > max_logit) max_logit = logit;
+                }
+
+                float sum_exp = 0.0f;
+                for (int i = 0; i < 10; i++)
+                {
+                    sum_exp += expf(__half2float(d_fc2_outputs[batch_idx * 10 + i]) - max_logit);
+                }
+
+                float prob = expf(__half2float(d_fc2_outputs[batch_idx * 10 + tid]) - max_logit) / sum_exp;
+                int correct_label = d_labels[batchOffset + batch_idx];
+                s_grad[tid] = __float2half(prob - (tid == correct_label ? 1.0f : 0.0f));
+            }
+            __syncthreads();
+
+            __half x_val = d_fc2_inputs[batch_idx * 256 + tid];
+
+            __half sum_input_grad = __float2half(0.0f);
+            #pragma unroll
+            for (int c = 0; c < 10; c++)
+            {
+                sum_input_grad += s_grad[c] * d_fc2_weights[tid * 10 + c];
+            }
+            d_fc2_in_grad[batch_idx * 256 + tid] = sum_input_grad;
+
+            if (__half2float(x_val) != 0.0f)
+            {
+                #pragma unroll
+                for (int c = 0; c < 10; c++)
+                {
+                    __half g_val = s_grad[c];
+                    if (__half2float(g_val) != 0.0f)
+                    {
+                        atomicAdd(&d_fc2_weights_grad[tid * 10 + c], g_val * x_val);
+                    }
+                }
+            }
+
+            if (tid < 10)
+            {
+                __half b_grad = s_grad[tid];
+                if (__half2float(b_grad) != 0.0f)
+                {
+                    atomicAdd(&d_fc2_biases_grad[tid], b_grad);
+                }
+            }
+        }
+
+        extern "C" __global__ void conv2_backward(
+            const __half* __restrict__ d_conv2_out_grad,
+            const __half* __restrict__ d_conv2_out_val,
+            const __half* __restrict__ d_conv2_unpooled_vals,
+            const __half* __restrict__ d_conv1_out,
+            const __half* __restrict__ d_conv2_filters,
+            __half* __restrict__ d_conv2_filters_grad,
+            __half* __restrict__ d_conv2_biases_grad,
+            __half* __restrict__ d_conv1_out_grad)
+        {
+            #define CONV2_CHUNKS 16
+            #define CONV2_BATCH_PER_CHUNK (BATCH_SIZE / CONV2_CHUNKS)
+
+            const int filter_idx = blockIdx.x / CONV2_CHUNKS;
+            const int chunk_idx = blockIdx.x % CONV2_CHUNKS;
+            const int tid = threadIdx.x;
+
+            __shared__ __half s_conv1_out[1152];
+            __shared__ __half s_filter_grad[200];
+            __shared__ __half s_bias_grad;
+            __shared__ __half s_grad[8][8];
+
+            __half zero = __float2half(0.0f);
+
+            for (int i = tid; i < 200; i += 128)
+            {
+                s_filter_grad[i] = zero;
+            }
+            if (tid == 0)
+            {
+                s_bias_grad = zero;
+            }
+            __syncthreads();
+
+            const int cx = (tid < 64) ? (tid % 8) : 0;
+            const int cy = (tid < 64) ? (tid / 8) : 0;
+            const int px = cx / 2;
+            const int py = cy / 2;
+            const int pool_idx = (py * 4 + px) * 16 + filter_idx;
+
+            const int start_b = chunk_idx * CONV2_BATCH_PER_CHUNK;
+            const int end_b = start_b + CONV2_BATCH_PER_CHUNK;
+
+            for (int b = start_b; b < end_b; b++)
+            {
+                for (int i = tid; i < 1152; i += 128)
+                {
+                    s_conv1_out[i] = d_conv1_out[b * 1152 + i];
+                }
+
+                __half out_grad = d_conv2_out_grad[b * 256 + pool_idx];
+                __half out_val = d_conv2_out_val[b * 256 + pool_idx];
+
+                __half my_val = zero;
+                if (tid < 64)
+                {
+                    my_val = d_conv2_unpooled_vals[(b * 64 + tid) * 16 + filter_idx];
+                }
+
+                __half grad = zero;
+                if (tid < 64 && __heq(my_val, out_val) && __hgt(out_val, zero))
+                {
+                    grad = out_grad;
+                }
+                if (tid < 64)
+                {
+                    s_grad[cy][cx] = grad;
+                }
+                __syncthreads();
+
+                for (int i = tid; i < 200; i += 128)
+                {
+                    int c = i % 8;
+                    int fx = (i / 8) % 5;
+                    int fy = i / 40;
+
+                    __half w_grad = zero;
+                    #pragma unroll
+                    for (int y = 0; y < 8; y++)
+                    {
+                        #pragma unroll
+                        for (int x = 0; x < 8; x++)
+                        {
+                            __half g = s_grad[y][x];
+                            if (__half2float(g) != 0.0f)
+                            {
+                                int in_x = x + fx;
+                                int in_y = y + fy;
+                                w_grad += g * s_conv1_out[(in_y * 12 + in_x) * 8 + c];
+                            }
+                        }
+                    }
+                    s_filter_grad[i] += w_grad;
+                }
+
+                if (tid == 0)
+                {
+                    __half b_grad = zero;
+                    for (int y = 0; y < 8; y++)
+                    {
+                        for (int x = 0; x < 8; x++)
+                        {
+                            b_grad += s_grad[y][x];
+                        }
+                    }
+                    s_bias_grad += b_grad;
+                }
+
+                for (int i = tid; i < 1152; i += 128)
+                {
+                    int c = i % 8;
+                    int ix = (i / 8) % 12;
+                    int iy = i / 96;
+
+                    __half sum_grad = zero;
+                    #pragma unroll
+                    for (int fy = 0; fy < 5; fy++)
+                    {
+                        #pragma unroll
+                        for (int fx = 0; fx < 5; fx++)
+                        {
+                            int x = ix - fx;
+                            int y = iy - fy;
+                            if (x >= 0 && x < 8 && y >= 0 && y < 8)
+                            {
+                                int f_idx = filter_idx * 200 + (fy * 5 + fx) * 8 + c;
+                                sum_grad += s_grad[y][x] * d_conv2_filters[f_idx];
+                            }
+                        }
+                    }
+                    if (__half2float(sum_grad) != 0.0f)
+                    {
+                        atomicAdd(&d_conv1_out_grad[b * 1152 + i], sum_grad);
+                    }
+                }
+
+                __syncthreads();
+            }
+
+            for (int i = tid; i < 200; i += 128)
+            {
+                atomicAdd(&d_conv2_filters_grad[filter_idx * 200 + i], s_filter_grad[i]);
+            }
+            if (tid == 0)
+            {
+                atomicAdd(&d_conv2_biases_grad[filter_idx], s_bias_grad);
+            }
+        }
+
+        extern "C" __global__ void conv1_backward(
+            const __half* __restrict__ d_conv1_out_grad,
+            const __half* __restrict__ d_conv1_out_val,
+            const __half* __restrict__ d_conv1_unpooled_vals,
+            const uint32_t* __restrict__ d_inputs,
+            __half* __restrict__ d_conv1_filters_grad,
+            __half* __restrict__ d_conv1_biases_grad,
+            const int* __restrict__ d_step,
+            int is_training)
+        {
+            #define CONV1_CHUNKS 16
+            #define CONV1_BATCH_PER_CHUNK (BATCH_SIZE / CONV1_CHUNKS)
+
+            const int filter_idx = blockIdx.x / CONV1_CHUNKS;
+            const int chunk_idx = blockIdx.x % CONV1_CHUNKS;
+            const int cx = threadIdx.x;
+            const int cy = threadIdx.y;
+            const int tid = cy * 24 + cx;
+
+            __shared__ __half s_filter_grad[25];
+            __shared__ __half s_bias_grad;
+            __shared__ __half s_grad[24][24];
+            __shared__ uint32_t s_image[28];
+
+            __half zero = __float2half(0.0f);
+
+            if (tid < 25)
+            {
+                s_filter_grad[tid] = zero;
+            }
+            if (tid == 0)
+            {
+                s_bias_grad = zero;
+            }
+            __syncthreads();
+
+            const int batchOffset = ((*d_step) % BATCHES_PER_EPOCH) * BATCH_SIZE;
+
+            const int px = cx / 2;
+            const int py = cy / 2;
+            const int pool_idx = (py * 12 + px) * 8 + filter_idx;
+
+            const int start_b = chunk_idx * CONV1_BATCH_PER_CHUNK;
+            const int end_b = start_b + CONV1_BATCH_PER_CHUNK;
+
+            for (int b = start_b; b < end_b; b++)
+            {
+                if (tid < 28)
+                {
+                    s_image[tid] = d_inputs[(batchOffset + b) * 28 + tid];
+                }
+
+                __half out_grad = d_conv1_out_grad[b * 1152 + pool_idx];
+                __half out_val = d_conv1_out_val[b * 1152 + pool_idx];
+                __half my_val = d_conv1_unpooled_vals[(b * 576 + cy * 24 + cx) * 8 + filter_idx];
+
+                __half grad = zero;
+                if (__heq(my_val, out_val) && __hgt(out_val, zero))
+                {
+                    grad = out_grad;
+                }
+                s_grad[cy][cx] = grad;
+                __syncthreads();
+
+                int seed = b + *d_step;
+                int dx = (is_training == 1) ? ((seed * 1103515245 + 12345) % 3 - 1) : 0;
+                int dy = (is_training == 1) ? (((seed * 1103515245 + 12345) / 3) % 3 - 1) : 0;
+
+                if (tid < 25)
+                {
+                    int fx = tid % 5;
+                    int fy = tid / 5;
+
+                    __half w_grad = zero;
+                    #pragma unroll
+                    for (int y = 0; y < 24; y++)
+                    {
+                        int shift_y = y + fy + dy;
+                        uint32_t row_bits = 0;
+                        if (shift_y >= 0 && shift_y < 28)
+                        {
+                            row_bits = s_image[shift_y];
+                        }
+                        #pragma unroll
+                        for (int x = 0; x < 24; x++)
+                        {
+                            int img_x = x + fx + dx;
+                            uint32_t pixel = 0;
+                            if (img_x >= 0 && img_x < 28)
+                            {
+                                pixel = (row_bits >> img_x) & 1u;
+                            }
+                            if (pixel == 1u)
+                            {
+                                w_grad += s_grad[y][x];
+                            }
+                        }
+                    }
+                    s_filter_grad[tid] += w_grad;
+                }
+
+                if (tid == 0)
+                {
+                    __half b_grad = zero;
+                    for (int y = 0; y < 24; y++)
+                    {
+                        for (int x = 0; x < 24; x++)
+                        {
+                            b_grad += s_grad[y][x];
+                        }
+                    }
+                    s_bias_grad += b_grad;
+                }
+                __syncthreads();
+            }
+
+            if (tid < 25)
+            {
+                atomicAdd(&d_conv1_filters_grad[filter_idx * 25 + tid], s_filter_grad[tid]);
+            }
+            if (tid == 0)
+            {
+                atomicAdd(&d_conv1_biases_grad[filter_idx], s_bias_grad);
+            }
+        }
+
+        extern "C" __global__ void adam_update(
+            __half* __restrict__ d_param,
+            __half* __restrict__ d_grad,
+            __half* __restrict__ d_m,
+            __half* __restrict__ d_v,
+            int num_elements,
+            int* __restrict__ d_step)
+        {
+            int tid = blockIdx.x * blockDim.x + threadIdx.x;
+            int stride = blockDim.x * gridDim.x;
+
+            int step_val = *d_step + 1;
+            
+            float max_lr = 0.06f; 
+            float beta1 = 0.7f;
+            float beta2 = 0.9f;
+            float epsilon = 1e-8f;
+            
+            int total_steps = TOTAL_STEPS;
+            float pct = (float)step_val / total_steps;
+            float start_lr = max_lr / 25.0f;
+            float end_lr = max_lr / 1000.0f;
+            float peak_pct = 0.3f;
+            
+            float lr = 0.0f;
+            if (pct < peak_pct)
+            {
+                float phase_pct = pct / peak_pct;
+                float cos_val = cosf(3.14159265f * phase_pct);
+                lr = start_lr + 0.5f * (max_lr - start_lr) * (1.0f - cos_val);
+            }
+            else
+            {
+                float phase_pct = (pct - peak_pct) / (1.0f - peak_pct);
+                float cos_val = cosf(3.14159265f * phase_pct);
+                lr = end_lr + 0.5f * (max_lr - end_lr) * (1.0f + cos_val);
+            }
+
+            float beta1_t = powf(beta1, step_val);
+            float beta2_t = powf(beta2, step_val);
+
+            for (int i = tid; i < num_elements; i += stride)
+            {
+                float g = __half2float(d_grad[i]) / BATCH_SIZE;
+                float m = beta1 * __half2float(d_m[i]) + (1.0f - beta1) * g;
+                float v = beta2 * __half2float(d_v[i]) + (1.0f - beta2) * g * g;
+
+                d_m[i] = __float2half(m);
+                d_v[i] = __float2half(v);
+
+                float m_hat = m / (1.0f - beta1_t);
+                float v_hat = v / (1.0f - beta2_t);
+
+                float param_val = __half2float(d_param[i]);
+                param_val -= lr * m_hat / (sqrtf(v_hat) + epsilon);
+                d_param[i] = __float2half(param_val);
+                d_grad[i] = __float2half(0.0f);
+            }
+
+            if (threadIdx.x == 0 && blockIdx.x == 0)
+            {
+                *d_step = step_val;
+            }
+        }
+        """;
+
+    public static readonly NetworkConfig ConfigV3 = new()
+    {
+        Name = "V3",
+        CudaSource = CudaSourceV3,
+        Conv1FilterCount = 8,
+        Conv1FilterSize = 5,
+        Conv2FilterCount = 16,
+        Conv2FilterSize = 5,
+        Pool2OutSize = 4,
+        HasFC1 = false,
+        BatchesPerEpoch = 300,
+        TotalSteps = 600,
+        MaxLR = 0.06f
+    };
+
     public static readonly NetworkConfig ConfigV1 = new()
     {
         Name = "V1",
@@ -1535,7 +2192,7 @@ public unsafe class Program
         }
         Console.WriteLine($"[CONFIG] Network Version: {version}");
 
-        NetworkConfig activeConfig = version == "V1" ? ConfigV1 : ConfigV2;
+        NetworkConfig activeConfig = version == "V1" ? ConfigV1 : (version == "V2" ? ConfigV2 : ConfigV3);
 
         CuInit.EnsureInit();
 
@@ -1576,7 +2233,18 @@ public unsafe class Program
         CUcontext context = default;
         try
         {
-            var options = new[] { $"--gpu-architecture=compute_{major}{minor}", "--std=c++17" };
+            var optionsList = new System.Collections.Generic.List<string>
+            {
+                $"--gpu-architecture=compute_{major}{minor}",
+                "--std=c++17"
+            };
+            string cudaPath = Environment.GetEnvironmentVariable("CUDA_PATH");
+            if (!string.IsNullOrEmpty(cudaPath))
+            {
+                optionsList.Add($"-I{Path.Combine(cudaPath, "include")}");
+            }
+
+            var options = optionsList.ToArray();
             var optionBytes = new byte[options.Length][];
             var optionPointers = stackalloc byte*[options.Length];
             for (int i = 0; i < options.Length; i++)
@@ -1651,7 +2319,8 @@ public unsafe class Program
             int conv2FilterCount = activeConfig.Conv2FilterCount;
             int totalParamElements = activeConfig.TotalParamElements;
 
-            nuint paramBytes = (nuint)(totalParamElements * sizeof(float));
+            int elementSize = activeConfig.Name == "V3" ? sizeof(ushort) : sizeof(float);
+            nuint paramBytes = (nuint)(totalParamElements * elementSize);
             cuMemAlloc(out var d_allParams, paramBytes).Ok();
             cuMemAlloc(out var d_allParamGrads, paramBytes).Ok();
             cuMemAlloc(out var d_allParamM, paramBytes).Ok();
@@ -1665,19 +2334,19 @@ public unsafe class Program
             var conv2Param = activeConfig.GetParam("conv2");
             var fc2Param = activeConfig.GetParam("fc2");
 
-            CUdeviceptr d_conv1Filters = SliceDevicePtr(d_allParams, conv1Param.WeightOffset);
-            CUdeviceptr d_conv1Biases = SliceDevicePtr(d_allParams, conv1Param.BiasOffset);
-            CUdeviceptr d_conv2Filters = SliceDevicePtr(d_allParams, conv2Param.WeightOffset);
-            CUdeviceptr d_conv2Biases = SliceDevicePtr(d_allParams, conv2Param.BiasOffset);
-            CUdeviceptr d_fc2Weights = SliceDevicePtr(d_allParams, fc2Param.WeightOffset);
-            CUdeviceptr d_fc2Biases = SliceDevicePtr(d_allParams, fc2Param.BiasOffset);
+            CUdeviceptr d_conv1Filters = SliceDevicePtr(d_allParams, conv1Param.WeightOffset, elementSize);
+            CUdeviceptr d_conv1Biases = SliceDevicePtr(d_allParams, conv1Param.BiasOffset, elementSize);
+            CUdeviceptr d_conv2Filters = SliceDevicePtr(d_allParams, conv2Param.WeightOffset, elementSize);
+            CUdeviceptr d_conv2Biases = SliceDevicePtr(d_allParams, conv2Param.BiasOffset, elementSize);
+            CUdeviceptr d_fc2Weights = SliceDevicePtr(d_allParams, fc2Param.WeightOffset, elementSize);
+            CUdeviceptr d_fc2Biases = SliceDevicePtr(d_allParams, fc2Param.BiasOffset, elementSize);
 
-            CUdeviceptr d_conv1FiltersGrad = SliceDevicePtr(d_allParamGrads, conv1Param.WeightOffset);
-            CUdeviceptr d_conv1BiasesGrad = SliceDevicePtr(d_allParamGrads, conv1Param.BiasOffset);
-            CUdeviceptr d_conv2FiltersGrad = SliceDevicePtr(d_allParamGrads, conv2Param.WeightOffset);
-            CUdeviceptr d_conv2BiasesGrad = SliceDevicePtr(d_allParamGrads, conv2Param.BiasOffset);
-            CUdeviceptr d_fc2WeightsGrad = SliceDevicePtr(d_allParamGrads, fc2Param.WeightOffset);
-            CUdeviceptr d_fc2BiasesGrad = SliceDevicePtr(d_allParamGrads, fc2Param.BiasOffset);
+            CUdeviceptr d_conv1FiltersGrad = SliceDevicePtr(d_allParamGrads, conv1Param.WeightOffset, elementSize);
+            CUdeviceptr d_conv1BiasesGrad = SliceDevicePtr(d_allParamGrads, conv1Param.BiasOffset, elementSize);
+            CUdeviceptr d_conv2FiltersGrad = SliceDevicePtr(d_allParamGrads, conv2Param.WeightOffset, elementSize);
+            CUdeviceptr d_conv2BiasesGrad = SliceDevicePtr(d_allParamGrads, conv2Param.BiasOffset, elementSize);
+            CUdeviceptr d_fc2WeightsGrad = SliceDevicePtr(d_allParamGrads, fc2Param.WeightOffset, elementSize);
+            CUdeviceptr d_fc2BiasesGrad = SliceDevicePtr(d_allParamGrads, fc2Param.BiasOffset, elementSize);
 
             CUdeviceptr d_fc1Weights = default, d_fc1Biases = default;
             CUdeviceptr d_fc1WeightsGrad = default, d_fc1BiasesGrad = default;
@@ -1685,10 +2354,10 @@ public unsafe class Program
             if (activeConfig.HasFC1)
             {
                 var fc1Param = activeConfig.GetParam("fc1");
-                d_fc1Weights = SliceDevicePtr(d_allParams, fc1Param.WeightOffset);
-                d_fc1Biases = SliceDevicePtr(d_allParams, fc1Param.BiasOffset);
-                d_fc1WeightsGrad = SliceDevicePtr(d_allParamGrads, fc1Param.WeightOffset);
-                d_fc1BiasesGrad = SliceDevicePtr(d_allParamGrads, fc1Param.BiasOffset);
+                d_fc1Weights = SliceDevicePtr(d_allParams, fc1Param.WeightOffset, elementSize);
+                d_fc1Biases = SliceDevicePtr(d_allParams, fc1Param.BiasOffset, elementSize);
+                d_fc1WeightsGrad = SliceDevicePtr(d_allParamGrads, fc1Param.WeightOffset, elementSize);
+                d_fc1BiasesGrad = SliceDevicePtr(d_allParamGrads, fc1Param.BiasOffset, elementSize);
             }
 
             int conv1OutSize = BatchSize * activeConfig.Conv1OutPerSample;
@@ -1696,31 +2365,31 @@ public unsafe class Program
             int conv2OutSize = BatchSize * activeConfig.Conv2OutPerSample;
             int conv2UnpooledSize = BatchSize * activeConfig.Conv2UnpooledPerSample;
 
-            cuMemAlloc(out var d_conv1Out, (nuint)(conv1OutSize * sizeof(float))).Ok();
-            cuMemAlloc(out var d_conv1Unpooled, (nuint)(conv1UnpooledSize * sizeof(float))).Ok();
-            cuMemAlloc(out var d_conv2Out, (nuint)(conv2OutSize * sizeof(float))).Ok();
-            cuMemAlloc(out var d_conv2Unpooled, (nuint)(conv2UnpooledSize * sizeof(float))).Ok();
+            cuMemAlloc(out var d_conv1Out, (nuint)(conv1OutSize * elementSize)).Ok();
+            cuMemAlloc(out var d_conv1Unpooled, (nuint)(conv1UnpooledSize * elementSize)).Ok();
+            cuMemAlloc(out var d_conv2Out, (nuint)(conv2OutSize * elementSize)).Ok();
+            cuMemAlloc(out var d_conv2Unpooled, (nuint)(conv2UnpooledSize * elementSize)).Ok();
 
             CUdeviceptr d_fc1Out = default;
             if (activeConfig.HasFC1)
             {
-                cuMemAlloc(out d_fc1Out, (nuint)(BatchSize * activeConfig.FC1Outputs * sizeof(float))).Ok();
+                cuMemAlloc(out d_fc1Out, (nuint)(BatchSize * activeConfig.FC1Outputs * elementSize)).Ok();
             }
-            cuMemAlloc(out var d_fc2Out, (nuint)(BatchSize * 10 * sizeof(float))).Ok();
+            cuMemAlloc(out var d_fc2Out, (nuint)(BatchSize * 10 * elementSize)).Ok();
 
             int conv1OutGradSize = BatchSize * activeConfig.Conv1OutPerSample;
-            cuMemAlloc(out var d_conv1OutGrad, (nuint)(conv1OutGradSize * sizeof(float))).Ok();
+            cuMemAlloc(out var d_conv1OutGrad, (nuint)(conv1OutGradSize * elementSize)).Ok();
 
             CUdeviceptr d_fc1OutGrad = default, d_conv2OutGrad = default;
             CUdeviceptr d_fc2InGrad = default;
             if (activeConfig.HasFC1)
             {
-                cuMemAlloc(out d_fc1OutGrad, (nuint)(BatchSize * activeConfig.FC1Outputs * sizeof(float))).Ok();
-                cuMemAlloc(out d_conv2OutGrad, (nuint)(BatchSize * activeConfig.FC1Inputs * sizeof(float))).Ok();
+                cuMemAlloc(out d_fc1OutGrad, (nuint)(BatchSize * activeConfig.FC1Outputs * elementSize)).Ok();
+                cuMemAlloc(out d_conv2OutGrad, (nuint)(BatchSize * activeConfig.FC1Inputs * elementSize)).Ok();
             }
             else
             {
-                cuMemAlloc(out d_fc2InGrad, (nuint)(BatchSize * activeConfig.FC2Inputs * sizeof(float))).Ok();
+                cuMemAlloc(out d_fc2InGrad, (nuint)(BatchSize * activeConfig.FC2Inputs * elementSize)).Ok();
             }
 
             cuMemAlloc(out var d_step, (nuint)sizeof(int)).Ok();
@@ -1878,6 +2547,7 @@ public unsafe class Program
                 12, 1111, 19, 37, 73, 97, 101, 223, 317, 503, 709, 883];
 
             var h_fcOut = new float[BatchSize * ClassCount];
+            var h_fcOutHalf = new Half[BatchSize * ClassCount];
 
             var argsTestConv1 = stackalloc void*[]
             {
@@ -1949,8 +2619,20 @@ public unsafe class Program
                             256u, 1u, 1u, 0u, stream, argsFc2V2, null).Ok();
                     }
 
-                    cuMemcpyDtoH((IntPtr)Unsafe.AsPointer(ref h_fcOut[0]),
-                        d_fc2Out, (nuint)(h_fcOut.Length * sizeof(float))).Ok();
+                    if (activeConfig.Name == "V3")
+                    {
+                        cuMemcpyDtoH((IntPtr)Unsafe.AsPointer(ref h_fcOutHalf[0]),
+                            d_fc2Out, (nuint)(h_fcOutHalf.Length * sizeof(Half))).Ok();
+                        for (int i = 0; i < h_fcOut.Length; i++)
+                        {
+                            h_fcOut[i] = (float)h_fcOutHalf[i];
+                        }
+                    }
+                    else
+                    {
+                        cuMemcpyDtoH((IntPtr)Unsafe.AsPointer(ref h_fcOut[0]),
+                            d_fc2Out, (nuint)(h_fcOut.Length * sizeof(float))).Ok();
+                    }
 
                     for (int b = 0; b < BatchSize; b++)
                     {
@@ -2071,33 +2753,56 @@ public unsafe class Program
         }
     }
 
-    static CUdeviceptr SliceDevicePtr(CUdeviceptr ptr, int offsetElements)
+    static CUdeviceptr SliceDevicePtr(CUdeviceptr ptr, int offsetElements, int elementSize)
     {
-        return new CUdeviceptr((IntPtr)(ptr.Value.ToInt64() + offsetElements * sizeof(float)));
+        return new CUdeviceptr((IntPtr)(ptr.Value.ToInt64() + offsetElements * elementSize));
     }
 
-    static void InitializeParameters(CUdeviceptr d_weights, CUdeviceptr d_biases, int outFeatures, int inFeatures, int seed)
+    static void InitializeParameters(CUdeviceptr d_weights, CUdeviceptr d_biases, int outFeatures, int inFeatures, int seed, bool isHalf)
     {
         var rand = new Random(seed);
         double stdDev = Math.Sqrt(2.0 / inFeatures);
 
-        float[] h_weights = new float[outFeatures * inFeatures];
-        for (int i = 0; i < h_weights.Length; i++)
+        if (isHalf)
         {
-            double u1 = 1.0 - rand.NextDouble();
-            double u2 = 1.0 - rand.NextDouble();
-            double normalRand = Math.Sqrt(-2.0 * Math.Log(u1)) * Math.Sin(2.0 * Math.PI * u2);
-            h_weights[i] = (float)(normalRand * stdDev);
-        }
+            Half[] h_weights = new Half[outFeatures * inFeatures];
+            for (int i = 0; i < h_weights.Length; i++)
+            {
+                double u1 = 1.0 - rand.NextDouble();
+                double u2 = 1.0 - rand.NextDouble();
+                double normalRand = Math.Sqrt(-2.0 * Math.Log(u1)) * Math.Sin(2.0 * Math.PI * u2);
+                h_weights[i] = (Half)(normalRand * stdDev);
+            }
 
-        float[] h_biases = new float[outFeatures];
-        for (int i = 0; i < h_biases.Length; i++)
+            Half[] h_biases = new Half[outFeatures];
+            for (int i = 0; i < h_biases.Length; i++)
+            {
+                h_biases[i] = (Half)0.01f;
+            }
+
+            cuMemcpyHtoD(d_weights, (IntPtr)Unsafe.AsPointer(ref h_weights[0]), (nuint)(h_weights.Length * sizeof(Half))).Ok();
+            cuMemcpyHtoD(d_biases, (IntPtr)Unsafe.AsPointer(ref h_biases[0]), (nuint)(h_biases.Length * sizeof(Half))).Ok();
+        }
+        else
         {
-            h_biases[i] = 0.01f;
-        }
+            float[] h_weights = new float[outFeatures * inFeatures];
+            for (int i = 0; i < h_weights.Length; i++)
+            {
+                double u1 = 1.0 - rand.NextDouble();
+                double u2 = 1.0 - rand.NextDouble();
+                double normalRand = Math.Sqrt(-2.0 * Math.Log(u1)) * Math.Sin(2.0 * Math.PI * u2);
+                h_weights[i] = (float)(normalRand * stdDev);
+            }
 
-        cuMemcpyHtoD(d_weights, (IntPtr)Unsafe.AsPointer(ref h_weights[0]), (nuint)(h_weights.Length * sizeof(float))).Ok();
-        cuMemcpyHtoD(d_biases, (IntPtr)Unsafe.AsPointer(ref h_biases[0]), (nuint)(h_biases.Length * sizeof(float))).Ok();
+            float[] h_biases = new float[outFeatures];
+            for (int i = 0; i < h_biases.Length; i++)
+            {
+                h_biases[i] = 0.01f;
+            }
+
+            cuMemcpyHtoD(d_weights, (IntPtr)Unsafe.AsPointer(ref h_weights[0]), (nuint)(h_weights.Length * sizeof(float))).Ok();
+            cuMemcpyHtoD(d_biases, (IntPtr)Unsafe.AsPointer(ref h_biases[0]), (nuint)(h_biases.Length * sizeof(float))).Ok();
+        }
     }
 
     static void InitializeModelParameters(
@@ -2108,20 +2813,21 @@ public unsafe class Program
         CUdeviceptr d_fc2Weights, CUdeviceptr d_fc2Biases,
         int seed)
     {
+        bool isHalf = activeConfig.Name == "V3";
         var conv1 = activeConfig.GetParam("conv1");
-        InitializeParameters(d_conv1Filters, d_conv1Biases, conv1.OutFeatures, conv1.InFeatures, seed);
+        InitializeParameters(d_conv1Filters, d_conv1Biases, conv1.OutFeatures, conv1.InFeatures, seed, isHalf);
 
         var conv2 = activeConfig.GetParam("conv2");
-        InitializeParameters(d_conv2Filters, d_conv2Biases, conv2.OutFeatures, conv2.InFeatures, seed);
+        InitializeParameters(d_conv2Filters, d_conv2Biases, conv2.OutFeatures, conv2.InFeatures, seed, isHalf);
 
         if (activeConfig.HasFC1)
         {
             var fc1 = activeConfig.GetParam("fc1");
-            InitializeParameters(d_fc1Weights, d_fc1Biases, fc1.OutFeatures, fc1.InFeatures, seed);
+            InitializeParameters(d_fc1Weights, d_fc1Biases, fc1.OutFeatures, fc1.InFeatures, seed, isHalf);
         }
 
         var fc2 = activeConfig.GetParam("fc2");
-        InitializeParameters(d_fc2Weights, d_fc2Biases, fc2.OutFeatures, fc2.InFeatures, seed);
+        InitializeParameters(d_fc2Weights, d_fc2Biases, fc2.OutFeatures, fc2.InFeatures, seed, isHalf);
     }
 
     static void EnsureDatasetFile(string filePath, string url)
