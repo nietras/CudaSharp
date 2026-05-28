@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
@@ -2184,7 +2184,7 @@ public unsafe partial class Program
         Pool2OutSize = 5,
         HasFC1 = false,
         BatchesPerEpoch = 200,
-        TotalSteps = 60,
+        TotalSteps = 300,
         MaxLR = 0.006f
     };
 
