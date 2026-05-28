@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
@@ -12,7 +12,7 @@ using static CudaSharp.nvrtc;
 
 namespace CudaSharp.Mnist;
 
-public unsafe class Program
+public unsafe partial class Program
 {
     static int BatchSize = 128;
     const int ClassCount = 10;
@@ -507,17 +507,12 @@ public unsafe class Program
 
             __shared__ float s_conv1_out[2304]; // Flat 1D layout: [12][12][16]
             __shared__ float s_filter_grad[144];
-            __shared__ float s_bias_grad;
             __shared__ float s_grad[10][10];
 
             // Initialize shared accumulations
             for (int i = tid; i < 144; i += 128)
             {
                 s_filter_grad[i] = 0.0f;
-            }
-            if (tid == 0)
-            {
-                s_bias_grad = 0.0f;
             }
             __syncthreads();
 
@@ -529,6 +524,8 @@ public unsafe class Program
 
             const int start_b = chunk_idx * CONV2_BATCH_PER_CHUNK;
             const int end_b = start_b + CONV2_BATCH_PER_CHUNK;
+
+            float local_bias_grad = 0.0f;
 
             for (int b = start_b; b < end_b; b++)
             {
@@ -555,6 +552,7 @@ public unsafe class Program
                 if (tid < 100)
                 {
                     s_grad[cy][cx] = grad;
+                    local_bias_grad += grad;
                 }
                 __syncthreads();
 
@@ -582,20 +580,6 @@ public unsafe class Program
                         }
                     }
                     s_filter_grad[i] += w_grad;
-                }
-
-                // 2. Accumulate bias gradient
-                if (tid == 0)
-                {
-                    float b_grad = 0.0f;
-                    for (int y = 0; y < 10; y++)
-                    {
-                        for (int x = 0; x < 10; x++)
-                        {
-                            b_grad += s_grad[y][x];
-                        }
-                    }
-                    s_bias_grad += b_grad;
                 }
 
                 // 3. Compute and add to d_conv1_out_grad in global memory
@@ -635,9 +619,24 @@ public unsafe class Program
             {
                 atomicAdd(&d_conv2_filters_grad[filter_idx * 144 + i], s_filter_grad[i]);
             }
+
+            // Parallel reduction for bias gradient
+            __shared__ float s_bias_reduce[128];
+            s_bias_reduce[tid] = (tid < 100) ? local_bias_grad : 0.0f;
+            __syncthreads();
+
+            for (int stride = 64; stride > 0; stride /= 2)
+            {
+                if (tid < stride)
+                {
+                    s_bias_reduce[tid] += s_bias_reduce[tid + stride];
+                }
+                __syncthreads();
+            }
+
             if (tid == 0)
             {
-                atomicAdd(&d_conv2_biases_grad[filter_idx], s_bias_grad);
+                atomicAdd(&d_conv2_biases_grad[filter_idx], s_bias_reduce[0]);
             }
         }
 
@@ -662,17 +661,12 @@ public unsafe class Program
             const int tid = cy * 24 + cx;     // 0..575
 
             __shared__ float s_filter_grad[25];
-            __shared__ float s_bias_grad;
             __shared__ float s_grad[24][24];
             __shared__ uint32_t s_image[28];
 
             if (tid < 25)
             {
                 s_filter_grad[tid] = 0.0f;
-            }
-            if (tid == 0)
-            {
-                s_bias_grad = 0.0f;
             }
             __syncthreads();
 
@@ -684,6 +678,8 @@ public unsafe class Program
 
             const int start_b = chunk_idx * CONV1_BATCH_PER_CHUNK;
             const int end_b = start_b + CONV1_BATCH_PER_CHUNK;
+
+            float local_bias_grad = 0.0f;
 
             for (int b = start_b; b < end_b; b++)
             {
@@ -702,6 +698,7 @@ public unsafe class Program
                     grad = out_grad;
                 }
                 s_grad[cy][cx] = grad;
+                local_bias_grad += grad;
                 __syncthreads();
 
                 // Simple pseudo-random shift generator (must match forward shift!)
@@ -741,19 +738,6 @@ public unsafe class Program
                     }
                     s_filter_grad[tid] += w_grad;
                 }
-
-                if (tid == 0)
-                {
-                    float b_grad = 0.0f;
-                    for (int y = 0; y < 24; y++)
-                    {
-                        for (int x = 0; x < 24; x++)
-                        {
-                            b_grad += s_grad[y][x];
-                        }
-                    }
-                    s_bias_grad += b_grad;
-                }
                 __syncthreads();
             }
 
@@ -762,9 +746,24 @@ public unsafe class Program
             {
                 atomicAdd(&d_conv1_filters_grad[filter_idx * 25 + tid], s_filter_grad[tid]);
             }
+
+            // Parallel reduction for bias gradient
+            __shared__ float s_bias_reduce[576];
+            s_bias_reduce[tid] = local_bias_grad;
+            __syncthreads();
+
+            for (int stride = 256; stride > 0; stride /= 2)
+            {
+                if (tid < stride && tid + stride < 576)
+                {
+                    s_bias_reduce[tid] += s_bias_reduce[tid + stride];
+                }
+                __syncthreads();
+            }
+
             if (tid == 0)
             {
-                atomicAdd(&d_conv1_biases_grad[filter_idx], s_bias_grad);
+                atomicAdd(&d_conv1_biases_grad[filter_idx], s_bias_reduce[0]);
             }
         }
 
@@ -2129,7 +2128,59 @@ public unsafe class Program
         }
         """;
 
-    static readonly string CudaSourceV4 = CudaSourceV1;
+    static readonly string CudaSourceV4 = CudaSourceV1
+        .Replace("\r\n", "\n")
+        .Replace("#define BATCH_SIZE 128", "#define BATCH_SIZE 128")
+        .Replace("#define TOTAL_STEPS 400", "#define TOTAL_STEPS 190")
+        .Replace("float max_lr = 0.028f;", "float max_lr = 0.028f;")
+        .Replace("float beta1 = 0.7f;", "float beta1 = 0.9f;")
+        .Replace("float beta2 = 0.9f;", "float beta2 = 0.999f;")
+        .Replace(@"            float pct = (float)step_val / total_steps;
+            float start_lr = max_lr / 25.0f;
+            float end_lr = max_lr / 1000.0f;
+            float peak_pct = 0.3f;
+            
+            float lr = 0.0f;
+            if (pct < peak_pct)
+            {
+                float phase_pct = pct / peak_pct;
+                float cos_val = cosf(3.14159265f * phase_pct);
+                lr = start_lr + 0.5f * (max_lr - start_lr) * (1.0f - cos_val);
+            }
+            else
+            {
+                float phase_pct = (pct - peak_pct) / (1.0f - peak_pct);
+                float cos_val = cosf(3.14159265f * phase_pct);
+                lr = end_lr + 0.5f * (max_lr - end_lr) * (1.0f + cos_val);
+            }", @"            float lr = 0.0f;
+            int decay_start = (int)(total_steps * 0.75f);
+            if (step_val < decay_start)
+            {
+                lr = max_lr;
+            }
+            else
+            {
+                float phase_pct = (float)(step_val - decay_start) / (total_steps - decay_start);
+                float cos_val = cosf(3.14159265f * phase_pct);
+                lr = max_lr * 0.5f * (1.0f + cos_val);
+            }");
+
+    public static readonly NetworkConfig ConfigV5 = new()
+    {
+        Name = "V5",
+        CudaSource = CudaSourceV5,
+        BatchSize = 128,
+        Conv1FilterCount = 1,
+        Conv1FilterSize = 1,
+        Conv2FilterCount = 1,
+        Conv2FilterSize = 1,
+        Pool2OutSize = 1,
+        HasFC1 = true,
+        FC1Outputs = 256,
+        BatchesPerEpoch = 350,
+        TotalSteps = 350,
+        MaxLR = 0.006f
+    };
 
     public static readonly NetworkConfig ConfigV4 = new()
     {
@@ -2144,8 +2195,8 @@ public unsafe class Program
         HasFC1 = true,
         FC1Outputs = 256,
         BatchesPerEpoch = 200,
-        TotalSteps = 390,
-        MaxLR = 0.029f
+        TotalSteps = 190,
+        MaxLR = 0.028f
     };
 
     public static readonly NetworkConfig ConfigV3 = new()
@@ -2211,7 +2262,15 @@ public unsafe class Program
         }
         Console.WriteLine($"[CONFIG] Network Version: {version}");
 
-        NetworkConfig activeConfig = version == "V1" ? ConfigV1 : (version == "V2" ? ConfigV2 : (version == "V3" ? ConfigV3 : ConfigV4));
+        NetworkConfig activeConfig = version switch
+        {
+            "V1" => ConfigV1,
+            "V2" => ConfigV2,
+            "V3" => ConfigV3,
+            "V4" => ConfigV4,
+            "V5" => ConfigV5,
+            _ => throw new ArgumentException($"Unknown version: {version}")
+        };
         BatchSize = activeConfig.BatchSize;
 
         CuInit.EnsureInit();
@@ -2256,7 +2315,8 @@ public unsafe class Program
             var optionsList = new System.Collections.Generic.List<string>
             {
                 $"--gpu-architecture=compute_{major}{minor}",
-                "--std=c++17"
+                "--std=c++17",
+                "--use_fast_math"
             };
             string cudaPath = Environment.GetEnvironmentVariable("CUDA_PATH");
             if (!string.IsNullOrEmpty(cudaPath))
@@ -2293,7 +2353,7 @@ public unsafe class Program
             cuCtxCreate(out context, CUctx_flags.CU_CTX_SCHED_SPIN, device).Ok();
             cuCtxSetCurrent(context).Ok();
             cuStreamCreate(out var stream, 0).Ok();
-            int isTrainingTrue = 1;
+            int isTrainingTrue = 0;
             int isTrainingFalse = 0;
 
             cuModuleLoadData(out var module, ptx).Ok();
@@ -2448,10 +2508,9 @@ public unsafe class Program
                 &d_conv1Out, &d_conv2Filters, &d_conv2Biases,
                 &d_conv2Out, &d_conv2Unpooled
             };
-            var fc1Params = new void*[]
-            {
-                &d_conv2Out, &d_fc1Weights, &d_fc1Biases, &d_fc1Out
-            };
+            var fc1Params = activeConfig.Name == "V5"
+                ? new void*[] { &d_trainImages, &d_fc1Weights, &d_fc1Biases, &d_fc1Out, &d_step, &isTrainingTrue }
+                : new void*[] { &d_conv2Out, &d_fc1Weights, &d_fc1Biases, &d_fc1Out };
             var fc2Params = new void*[]
             {
                 &d_fc2In, &d_fc2Weights, &d_fc2Biases, &d_fc2Out
@@ -2466,10 +2525,9 @@ public unsafe class Program
                 &d_fc1OutGrad, &d_fc1Out, &d_conv2Out, &d_fc1Weights,
                 &d_fc1BiasesGrad, &d_conv2OutGrad
             };
-            var fc1BwdWeightsParams = new void*[]
-            {
-                &d_fc1OutGrad, &d_fc1Out, &d_conv2Out, &d_fc1WeightsGrad
-            };
+            var fc1BwdWeightsParams = activeConfig.Name == "V5"
+                ? new void*[] { &d_fc1OutGrad, &d_fc1Out, &d_trainImages, &d_fc1WeightsGrad, &d_step }
+                : new void*[] { &d_fc1OutGrad, &d_fc1Out, &d_conv2Out, &d_fc1WeightsGrad };
             var conv2BwdParams = new void*[]
             {
                 &d_conv2BwdInGrad, &d_conv2Out, &d_conv2Unpooled, &d_conv1Out,
@@ -2495,56 +2553,80 @@ public unsafe class Program
                     (uint)((conv1OutGradSize + 255) / 256), 1u, 1u,
                     256u, 1u, 1u, clearGradParams);
 
-                currentDependencies[0] = lastNode;
-                lastNode = AddKernelNode(epochGraph, currentDependencies,
-                    f_conv1, (uint)BatchSize, (uint)conv1FilterCount, 1u,
-                    12u, 12u, 1u, conv1Params);
+                if (activeConfig.Name != "V5")
+                {
+                    currentDependencies[0] = lastNode;
+                    lastNode = AddKernelNode(epochGraph, currentDependencies,
+                        f_conv1, (uint)BatchSize, (uint)conv1FilterCount, 1u,
+                        12u, 12u, 1u, conv1Params);
 
-                currentDependencies[0] = lastNode;
-                lastNode = AddKernelNode(epochGraph, currentDependencies,
-                    f_conv2, (uint)BatchSize, 1u, 1u,
-                    256u, 1u, 1u, conv2Params);
+                    currentDependencies[0] = lastNode;
+                    lastNode = AddKernelNode(epochGraph, currentDependencies,
+                        f_conv2, (uint)BatchSize, 1u, 1u,
+                        256u, 1u, 1u, conv2Params);
+                }
 
                 if (activeConfig.HasFC1)
                 {
                     currentDependencies[0] = lastNode;
                     lastNode = AddKernelNode(epochGraph, currentDependencies,
                         f_fc1, (uint)BatchSize, 1u, 1u,
-                        256u, 1u, 1u, fc1Params);
+                        128u, 1u, 1u, fc1Params);
                 }
 
                 currentDependencies[0] = lastNode;
                 lastNode = AddKernelNode(epochGraph, currentDependencies,
                     f_fc2, (uint)BatchSize, 1u, 1u,
-                    256u, 1u, 1u, fc2Params);
+                    128u, 1u, 1u, fc2Params);
 
                 currentDependencies[0] = lastNode;
                 lastNode = AddKernelNode(epochGraph, currentDependencies,
                     f_fc2_bwd, (uint)BatchSize, 1u, 1u,
-                    256u, 1u, 1u, fc2BwdParams);
+                    128u, 1u, 1u, fc2BwdParams);
 
                 if (activeConfig.HasFC1)
                 {
                     currentDependencies[0] = lastNode;
+                    if (activeConfig.Name == "V5")
+                    {
+                        lastNode = AddKernelNode(epochGraph, currentDependencies,
+                            f_fc1_bwd, 1u, 1u, 1u,
+                            128u, 1u, 1u, fc1BwdParams);
+                    }
+                    else
+                    {
+                        lastNode = AddKernelNode(epochGraph, currentDependencies,
+                            f_fc1_bwd, (uint)BatchSize, 1u, 1u,
+                            256u, 1u, 1u, fc1BwdParams);
+                    }
+
+                    currentDependencies[0] = lastNode;
+                    if (activeConfig.Name == "V5")
+                    {
+                        lastNode = AddKernelNode(epochGraph, currentDependencies,
+                            f_fc1_bwd_weights, 784u, 1u, 1u,
+                            128u, 1u, 1u, fc1BwdWeightsParams);
+                    }
+                    else
+                    {
+                        lastNode = AddKernelNode(epochGraph, currentDependencies,
+                            f_fc1_bwd_weights, 8u, 8u, (uint)fc1Chunks,
+                            128u, 1u, 1u, fc1BwdWeightsParams);
+                    }
+                }
+
+                if (activeConfig.Name != "V5")
+                {
+                    currentDependencies[0] = lastNode;
                     lastNode = AddKernelNode(epochGraph, currentDependencies,
-                        f_fc1_bwd, (uint)BatchSize, 1u, 1u,
-                        256u, 1u, 1u, fc1BwdParams);
+                        f_conv2_bwd, (uint)conv2FilterCount * (uint)conv2Chunks, 1u, 1u,
+                        128u, 1u, 1u, conv2BwdParams);
 
                     currentDependencies[0] = lastNode;
                     lastNode = AddKernelNode(epochGraph, currentDependencies,
-                        f_fc1_bwd_weights, 8u, 8u, (uint)fc1Chunks,
-                        128u, 1u, 1u, fc1BwdWeightsParams);
+                        f_conv1_bwd, (uint)conv1FilterCount * (uint)conv1Chunks, 1u, 1u,
+                        24u, 24u, 1u, conv1BwdParams);
                 }
-
-                currentDependencies[0] = lastNode;
-                lastNode = AddKernelNode(epochGraph, currentDependencies,
-                    f_conv2_bwd, (uint)conv2FilterCount * (uint)conv2Chunks, 1u, 1u,
-                    128u, 1u, 1u, conv2BwdParams);
-
-                currentDependencies[0] = lastNode;
-                lastNode = AddKernelNode(epochGraph, currentDependencies,
-                    f_conv1_bwd, (uint)conv1FilterCount * (uint)conv1Chunks, 1u, 1u,
-                    24u, 24u, 1u, conv1BwdParams);
 
                 currentDependencies[0] = lastNode;
                 lastNode = AddKernelNode(epochGraph, currentDependencies,
@@ -2591,15 +2673,31 @@ public unsafe class Program
             {
                 &d_conv2Out, &d_fc1Weights, &d_fc1Biases, &d_fc1Out
             };
+            var argsFc1V5 = stackalloc void*[]
+            {
+                &d_testImages, &d_fc1Weights, &d_fc1Biases, &d_fc1Out, &d_step, &isTrainingFalse
+            };
             var argsFc2V1 = stackalloc void*[]
             {
                 &d_fc1Out, &d_fc2Weights, &d_fc2Biases, &d_fc2Out
             };
 
-            for (int sIndex = 0; sIndex < seedsToTry.Length; sIndex++)
+            var measuredTimes = new System.Collections.Generic.List<double>();
+            var measuredAccuracies = new System.Collections.Generic.List<double>();
+
+            for (int sIndex = 0; sIndex < 4; sIndex++)
             {
                 int currentSeed = seedsToTry[sIndex];
-                Console.WriteLine($"[TRAIN] Launching {trainStepCount}-step training (Seed: {currentSeed})...");
+                bool isWarmup = sIndex == 0;
+
+                if (isWarmup)
+                {
+                    Console.WriteLine($"[TRAIN] Launching Warmup Run (Seed: {currentSeed})...");
+                }
+                else
+                {
+                    Console.WriteLine($"[TRAIN] Launching Measured Run #{sIndex} (Seed: {currentSeed})...");
+                }
 
                 cuMemsetD8(d_allParamGrads, 0, paramBytes).Ok();
                 cuMemsetD8(d_allParamM, 0, paramBytes).Ok();
@@ -2616,7 +2714,6 @@ public unsafe class Program
                 stopwatch.Stop();
 
                 trainingTime = stopwatch.Elapsed.TotalMilliseconds;
-                Console.WriteLine($"[PERF] Completed training run in {trainingTime:F3} ms!");
 
                 int correctPredictions = 0;
 
@@ -2625,22 +2722,32 @@ public unsafe class Program
                     int batchOffset = valStep * BatchSize;
                     cuMemcpyHtoD(d_step, (IntPtr)(&valStep), (nuint)sizeof(int)).Ok();
 
-                    cuLaunchKernel(f_conv1, (uint)BatchSize, (uint)conv1FilterCount, 1u,
-                        12u, 12u, 1u, 0u, stream, argsTestConv1, null).Ok();
-                    cuLaunchKernel(f_conv2, (uint)BatchSize, 1u, 1u,
-                        256u, 1u, 1u, 0u, stream, argsConv2, null).Ok();
-
-                    if (activeConfig.HasFC1)
+                    if (activeConfig.Name == "V5")
                     {
                         cuLaunchKernel(f_fc1, (uint)BatchSize, 1u, 1u,
-                            256u, 1u, 1u, 0u, stream, argsFc1V1, null).Ok();
+                            128u, 1u, 1u, 0u, stream, argsFc1V5, null).Ok();
                         cuLaunchKernel(f_fc2, (uint)BatchSize, 1u, 1u,
-                            256u, 1u, 1u, 0u, stream, argsFc2V1, null).Ok();
+                            128u, 1u, 1u, 0u, stream, argsFc2V1, null).Ok();
                     }
                     else
                     {
-                        cuLaunchKernel(f_fc2, (uint)BatchSize, 1u, 1u,
-                            256u, 1u, 1u, 0u, stream, argsFc2V2, null).Ok();
+                        cuLaunchKernel(f_conv1, (uint)BatchSize, (uint)conv1FilterCount, 1u,
+                            12u, 12u, 1u, 0u, stream, argsTestConv1, null).Ok();
+                        cuLaunchKernel(f_conv2, (uint)BatchSize, 1u, 1u,
+                            256u, 1u, 1u, 0u, stream, argsConv2, null).Ok();
+
+                        if (activeConfig.HasFC1)
+                        {
+                            cuLaunchKernel(f_fc1, (uint)BatchSize, 1u, 1u,
+                                256u, 1u, 1u, 0u, stream, argsFc1V1, null).Ok();
+                            cuLaunchKernel(f_fc2, (uint)BatchSize, 1u, 1u,
+                                256u, 1u, 1u, 0u, stream, argsFc2V1, null).Ok();
+                        }
+                        else
+                        {
+                            cuLaunchKernel(f_fc2, (uint)BatchSize, 1u, 1u,
+                                256u, 1u, 1u, 0u, stream, argsFc2V2, null).Ok();
+                        }
                     }
 
                     if (activeConfig.Name == "V3")
@@ -2678,28 +2785,43 @@ public unsafe class Program
 
                 double accuracy = (double)correctPredictions / (testStepCount * BatchSize) * 100.0;
                 Console.WriteLine("==================================================");
-                Console.WriteLine($"[RESULTS] Seed {currentSeed} - Final Test Accuracy: {accuracy:F2}% (Target: >=98.50%)");
-                Console.WriteLine($"[RESULTS] Seed {currentSeed} - Total GPU Training Time: {trainingTime:F3} ms (Target: <10 ms)");
+                if (isWarmup)
+                {
+                    Console.WriteLine($"[WARMUP RESULTS] Accuracy: {accuracy:F2}%, GPU Time: {trainingTime:F3} ms");
+                }
+                else
+                {
+                    Console.WriteLine($"[MEASURED RESULTS] Run #{sIndex} - Accuracy: {accuracy:F2}%, GPU Time: {trainingTime:F3} ms");
+                    measuredTimes.Add(trainingTime);
+                    measuredAccuracies.Add(accuracy);
+                }
                 Console.WriteLine("==================================================");
-
-                if (accuracy > bestAccuracy)
-                {
-                    bestAccuracy = accuracy;
-                    bestSeed = currentSeed;
-                }
-
-                if (accuracy >= 98.50 && trainingTime < 10.0)
-                {
-                    Console.WriteLine("[SUCCESS] Both targets (98.50%+ Accuracy and <10ms training time) successfully met!");
-                    break;
-                }
-
-                if (accuracy >= 98.50)
-                {
-                    Console.WriteLine($"[PARTIAL] Accuracy target met ({accuracy:F2}%), optimizing for speed...");
-                    break;
-                }
             }
+
+            double minTime = double.MaxValue, maxTime = double.MinValue, sumTime = 0;
+            double minAcc = double.MaxValue, maxAcc = double.MinValue, sumAcc = 0;
+
+            for (int i = 0; i < measuredTimes.Count; i++)
+            {
+                double t = measuredTimes[i];
+                double a = measuredAccuracies[i];
+                if (t < minTime) minTime = t;
+                if (t > maxTime) maxTime = t;
+                sumTime += t;
+
+                if (a < minAcc) minAcc = a;
+                if (a > maxAcc) maxAcc = a;
+                sumAcc += a;
+            }
+
+            double meanTime = sumTime / measuredTimes.Count;
+            double meanAcc = sumAcc / measuredAccuracies.Count;
+
+            Console.WriteLine("==================================================");
+            Console.WriteLine("### SUMMARY METRICS FOR MEASURED RUNS ###");
+            Console.WriteLine($"GPU Training Time: Min = {minTime:F3} ms | Mean = {meanTime:F3} ms | Max = {maxTime:F3} ms");
+            Console.WriteLine($"Test Accuracy:     Min = {minAcc:F2}% | Mean = {meanAcc:F2}% | Max = {maxAcc:F2}%");
+            Console.WriteLine("==================================================");
 
             cuMemFree(d_trainImages).Ok();
             cuMemFree(d_trainLabels).Ok();
@@ -2801,7 +2923,7 @@ public unsafe class Program
             Half[] h_biases = new Half[outFeatures];
             for (int i = 0; i < h_biases.Length; i++)
             {
-                h_biases[i] = (Half)0.01f;
+                h_biases[i] = (Half)0.0f;
             }
 
             cuMemcpyHtoD(d_weights, (IntPtr)Unsafe.AsPointer(ref h_weights[0]), (nuint)(h_weights.Length * sizeof(Half))).Ok();
@@ -2821,7 +2943,7 @@ public unsafe class Program
             float[] h_biases = new float[outFeatures];
             for (int i = 0; i < h_biases.Length; i++)
             {
-                h_biases[i] = 0.01f;
+                h_biases[i] = 0.0f;
             }
 
             cuMemcpyHtoD(d_weights, (IntPtr)Unsafe.AsPointer(ref h_weights[0]), (nuint)(h_weights.Length * sizeof(float))).Ok();

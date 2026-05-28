@@ -53,7 +53,7 @@ public sealed class NetworkConfig
         }
     }
 
-    public int FC1Inputs => Conv2OutPerSample;
+    public int FC1Inputs => (Name == "V5" || Name == "V6") ? 784 : Conv2OutPerSample;
     public int FC2Inputs => HasFC1 ? FC1Outputs : Conv2OutPerSample;
 
     // Contiguous parameter layout
