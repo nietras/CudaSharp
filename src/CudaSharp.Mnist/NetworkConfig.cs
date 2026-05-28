@@ -40,8 +40,10 @@ public sealed class NetworkConfig
     public float Beta2 { get; init; } = 0.9f;
 
     // Computed architecture sizes
-    public int Conv1OutPerSample => 12 * 12 * Conv1FilterCount;
-    public int Conv1UnpooledPerSample => 24 * 24 * Conv1FilterCount;
+    public int Conv1OutSize => 28 - Conv1FilterSize + 1;
+    public int Pool1OutSize => Conv1OutSize / 2;
+    public int Conv1OutPerSample => Pool1OutSize * Pool1OutSize * Conv1FilterCount;
+    public int Conv1UnpooledPerSample => Conv1OutSize * Conv1OutSize * Conv1FilterCount;
     public int Conv2OutPerSample => Pool2OutSize * Pool2OutSize * Conv2FilterCount;
 
     public int Conv2UnpooledPerSample

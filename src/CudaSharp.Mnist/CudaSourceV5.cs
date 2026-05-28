@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 
 namespace CudaSharp.Mnist;
 
@@ -8,13 +8,21 @@ public static partial class Program
         """
         typedef unsigned int uint32_t;
         
+        #ifndef BATCH_SIZE
         #define BATCH_SIZE 128
+        #endif
         #define FC1_INPUTS 784
+        #ifndef FC1_OUTPUTS
         #define FC1_OUTPUTS 256
+        #endif
         #define FC2_OUTPUTS 10
 
+        #ifndef BATCHES_PER_EPOCH
         #define BATCHES_PER_EPOCH 350
+        #endif
+        #ifndef TOTAL_STEPS
         #define TOTAL_STEPS 350
+        #endif
 
         // Helper to clear a gradient buffer asynchronously
         extern "C" __global__ void clear_gradient(float* __restrict__ d_grad, int num_elements)
@@ -88,10 +96,7 @@ public static partial class Program
                 {
                     uint32_t pixel = (row_bits >> c) & 1u;
 
-                    if (pixel == 1u)
-                    {
-                        sum += d_weights[(r * 28 + c) * FC1_OUTPUTS + tid];
-                    }
+                    sum += (float)pixel * d_weights[(r * 28 + c) * FC1_OUTPUTS + tid];
                 }
             }
 
@@ -255,10 +260,7 @@ public static partial class Program
             #pragma unroll 4
             for (int j = 0; j < 128; j++)
             {
-                if (s_pixels[j] == 1u)
-                {
-                    sum += d_fc1_out_grad[j * FC1_OUTPUTS + tid];
-                }
+                sum += (float)s_pixels[j] * d_fc1_out_grad[j * FC1_OUTPUTS + tid];
             }
 
             d_fc1_weights_grad[input_idx * FC1_OUTPUTS + tid] = sum;
@@ -299,7 +301,10 @@ public static partial class Program
 
             int step_val = *d_step + 1; // 1-indexed for beta power
             
-            float max_lr = 0.006f; 
+            #ifndef MAX_LR
+            #define MAX_LR 0.006f
+            #endif
+            float max_lr = MAX_LR; 
             float beta1 = 0.7f;
             float beta2 = 0.9f;
             float epsilon = 1e-8f;
