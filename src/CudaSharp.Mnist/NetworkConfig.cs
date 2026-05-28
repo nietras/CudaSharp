@@ -15,6 +15,8 @@ public sealed class NetworkConfig
 {
     public required string Name { get; init; }
     public required string CudaSource { get; init; }
+    public bool IsHalf { get; init; } = true;
+    public bool IsV7Based { get; init; } = false;
 
     // Conv1 layer
     public required int Conv1FilterCount { get; init; }

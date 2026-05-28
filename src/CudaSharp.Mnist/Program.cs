@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
@@ -2176,6 +2176,8 @@ public unsafe partial class Program
     {
         Name = "V7",
         CudaSource = CudaSourceV7,
+        IsHalf = true,
+        IsV7Based = true,
         BatchSize = 256,
         Conv1FilterCount = 8,
         Conv1FilterSize = 3,
@@ -2192,6 +2194,8 @@ public unsafe partial class Program
     {
         Name = "V6",
         CudaSource = CudaSourceV6,
+        IsHalf = true,
+        IsV7Based = false,
         BatchSize = 128,
         Conv1FilterCount = 16,
         Conv1FilterSize = 5,
@@ -2208,6 +2212,8 @@ public unsafe partial class Program
     {
         Name = "V5",
         CudaSource = CudaSourceV5,
+        IsHalf = false,
+        IsV7Based = false,
         BatchSize = 128,
         Conv1FilterCount = 1,
         Conv1FilterSize = 1,
@@ -2225,6 +2231,8 @@ public unsafe partial class Program
     {
         Name = "V4",
         CudaSource = CudaSourceV4,
+        IsHalf = false,
+        IsV7Based = false,
         BatchSize = 128,
         Conv1FilterCount = 16,
         Conv1FilterSize = 5,
@@ -2242,6 +2250,8 @@ public unsafe partial class Program
     {
         Name = "V3",
         CudaSource = CudaSourceV3,
+        IsHalf = true,
+        IsV7Based = false,
         Conv1FilterCount = 8,
         Conv1FilterSize = 5,
         Conv2FilterCount = 16,
@@ -2258,6 +2268,8 @@ public unsafe partial class Program
     {
         Name = "V1",
         CudaSource = CudaSourceV1,
+        IsHalf = false,
+        IsV7Based = false,
         Conv1FilterCount = 16,
         Conv1FilterSize = 5,
         Conv2FilterCount = 16,
@@ -2274,6 +2286,8 @@ public unsafe partial class Program
     {
         Name = "V2",
         CudaSource = CudaSourceV2,
+        IsHalf = false,
+        IsV7Based = false,
         Conv1FilterCount = 8,
         Conv1FilterSize = 5,
         Conv2FilterCount = 16,
@@ -2306,17 +2320,81 @@ public unsafe partial class Program
         }
         Console.WriteLine($"[CONFIG] Network Version: {version} (Profile Mode: {profile})");
 
-        NetworkConfig activeConfig = version switch
+        NetworkConfig activeConfig;
+        if (version.StartsWith("V0") || (version.StartsWith("V") && version.Length > 2 && int.TryParse(version.AsSpan(1), out _)))
         {
-            "V1" => ConfigV1,
-            "V2" => ConfigV2,
-            "V3" => ConfigV3,
-            "V4" => ConfigV4,
-            "V5" => ConfigV5,
-            "V6" => ConfigV6,
-            "V7" => ConfigV7,
-            _ => throw new ArgumentException($"Unknown version: {version}")
-        };
+            if (int.TryParse(version.AsSpan(1), out int num) && num >= 1 && num <= 99)
+            {
+                if (num == 1) activeConfig = ConfigV1;
+                else if (num == 2) activeConfig = ConfigV2;
+                else if (num == 3) activeConfig = ConfigV3;
+                else if (num == 4) activeConfig = ConfigV4;
+                else if (num == 5) activeConfig = ConfigV5;
+                else if (num == 6) activeConfig = ConfigV6;
+                else if (num == 7) activeConfig = ConfigV7;
+                else
+                {
+                    int batchSize = (num % 4) switch
+                    {
+                        0 => 64,
+                        1 => 128,
+                        2 => 256,
+                        3 => 512,
+                        _ => 256
+                    };
+                    float maxLR = ((num / 4) % 4) switch
+                    {
+                        0 => 0.003f,
+                        1 => 0.006f,
+                        2 => 0.009f,
+                        3 => 0.012f,
+                        _ => 0.006f
+                    };
+                    int totalSteps = ((num / 16) % 3) switch
+                    {
+                        0 => 150,
+                        1 => 300,
+                        2 => 450,
+                        _ => 300
+                    };
+                    activeConfig = new NetworkConfig
+                    {
+                        Name = version,
+                        CudaSource = CudaSourceV7,
+                        IsHalf = true,
+                        IsV7Based = true,
+                        BatchSize = batchSize,
+                        Conv1FilterCount = 8,
+                        Conv1FilterSize = 3,
+                        Conv2FilterCount = 16,
+                        Conv2FilterSize = 3,
+                        Pool2OutSize = 5,
+                        HasFC1 = false,
+                        BatchesPerEpoch = 51200 / batchSize,
+                        TotalSteps = totalSteps,
+                        MaxLR = maxLR
+                    };
+                }
+            }
+            else
+            {
+                throw new ArgumentException($"Unknown version: {version}");
+            }
+        }
+        else
+        {
+            activeConfig = version switch
+            {
+                "V1" => ConfigV1,
+                "V2" => ConfigV2,
+                "V3" => ConfigV3,
+                "V4" => ConfigV4,
+                "V5" => ConfigV5,
+                "V6" => ConfigV6,
+                "V7" => ConfigV7,
+                _ => throw new ArgumentException($"Unknown version: {version}")
+            };
+        }
         BatchSize = activeConfig.BatchSize;
 
         CuInit.EnsureInit();
@@ -2426,7 +2504,7 @@ public unsafe partial class Program
             cuModuleGetFunction(out var f_adam, module, "adam_update").Ok();
 
             CUfunction f_fc2_bwd_weights = default;
-            if (activeConfig.Name == "V7")
+            if (activeConfig.IsV7Based)
             {
                 cuModuleGetFunction(out f_fc2_bwd_weights, module, "fc2_backward_weights").Ok();
             }
@@ -2439,10 +2517,10 @@ public unsafe partial class Program
                 cuModuleGetFunction(out f_fc1_bwd_weights, module, "fc1_backward_weights").Ok();
             }
 
-            uint conv1BlockX = (activeConfig.Name == "V7") ? 13u : 12u;
-            uint conv1BlockY = (activeConfig.Name == "V7") ? 13u : 12u;
-            uint conv1BwdBlockX = (activeConfig.Name == "V7") ? 16u : 24u;
-            uint conv1BwdBlockY = (activeConfig.Name == "V7") ? 16u : 24u;
+            uint conv1BlockX = (uint)activeConfig.Pool1OutSize;
+            uint conv1BlockY = (uint)activeConfig.Pool1OutSize;
+            uint conv1BwdBlockX = activeConfig.IsV7Based ? 16u : 24u;
+            uint conv1BwdBlockY = activeConfig.IsV7Based ? 16u : 24u;
 
             Console.WriteLine("[MEM] Allocating GPU memory buffers...");
 
@@ -2466,7 +2544,7 @@ public unsafe partial class Program
             int conv2FilterCount = activeConfig.Conv2FilterCount;
             int totalParamElements = activeConfig.TotalParamElements;
 
-            int elementSize = (activeConfig.Name == "V3" || activeConfig.Name == "V6" || activeConfig.Name == "V7") ? sizeof(ushort) : sizeof(float);
+            int elementSize = activeConfig.IsHalf ? sizeof(ushort) : sizeof(float);
             nuint paramBytes = (nuint)(totalParamElements * elementSize);
             cuMemAlloc(out var d_allParams, paramBytes).Ok();
             cuMemAlloc(out var d_allParamGrads, paramBytes).Ok();
@@ -2656,7 +2734,7 @@ public unsafe partial class Program
                     f_fc2_bwd, (uint)BatchSize, 1u, 1u,
                     fc2BlockSize, 1u, 1u, fc2BwdParams);
 
-                if (activeConfig.Name == "V7")
+                if (activeConfig.IsV7Based)
                 {
                     currentDependencies[0] = lastNode;
                     lastNode = AddKernelNode(epochGraph, currentDependencies,
@@ -2841,7 +2919,7 @@ public unsafe partial class Program
 
                         fc2BwdTimes.Add(MeasureKernel(f_fc2_bwd, (uint)BatchSize, 1u, 1u, fc2BlockSize, 1u, 1u, fc2BwdParams));
 
-                        if (activeConfig.Name == "V7")
+                        if (activeConfig.IsV7Based)
                         {
                             fc2BwdWTimes.Add(MeasureKernel(f_fc2_bwd_weights, 400u, 1u, 1u, 128u, 1u, 1u, fc2BwdWeightsParams));
                         }
@@ -2953,7 +3031,7 @@ public unsafe partial class Program
                         }
                     }
 
-                    if (activeConfig.Name == "V3" || activeConfig.Name == "V6" || activeConfig.Name == "V7")
+                    if (activeConfig.IsHalf)
                     {
                         cuMemcpyDtoH((IntPtr)Unsafe.AsPointer(ref h_fcOutHalf[0]),
                             d_fc2Out, (nuint)(h_fcOutHalf.Length * sizeof(Half))).Ok();
@@ -3162,7 +3240,7 @@ public unsafe partial class Program
         CUdeviceptr d_fc2Weights, CUdeviceptr d_fc2Biases,
         int seed)
     {
-        bool isHalf = activeConfig.Name == "V3" || activeConfig.Name == "V6" || activeConfig.Name == "V7";
+        bool isHalf = activeConfig.IsHalf;
         var conv1 = activeConfig.GetParam("conv1");
         InitializeParameters(d_conv1Filters, d_conv1Biases, conv1.OutFeatures, conv1.InFeatures, seed, isHalf);
 
