@@ -2188,7 +2188,7 @@ public unsafe partial class Program
         FC1Outputs = 120,
         FC1Inputs = 256,
         BatchesPerEpoch = 400,
-        TotalSteps = 108,
+        TotalSteps = 155,
         MaxLR = 0.014f
     };
 
@@ -2208,7 +2208,7 @@ public unsafe partial class Program
         FC1Outputs = 120,
         FC1Inputs = 256,
         BatchesPerEpoch = 400,
-        TotalSteps = 108,
+        TotalSteps = 155,
         MaxLR = 0.016f
     };
 

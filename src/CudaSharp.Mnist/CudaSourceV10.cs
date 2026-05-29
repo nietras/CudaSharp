@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 
 namespace CudaSharp.Mnist;
 
@@ -462,11 +462,26 @@ public static partial class Program
             const int tid = threadIdx.x; // 0..255
 
             __shared__ __half s_grad[120];
+            __shared__ __half s_weights[256][120];
 
             // Load s_grad
             if (tid < 120)
             {
                 s_grad[tid] = d_fc1_out_grad[batch_idx * 120 + tid];
+            }
+
+            int warp_id = tid / 32;
+            int lane_id = tid % 32;
+            int warp_row_start = warp_id * 32;
+            
+            // Cooperatively load 32x120 weights for this warp in a fully coalesced manner
+            int total_warp_elements = 32 * 120;
+            #pragma unroll
+            for (int i = lane_id; i < total_warp_elements; i += 32)
+            {
+                int r = i / 120;
+                int c = i % 120;
+                s_weights[warp_row_start + r][c] = d_fc1_weights[(warp_row_start + r) * 120 + c];
             }
             __syncthreads();
 
@@ -474,7 +489,7 @@ public static partial class Program
             #pragma unroll
             for (int c = 0; c < 120; c++)
             {
-                sum_grad += s_grad[c] * d_fc1_weights[tid * 120 + c];
+                sum_grad += s_grad[c] * s_weights[tid][c];
             }
 
             d_conv2_out_grad[batch_idx * 256 + tid] = sum_grad;
@@ -865,23 +880,37 @@ public static partial class Program
             float epsilon = 1e-4f;
             
             int total_steps = TOTAL_STEPS;
-            float lr = 0.0f;
-            float pct = (float)step_val / total_steps;
-            float warmup_pct = 0.30f;
-            if (pct < warmup_pct)
+            
+            __shared__ float s_lr;
+            __shared__ float s_beta1_t;
+            __shared__ float s_beta2_t;
+            
+            if (threadIdx.x == 0)
             {
-                float alpha = pct / warmup_pct;
-                lr = max_lr * (0.1f + 0.9f * alpha);
+                s_beta1_t = powf(beta1, (float)step_val);
+                s_beta2_t = powf(beta2, (float)step_val);
+                
+                float pct = (float)step_val / total_steps;
+                float warmup_pct = 0.20f;
+                float local_lr = 0.0f;
+                if (pct < warmup_pct)
+                {
+                    float alpha = pct / warmup_pct;
+                    local_lr = max_lr * (0.1f + 0.9f * alpha);
+                }
+                else
+                {
+                    float alpha = (pct - warmup_pct) / (1.0f - warmup_pct);
+                    float cos_val = cosf(3.14159265f * alpha);
+                    local_lr = max_lr * 0.5f * (1.0f + cos_val);
+                }
+                s_lr = local_lr;
             }
-            else
-            {
-                float alpha = (pct - warmup_pct) / (1.0f - warmup_pct);
-                float cos_val = cosf(3.14159265f * alpha);
-                lr = max_lr * 0.5f * (1.0f + cos_val);
-            }
+            __syncthreads();
 
-            float beta1_t = powf(beta1, step_val);
-            float beta2_t = powf(beta2, step_val);
+            float lr = s_lr;
+            float beta1_t = s_beta1_t;
+            float beta2_t = s_beta2_t;
 
             for (int i = tid; i < num_elements; i += stride)
             {
