@@ -2172,6 +2172,26 @@ public unsafe partial class Program
                 lr = max_lr * 0.5f * (1.0f + cos_val);
             }");
 
+    public static readonly NetworkConfig ConfigV9 = new()
+    {
+        Name = "V9",
+        CudaSource = CudaSourceV9,
+        IsHalf = true,
+        IsV7Based = true,
+        BatchSize = 256,
+        Conv1FilterCount = 6,
+        Conv1FilterSize = 5,
+        Conv2FilterCount = 16,
+        Conv2FilterSize = 5,
+        Pool2OutSize = 4,
+        HasFC1 = true,
+        FC1Outputs = 120,
+        FC1Inputs = 256,
+        BatchesPerEpoch = 200,
+        TotalSteps = 300,
+        MaxLR = 0.006f
+    };
+
     public static readonly NetworkConfig ConfigV8 = new()
     {
         Name = "V8",
@@ -2353,6 +2373,7 @@ public unsafe partial class Program
                 else if (num == 6) activeConfig = ConfigV6;
                 else if (num == 7) activeConfig = ConfigV7;
                 else if (num == 8) activeConfig = ConfigV8;
+                else if (num == 9) activeConfig = ConfigV9;
                 else
                 {
                     int batchSize = (num % 4) switch
@@ -2414,6 +2435,7 @@ public unsafe partial class Program
                 "V6" => ConfigV6,
                 "V7" => ConfigV7,
                 "V8" => ConfigV8,
+                "V9" => ConfigV9,
                 _ => throw new ArgumentException($"Unknown version: {version}")
             };
         }
@@ -2789,7 +2811,7 @@ public unsafe partial class Program
                 if (activeConfig.HasFC1)
                 {
                     currentDependencies[0] = lastNode;
-                    uint fc1BlockSize = activeConfig.Name == "V8" ? 784u : 128u;
+                    uint fc1BlockSize = activeConfig.Name == "V8" ? 784u : (activeConfig.Name == "V9" ? 256u : 128u);
                     lastNode = AddKernelNode(epochGraph, currentDependencies,
                         f_fc1, (uint)BatchSize, 1u, 1u,
                         fc1BlockSize, 1u, 1u, fc1Params);
@@ -2810,7 +2832,7 @@ public unsafe partial class Program
                 if (activeConfig.IsV7Based)
                 {
                     currentDependencies[0] = lastNode;
-                    uint fc2BwdWGridX = activeConfig.Name == "V8" ? 784u : 400u;
+                    uint fc2BwdWGridX = activeConfig.Name == "V8" ? 784u : (activeConfig.Name == "V9" ? 120u : 400u);
                     lastNode = AddKernelNode(epochGraph, currentDependencies,
                         f_fc2_bwd_weights, fc2BwdWGridX, 1u, 1u,
                         128u, 1u, 1u, fc2BwdWeightsParams);
@@ -2841,7 +2863,13 @@ public unsafe partial class Program
                     if (activeConfig.Name != "V8")
                     {
                         currentDependencies[0] = lastNode;
-                        if (activeConfig.Name == "V5")
+                        if (activeConfig.Name == "V9")
+                        {
+                            lastNode = AddKernelNode(epochGraph, currentDependencies,
+                                f_fc1_bwd_weights, 256u, 1u, 1u,
+                                64u, 1u, 1u, fc1BwdWeightsParams);
+                        }
+                        else if (activeConfig.Name == "V5")
                         {
                             lastNode = AddKernelNode(epochGraph, currentDependencies,
                                 f_fc1_bwd_weights, 784u, 1u, 1u,
@@ -2959,6 +2987,8 @@ public unsafe partial class Program
 
 
 
+
+
                 var stopwatch = Stopwatch.StartNew();
                 if (profile)
                 {
@@ -3011,7 +3041,7 @@ public unsafe partial class Program
 
                         if (activeConfig.HasFC1)
                         {
-                            uint fc1FwdBlockSize = activeConfig.Name == "V8" ? 784u : 128u;
+                            uint fc1FwdBlockSize = activeConfig.Name == "V8" ? 784u : (activeConfig.Name == "V9" ? 256u : 128u);
                             fc1Times.Add(MeasureKernel(f_fc1, (uint)BatchSize, 1u, 1u, fc1FwdBlockSize, 1u, 1u, fc1Params));
                         }
 
@@ -3021,7 +3051,7 @@ public unsafe partial class Program
 
                         if (activeConfig.IsV7Based)
                         {
-                            uint fc2BwdWGridX = activeConfig.Name == "V8" ? 784u : 400u;
+                            uint fc2BwdWGridX = activeConfig.Name == "V8" ? 784u : (activeConfig.Name == "V9" ? 120u : 400u);
                             fc2BwdWTimes.Add(MeasureKernel(f_fc2_bwd_weights, fc2BwdWGridX, 1u, 1u, 128u, 1u, 1u, fc2BwdWeightsParams));
                         }
 
@@ -3031,6 +3061,11 @@ public unsafe partial class Program
                             {
                                 fc1BwdTimes.Add(MeasureKernel(f_fc1_bwd, (uint)BatchSize, 1u, 1u, 784u, 1u, 1u, fc1BwdParams));
                                 fc1BwdWTimes.Add(MeasureKernel(f_fc1_bwd_weights, (uint)conv2FilterCount * (uint)conv2Chunks, 1u, 1u, 128u, 1u, 1u, fc1BwdWeightsParams));
+                            }
+                            else if (activeConfig.Name == "V9")
+                            {
+                                fc1BwdTimes.Add(MeasureKernel(f_fc1_bwd, (uint)BatchSize, 1u, 1u, 256u, 1u, 1u, fc1BwdParams));
+                                fc1BwdWTimes.Add(MeasureKernel(f_fc1_bwd_weights, 256u, 1u, 1u, 64u, 1u, 1u, fc1BwdWeightsParams));
                             }
                             else if (activeConfig.Name == "V5")
                             {
@@ -3401,7 +3436,7 @@ public unsafe partial class Program
         {
             var fc1 = activeConfig.GetParam("fc1");
             InitializeParameters(d_fc1Weights, d_fc1Biases, fc1.OutFeatures, fc1.InFeatures, seed, isHalf);
-            if (activeConfig.Name == "V8")
+            if (activeConfig.Name == "V8" || activeConfig.Name == "V9")
             {
                 ScaleDownDeviceBuffer(d_fc1Weights, fc1.OutFeatures * fc1.InFeatures, 0.05f, isHalf);
             }
