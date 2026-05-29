@@ -2,32 +2,30 @@
 
 public static partial class Program
 {
-    public static string CudaSourceV9 =>
+    public static string CudaSourceV3 =>
         """
         #include <cuda_fp16.h>
 
         typedef unsigned int uint32_t;
-
+        
         #ifndef BATCH_SIZE
-        #define BATCH_SIZE 256
+        #define BATCH_SIZE 128
         #endif
         #define FILTER1_SIZE 5
         #define FILTER2_SIZE 5
         #define INPUT_SIZE 28
         #define POOL1_SIZE 12
         #define POOL2_SIZE 4
-        #define FC1_INPUTS 256
-        #define FC1_OUTPUTS 120
+        #define FC2_INPUTS 256
         #define FC2_OUTPUTS 10
 
         #ifndef BATCHES_PER_EPOCH
-        #define BATCHES_PER_EPOCH 200
+        #define BATCHES_PER_EPOCH 300
         #endif
         #ifndef TOTAL_STEPS
-        #define TOTAL_STEPS 300
+        #define TOTAL_STEPS 600
         #endif
 
-        // Helper to clear a gradient buffer asynchronously
         extern "C" __global__ void clear_gradient(__half* __restrict__ d_grad, int num_elements)
         {
             int tid = blockIdx.x * blockDim.x + threadIdx.x;
@@ -39,23 +37,6 @@ public static partial class Program
             }
         }
 
-        // Dummy empty kernels to satisfy C# Module loading structure
-        extern "C" __global__ void fused_forward(
-            const uint32_t* d_inputs, const __half* d_conv1_filters, const __half* d_conv1_biases,
-            const __half* d_conv2_filters, const __half* d_conv2_biases, const __half* d_fc2_weights,
-            const __half* d_fc2_biases, __half* d_conv1_out, __half* d_conv1_unpooled,
-            __half* d_conv2_out, __half* d_conv2_unpooled, __half* d_fc2_out,
-            const int* d_step, int is_training) {}
-
-        extern "C" __global__ void fused_backward(
-            const __half* d_fc2_out, const int* d_labels, const __half* d_conv2_out,
-            const __half* d_fc2_weights, __half* d_fc2_weights_grad, __half* d_fc2_biases_grad,
-            const __half* d_conv2_unpooled, const __half* d_conv1_out, const __half* d_conv2_filters,
-            __half* d_conv2_filters_grad, __half* d_conv2_biases_grad, const __half* d_conv1_unpooled,
-            const uint32_t* d_inputs, __half* d_conv1_filters_grad, __half* d_conv1_biases_grad,
-            const int* d_step) {}
-
-        // Conv1 Forward Pass (1-bit input -> 6 filters, 12x12 output after MaxPool + ReLU)
         extern "C" __global__ void conv1_forward(
             const uint32_t* __restrict__ d_inputs,
             const __half* __restrict__ d_filters,
@@ -78,7 +59,8 @@ public static partial class Program
             int tid_flat = threadIdx.y * 12 + threadIdx.x;
             if (tid_flat < 25)
             {
-                s_filter[tid_flat / 5][tid_flat % 5] = d_filters[filter_idx * 25 + tid_flat];
+                s_filter[tid_flat / 5][tid_flat % 5] = 
+                    d_filters[filter_idx * 25 + tid_flat];
             }
             
             __shared__ uint32_t s_image[28];
@@ -131,7 +113,7 @@ public static partial class Program
                         }
                     }
 
-                    int unpooled_idx = (batch_idx * 576 + cy * 24 + cx) * 6 + filter_idx;
+                    int unpooled_idx = (batch_idx * 576 + cy * 24 + cx) * 8 + filter_idx;
                     d_unpooled_vals[unpooled_idx] = sum;
 
                     __half activated = __hgt(sum, zero) ? sum : zero;
@@ -142,11 +124,12 @@ public static partial class Program
                 }
             }
 
-            const int out_idx = batch_idx * 864 + (out_y * 12 + out_x) * 6 + filter_idx;
+            const int out_idx = batch_idx * (12 * 12 * 8) 
+                                + (out_y * 12 + out_x) * 8 
+                                + filter_idx;
             d_outputs[out_idx] = max_val;
         }
 
-        // Conv2 Forward Pass (6 channels -> 16 filters, 4x4 output after MaxPool + ReLU)
         extern "C" __global__ void conv2_forward(
             const __half* __restrict__ d_inputs,
             const __half* __restrict__ d_filters,
@@ -157,25 +140,24 @@ public static partial class Program
             const int batch_idx = blockIdx.x;
             const int tid = threadIdx.x;
 
-            __shared__ __half s_input[864]; // 12 * 12 * 6 = 864
-            __shared__ __half s_filters[2400]; // 16 * 6 * 25 = 2400. 4800 bytes, safe!
+            __shared__ __half s_input[1152];
+            __shared__ __half s_filters[3200];
 
-            for (int i = tid; i < 864; i += 256)
+            for (int i = tid; i < 1152; i += 256)
             {
-                s_input[i] = d_inputs[batch_idx * 864 + i];
+                s_input[i] = d_inputs[batch_idx * 1152 + i];
             }
 
-            for (int i = tid; i < 2400; i += 256)
+            for (int i = tid; i < 3200; i += 256)
             {
                 s_filters[i] = d_filters[i];
             }
             __syncthreads();
 
-            #pragma unroll
-            for (int out_idx = tid; out_idx < 256; out_idx += 256)
+            if (tid < 256)
             {
-                int filter_idx = out_idx / 16;
-                int spatial_idx = out_idx % 16;
+                int filter_idx = tid / 16;
+                int spatial_idx = tid % 16;
                 int out_x = spatial_idx % 4;
                 int out_y = spatial_idx / 4;
 
@@ -197,7 +179,7 @@ public static partial class Program
                         __half sum = d_biases[filter_idx];
 
                         #pragma unroll
-                        for (int c = 0; c < 6; c++)
+                        for (int c = 0; c < 8; c++)
                         {
                             #pragma unroll
                             for (int fy = 0; fy < 5; fy++)
@@ -207,7 +189,7 @@ public static partial class Program
                                 {
                                     int in_x = cx + fx;
                                     int in_y = cy + fy;
-                                    sum += s_input[(in_y * 12 + in_x) * 6 + c] * s_filters[filter_idx * 150 + (fy * 5 + fx) * 6 + c];
+                                    sum += s_input[(in_y * 12 + in_x) * 8 + c] * s_filters[filter_idx * 200 + (fy * 5 + fx) * 8 + c];
                                 }
                             }
                         }
@@ -228,8 +210,7 @@ public static partial class Program
             }
         }
 
-        // FC1 Linear Forward Pass (256 features -> 120 classes)
-        extern "C" __global__ void fc1_forward(
+        extern "C" __global__ void fc2_forward(
             const __half* __restrict__ d_inputs,
             const __half* __restrict__ d_weights,
             const __half* __restrict__ d_biases,
@@ -242,40 +223,11 @@ public static partial class Program
             s_input[tid] = d_inputs[batch_idx * 256 + tid];
             __syncthreads();
 
-            if (tid < 120)
-            {
-                __half sum = d_biases[tid];
-                #pragma unroll 4
-                for (int i = 0; i < 256; i++)
-                {
-                    sum += s_input[i] * d_weights[i * 120 + tid];
-                }
-                d_outputs[batch_idx * 120 + tid] = sum > __float2half(0.0f) ? sum : __float2half(0.0f);
-            }
-        }
-
-        // FC2 Linear Forward Pass (120 features -> 10 classes)
-        extern "C" __global__ void fc2_forward(
-            const __half* __restrict__ d_inputs,
-            const __half* __restrict__ d_weights,
-            const __half* __restrict__ d_biases,
-            __half* __restrict__ d_outputs)
-        {
-            const int batch_idx = blockIdx.x;
-            const int tid = threadIdx.x;
-
-            __shared__ __half s_input[120];
-            if (tid < 120)
-            {
-                s_input[tid] = d_inputs[batch_idx * 120 + tid];
-            }
-            __syncthreads();
-
             if (tid < 10)
             {
                 __half sum = d_biases[tid];
                 #pragma unroll 4
-                for (int i = 0; i < 120; i++)
+                for (int i = 0; i < 256; i++)
                 {
                     sum += s_input[i] * d_weights[i * 10 + tid];
                 }
@@ -283,15 +235,14 @@ public static partial class Program
             }
         }
 
-        // FC2 Backward Pass (Activation gradients and bias gradients only, ZERO weights computation!)
         extern "C" __global__ void fc2_backward(
             const __half* __restrict__ d_fc2_outputs,
             const int* __restrict__ d_labels,
-            const __half* __restrict__ d_fc1_outputs,
+            const __half* __restrict__ d_fc2_inputs,
             const __half* __restrict__ d_fc2_weights,
-            __half* __restrict__ d_fc2_weights_grad, // unused
+            __half* __restrict__ d_fc2_weights_grad,
             __half* __restrict__ d_fc2_biases_grad,
-            __half* __restrict__ d_fc1_out_grad,
+            __half* __restrict__ d_fc2_in_grad,
             const int* __restrict__ d_step)
         {
             const int batch_idx = blockIdx.x;
@@ -322,17 +273,27 @@ public static partial class Program
             }
             __syncthreads();
 
-            if (tid < 120)
+            __half x_val = d_fc2_inputs[batch_idx * 256 + tid];
+
+            __half sum_input_grad = __float2half(0.0f);
+            #pragma unroll
+            for (int c = 0; c < 10; c++)
             {
-                __half sum_input_grad = __float2half(0.0f);
+                sum_input_grad += s_grad[c] * d_fc2_weights[tid * 10 + c];
+            }
+            d_fc2_in_grad[batch_idx * 256 + tid] = sum_input_grad;
+
+            if (__half2float(x_val) != 0.0f)
+            {
                 #pragma unroll
                 for (int c = 0; c < 10; c++)
                 {
-                    sum_input_grad += s_grad[c] * d_fc2_weights[tid * 10 + c];
+                    __half g_val = s_grad[c];
+                    if (__half2float(g_val) != 0.0f)
+                    {
+                        atomicAdd(&d_fc2_weights_grad[tid * 10 + c], g_val * x_val);
+                    }
                 }
-                // Backprop over ReLU of FC1
-                __half fc1_out = d_fc1_outputs[batch_idx * 120 + tid];
-                d_fc1_out_grad[batch_idx * 120 + tid] = __hgt(fc1_out, __float2half(0.0f)) ? sum_input_grad : __float2half(0.0f);
             }
 
             if (tid < 10)
@@ -345,202 +306,33 @@ public static partial class Program
             }
         }
 
-        // FC2 Backward Weights Pass (Zero atomics, block-level parallel reductions!)
-        extern "C" __global__ void fc2_backward_weights(
-            const __half* __restrict__ d_fc2_outputs,  // [BatchSize x 10]
-            const int* __restrict__ d_labels,         // [TotalImages]
-            const __half* __restrict__ d_fc1_outputs,   // [BatchSize x 120]
-            __half* __restrict__ d_fc2_weights_grad,   // [120 x 10]
-            const int* __restrict__ d_step)
-        {
-            const int input_idx = blockIdx.x; // 0..119
-            const int tid = threadIdx.x;      // 0..127
-
-            int batchOffset = ((*d_step) % BATCHES_PER_EPOCH) * BATCH_SIZE;
-
-            __shared__ float s_weight_grads[128][10];
-
-            #pragma unroll
-            for (int c = 0; c < 10; c++)
-            {
-                s_weight_grads[tid][c] = 0.0f;
-            }
-            __syncthreads();
-
-            #pragma unroll
-            for (int i = 0; i < 2; i++)
-            {
-                int b = i * 128 + tid;
-
-                float max_logit = -1e9f;
-                for (int c = 0; c < 10; c++)
-                {
-                    float logit = __half2float(d_fc2_outputs[b * 10 + c]);
-                    if (logit > max_logit) max_logit = logit;
-                }
-
-                float sum_exp = 0.0f;
-                for (int c = 0; c < 10; c++)
-                {
-                    sum_exp += expf(__half2float(d_fc2_outputs[b * 10 + c]) - max_logit);
-                }
-
-                int correct_label = d_labels[batchOffset + b];
-                float x_val = __half2float(d_fc1_outputs[b * 120 + input_idx]);
-
-                #pragma unroll
-                for (int c = 0; c < 10; c++)
-                {
-                    float prob = expf(__half2float(d_fc2_outputs[b * 10 + c]) - max_logit) / sum_exp;
-                    float g_val = prob - (c == correct_label ? 1.0f : 0.0f);
-                    s_weight_grads[tid][c] += g_val * x_val;
-                }
-            }
-            __syncthreads();
-
-            for (int stride = 64; stride > 0; stride >>= 1)
-            {
-                if (tid < stride)
-                {
-                    #pragma unroll
-                    for (int c = 0; c < 10; c++)
-                    {
-                        s_weight_grads[tid][c] += s_weight_grads[tid + stride][c];
-                    }
-                }
-                __syncthreads();
-            }
-
-            if (tid == 0)
-            {
-                #pragma unroll
-                for (int c = 0; c < 10; c++)
-                {
-                    d_fc2_weights_grad[input_idx * 10 + c] = __float2half(s_weight_grads[0][c]);
-                }
-            }
-        }
-
-        // FC1 Backward Pass (Activation gradients and bias gradients only, ZERO weights computation!)
-        extern "C" __global__ void fc1_backward(
-            const __half* __restrict__ d_fc1_out_grad, // [BatchSize x 120]
-            const __half* __restrict__ d_fc1_outputs,  // unused
-            const __half* __restrict__ d_fc2_inputs,   // [BatchSize x 256] (d_conv2Out)
-            const __half* __restrict__ d_fc1_weights,   // [256 x 120]
-            __half* __restrict__ d_fc1_biases_grad,
-            __half* __restrict__ d_conv2_out_grad)     // [BatchSize x 256]
-        {
-            const int batch_idx = blockIdx.x;
-            const int tid = threadIdx.x; // 0..255
-
-            __shared__ __half s_grad[120];
-            if (tid < 120)
-            {
-                s_grad[tid] = d_fc1_out_grad[batch_idx * 120 + tid];
-            }
-            __syncthreads();
-
-            __half sum_grad = __float2half(0.0f);
-            #pragma unroll
-            for (int c = 0; c < 120; c++)
-            {
-                sum_grad += s_grad[c] * d_fc1_weights[tid * 120 + c];
-            }
-            d_conv2_out_grad[batch_idx * 256 + tid] = sum_grad;
-
-            if (tid < 120)
-            {
-                __half b_grad = s_grad[tid];
-                if (__half2float(b_grad) != 0.0f)
-                {
-                    atomicAdd(&d_fc1_biases_grad[tid], b_grad);
-                }
-            }
-        }
-
-        // FC1 Backward Weights Pass (Zero atomics, block-level parallel reductions!)
-        extern "C" __global__ void fc1_backward_weights(
-            const __half* __restrict__ d_fc1_out_grad, // [BatchSize x 120]
-            const __half* __restrict__ d_fc1_outputs,  // unused
-            const __half* __restrict__ d_fc1_inputs,   // [BatchSize x 256] (d_conv2Out)
-            __half* __restrict__ d_fc1_weights_grad)   // [256 x 120]
-        {
-            const int input_idx = blockIdx.x; // 0..255
-            const int tid = threadIdx.x;      // 0..63
-
-            __shared__ float s_accum[64][120];
-
-            #pragma unroll
-            for (int c = 0; c < 120; c++)
-            {
-                s_accum[tid][c] = 0.0f;
-            }
-            __syncthreads();
-
-            #pragma unroll
-            for (int i = 0; i < 4; i++)
-            {
-                int b = i * 64 + tid;
-                float x_val = __half2float(d_fc1_inputs[b * 256 + input_idx]);
-                #pragma unroll
-                for (int c = 0; c < 120; c++)
-                {
-                    s_accum[tid][c] += x_val * __half2float(d_fc1_out_grad[b * 120 + c]);
-                }
-            }
-            __syncthreads();
-
-            for (int stride = 32; stride > 0; stride >>= 1)
-            {
-                if (tid < stride)
-                {
-                    #pragma unroll
-                    for (int c = 0; c < 120; c++)
-                    {
-                        s_accum[tid][c] += s_accum[tid + stride][c];
-                    }
-                }
-                __syncthreads();
-            }
-
-            if (tid == 0)
-            {
-                #pragma unroll
-                for (int c = 0; c < 120; c++)
-                {
-                    d_fc1_weights_grad[input_idx * 120 + c] = __float2half(s_accum[0][c]);
-                }
-            }
-        }
-
-        // Conv2 Backward Pass (16 channels -> 6 filters, 8x8 input gradients)
         extern "C" __global__ void conv2_backward(
-            const __half* __restrict__ d_conv2_out_grad,         // [Batch x 256]
-            const __half* __restrict__ d_conv2_out_val,          // [Batch x 256]
-            const __half* __restrict__ d_conv2_unpooled_vals,    // [Batch x 8x8x16]
-            const __half* __restrict__ d_conv1_out,              // [Batch x 12x12x6]
-            const __half* __restrict__ d_conv2_filters,          // [16 x 6 x 5 x 5] = 2400 elements
-            __half* __restrict__ d_conv2_filters_grad,           // [16 x 6 x 25]
-            __half* __restrict__ d_conv2_biases_grad,            // [16]
-            __half* __restrict__ d_conv1_out_grad)               // [Batch x 12x12x6]
+            const __half* __restrict__ d_conv2_out_grad,
+            const __half* __restrict__ d_conv2_out_val,
+            const __half* __restrict__ d_conv2_unpooled_vals,
+            const __half* __restrict__ d_conv1_out,
+            const __half* __restrict__ d_conv2_filters,
+            __half* __restrict__ d_conv2_filters_grad,
+            __half* __restrict__ d_conv2_biases_grad,
+            __half* __restrict__ d_conv1_out_grad)
         {
             #ifndef CONV2_CHUNKS
             #define CONV2_CHUNKS 16
             #endif
             #define CONV2_BATCH_PER_CHUNK (BATCH_SIZE / CONV2_CHUNKS)
 
-            const int filter_idx = blockIdx.x / CONV2_CHUNKS; // 0..15 (Conv2 output channel)
+            const int filter_idx = blockIdx.x / CONV2_CHUNKS;
             const int chunk_idx = blockIdx.x % CONV2_CHUNKS;
             const int tid = threadIdx.x;
 
-            __shared__ __half s_conv1_out[864];           // 12 * 12 * 6 = 864 elements
-            __shared__ __half s_filter_grad[150];         // 6 * 25 = 150 elements
+            __shared__ __half s_conv1_out[1152];
+            __shared__ __half s_filter_grad[200];
             __shared__ __half s_bias_grad;
             __shared__ __half s_grad[8][8];
 
             __half zero = __float2half(0.0f);
 
-            for (int i = tid; i < 150; i += 128)
+            for (int i = tid; i < 200; i += 128)
             {
                 s_filter_grad[i] = zero;
             }
@@ -554,35 +346,20 @@ public static partial class Program
             const int cy = (tid < 64) ? (tid / 8) : 0;
             const int px = cx / 2;
             const int py = cy / 2;
+            const int pool_idx = (py * 4 + px) * 16 + filter_idx;
 
             const int start_b = chunk_idx * CONV2_BATCH_PER_CHUNK;
             const int end_b = start_b + CONV2_BATCH_PER_CHUNK;
 
-            int c_arr[2], fx_arr[2], fy_arr[2];
-            int i_count = 0;
-            for (int i = tid; i < 150; i += 128)
-            {
-                c_arr[i_count] = i % 6;
-                fx_arr[i_count] = (i / 6) % 5;
-                fy_arr[i_count] = i / 30;
-                i_count++;
-            }
-
             for (int b = start_b; b < end_b; b++)
             {
-                for (int i = tid; i < 864; i += 128)
+                for (int i = tid; i < 1152; i += 128)
                 {
-                    s_conv1_out[i] = d_conv1_out[b * 864 + i];
+                    s_conv1_out[i] = d_conv1_out[b * 1152 + i];
                 }
 
-                __half out_grad = zero;
-                __half out_val = zero;
-                if (tid < 64 && px < 4 && py < 4)
-                {
-                    int pool_idx = (py * 4 + px) * 16 + filter_idx;
-                    out_grad = d_conv2_out_grad[b * 256 + pool_idx];
-                    out_val = d_conv2_out_val[b * 256 + pool_idx];
-                }
+                __half out_grad = d_conv2_out_grad[b * 256 + pool_idx];
+                __half out_val = d_conv2_out_val[b * 256 + pool_idx];
 
                 __half my_val = zero;
                 if (tid < 64)
@@ -601,14 +378,11 @@ public static partial class Program
                 }
                 __syncthreads();
 
-                // Accumulate weights gradient
-                int idx = 0;
-                for (int i = tid; i < 150; i += 128)
+                for (int i = tid; i < 200; i += 128)
                 {
-                    int c = c_arr[idx];
-                    int fx = fx_arr[idx];
-                    int fy = fy_arr[idx];
-                    idx++;
+                    int c = i % 8;
+                    int fx = (i / 8) % 5;
+                    int fy = i / 40;
 
                     __half w_grad = zero;
                     #pragma unroll
@@ -622,7 +396,7 @@ public static partial class Program
                             {
                                 int in_x = x + fx;
                                 int in_y = y + fy;
-                                w_grad += g * s_conv1_out[(in_y * 12 + in_x) * 6 + c];
+                                w_grad += g * s_conv1_out[(in_y * 12 + in_x) * 8 + c];
                             }
                         }
                     }
@@ -642,13 +416,11 @@ public static partial class Program
                     s_bias_grad += b_grad;
                 }
 
-                // Backprop to inputs
-                for (int i = tid; i < 864; i += 128)
+                for (int i = tid; i < 1152; i += 128)
                 {
-                    int c = i % 6;
-                    int spatial_idx = i / 6;
-                    int ix = spatial_idx % 12;
-                    int iy = spatial_idx / 12;
+                    int c = i % 8;
+                    int ix = (i / 8) % 12;
+                    int iy = i / 96;
 
                     __half sum_grad = zero;
                     #pragma unroll
@@ -661,22 +433,23 @@ public static partial class Program
                             int y = iy - fy;
                             if (x >= 0 && x < 8 && y >= 0 && y < 8)
                             {
-                                int f_idx = filter_idx * 150 + (fy * 5 + fx) * 6 + c;
+                                int f_idx = filter_idx * 200 + (fy * 5 + fx) * 8 + c;
                                 sum_grad += s_grad[y][x] * d_conv2_filters[f_idx];
                             }
                         }
                     }
                     if (__half2float(sum_grad) != 0.0f)
                     {
-                        atomicAdd(&d_conv1_out_grad[b * 864 + i], sum_grad);
+                        atomicAdd(&d_conv1_out_grad[b * 1152 + i], sum_grad);
                     }
                 }
+
                 __syncthreads();
             }
 
-            for (int i = tid; i < 150; i += 128)
+            for (int i = tid; i < 200; i += 128)
             {
-                atomicAdd(&d_conv2_filters_grad[filter_idx * 150 + i], s_filter_grad[i]);
+                atomicAdd(&d_conv2_filters_grad[filter_idx * 200 + i], s_filter_grad[i]);
             }
             if (tid == 0)
             {
@@ -684,7 +457,6 @@ public static partial class Program
             }
         }
 
-        // Conv1 Backward Pass (6 filters -> 1-bit input gradients)
         extern "C" __global__ void conv1_backward(
             const __half* __restrict__ d_conv1_out_grad,
             const __half* __restrict__ d_conv1_out_val,
@@ -702,7 +474,9 @@ public static partial class Program
 
             const int filter_idx = blockIdx.x / CONV1_CHUNKS;
             const int chunk_idx = blockIdx.x % CONV1_CHUNKS;
-            const int tid = threadIdx.y * 16 + threadIdx.x; // Block is 16x16 = 256 threads
+            const int cx = threadIdx.x;
+            const int cy = threadIdx.y;
+            const int tid = cy * 24 + cx;
 
             __shared__ __half s_filter_grad[25];
             __shared__ __half s_bias_grad;
@@ -723,11 +497,12 @@ public static partial class Program
 
             const int batchOffset = ((*d_step) % BATCHES_PER_EPOCH) * BATCH_SIZE;
 
+            const int px = cx / 2;
+            const int py = cy / 2;
+            const int pool_idx = (py * 12 + px) * 8 + filter_idx;
+
             const int start_b = chunk_idx * CONV1_BATCH_PER_CHUNK;
             const int end_b = start_b + CONV1_BATCH_PER_CHUNK;
-
-            int fx = tid % 5;
-            int fy = tid / 5;
 
             for (int b = start_b; b < end_b; b++)
             {
@@ -736,26 +511,16 @@ public static partial class Program
                     s_image[tid] = d_inputs[(batchOffset + b) * 28 + tid];
                 }
 
-                // Parallel populate s_grad across 256 threads
-                for (int i = tid; i < 576; i += 256)
+                __half out_grad = d_conv1_out_grad[b * 1152 + pool_idx];
+                __half out_val = d_conv1_out_val[b * 1152 + pool_idx];
+                __half my_val = d_conv1_unpooled_vals[(b * 576 + cy * 24 + cx) * 8 + filter_idx];
+
+                __half grad = zero;
+                if (__heq(my_val, out_val) && __hgt(out_val, zero))
                 {
-                    int gy = i / 24;
-                    int gx = i % 24;
-                    int px = gx / 2;
-                    int py = gy / 2;
-                    int pool_idx = (py * 12 + px) * 6 + filter_idx;
-
-                    __half out_grad = d_conv1_out_grad[b * 864 + pool_idx];
-                    __half out_val = d_conv1_out_val[b * 864 + pool_idx];
-                    __half my_val = d_conv1_unpooled_vals[(b * 576 + gy * 24 + gx) * 6 + filter_idx];
-
-                    __half grad = zero;
-                    if (__heq(my_val, out_val) && __hgt(out_val, zero))
-                    {
-                        grad = out_grad;
-                    }
-                    s_grad[gy][gx] = grad;
+                    grad = out_grad;
                 }
+                s_grad[cy][cx] = grad;
                 __syncthreads();
 
                 int seed = b + *d_step;
@@ -764,6 +529,9 @@ public static partial class Program
 
                 if (tid < 25)
                 {
+                    int fx = tid % 5;
+                    int fy = tid / 5;
+
                     __half w_grad = zero;
                     #pragma unroll
                     for (int y = 0; y < 24; y++)
@@ -814,7 +582,6 @@ public static partial class Program
             }
         }
 
-        // Adam parameter updates (custom FP16)
         extern "C" __global__ void adam_update(
             __half* __restrict__ d_param,
             __half* __restrict__ d_grad,
@@ -829,25 +596,31 @@ public static partial class Program
             int step_val = *d_step + 1;
             
             #ifndef MAX_LR
-            #define MAX_LR 0.006f
+            #define MAX_LR 0.06f
             #endif
             float max_lr = MAX_LR; 
             float beta1 = 0.7f;
             float beta2 = 0.9f;
-            float epsilon = 1e-4f;
+            float epsilon = 1e-8f;
             
             int total_steps = TOTAL_STEPS;
+            float pct = (float)step_val / total_steps;
+            float start_lr = max_lr / 25.0f;
+            float end_lr = max_lr / 1000.0f;
+            float peak_pct = 0.3f;
+            
             float lr = 0.0f;
-            int decay_start = (int)(total_steps * 0.75f);
-            if (step_val < decay_start)
+            if (pct < peak_pct)
             {
-                lr = max_lr;
+                float phase_pct = pct / peak_pct;
+                float cos_val = cosf(3.14159265f * phase_pct);
+                lr = start_lr + 0.5f * (max_lr - start_lr) * (1.0f - cos_val);
             }
             else
             {
-                float phase_pct = (float)(step_val - decay_start) / (total_steps - decay_start);
+                float phase_pct = (pct - peak_pct) / (1.0f - peak_pct);
                 float cos_val = cosf(3.14159265f * phase_pct);
-                lr = max_lr * 0.5f * (1.0f + cos_val);
+                lr = end_lr + 0.5f * (max_lr - end_lr) * (1.0f + cos_val);
             }
 
             float beta1_t = powf(beta1, step_val);

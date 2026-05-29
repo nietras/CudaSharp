@@ -1,10 +1,8 @@
-using System;
-
-namespace CudaSharp.Mnist;
+﻿namespace CudaSharp.Mnist;
 
 public static partial class Program
 {
-    public static readonly string CudaSourceV10 =
+    public static string CudaSourceV10 =>
         """
         #include <cuda_fp16.h>
 
@@ -385,6 +383,13 @@ public static partial class Program
 
             int batchOffset = ((*d_step) % BATCHES_PER_EPOCH) * BATCH_SIZE;
 
+            __shared__ __half s_fc2_outputs[BATCH_SIZE][10];
+            #pragma unroll
+            for (int c = 0; c < 10; c++)
+            {
+                s_fc2_outputs[tid][c] = d_fc2_outputs[tid * 10 + c];
+            }
+
             __shared__ float s_weight_grads[128][10];
 
             #pragma unroll
@@ -402,14 +407,14 @@ public static partial class Program
                 float max_logit = -1e9f;
                 for (int c = 0; c < 10; c++)
                 {
-                    float logit = __half2float(d_fc2_outputs[b * 10 + c]);
+                    float logit = __half2float(s_fc2_outputs[b][c]);
                     if (logit > max_logit) max_logit = logit;
                 }
 
                 float sum_exp = 0.0f;
                 for (int c = 0; c < 10; c++)
                 {
-                    sum_exp += expf(__half2float(d_fc2_outputs[b * 10 + c]) - max_logit);
+                    sum_exp += expf(__half2float(s_fc2_outputs[b][c]) - max_logit);
                 }
 
                 int correct_label = d_labels[batchOffset + b];
@@ -418,7 +423,7 @@ public static partial class Program
                 #pragma unroll
                 for (int c = 0; c < 10; c++)
                 {
-                    float prob = expf(__half2float(d_fc2_outputs[b * 10 + c]) - max_logit) / sum_exp;
+                    float prob = expf(__half2float(s_fc2_outputs[b][c]) - max_logit) / sum_exp;
                     float g_val = prob - (c == correct_label ? 1.0f : 0.0f);
                     s_weight_grads[tid][c] += g_val * x_val;
                 }

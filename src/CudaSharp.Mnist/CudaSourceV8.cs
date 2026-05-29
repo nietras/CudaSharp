@@ -1,10 +1,8 @@
-﻿using System;
-
-namespace CudaSharp.Mnist;
+﻿namespace CudaSharp.Mnist;
 
 public static partial class Program
 {
-    public static readonly string CudaSourceV8 =
+    public static string CudaSourceV8 =>
         """
         #include <cuda_fp16.h>
 
