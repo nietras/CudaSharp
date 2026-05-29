@@ -395,7 +395,7 @@ public static partial class Program
             __syncthreads();
 
             #pragma unroll
-            for (int i = 0; i < 2; i++)
+            for (int i = 0; i < (BATCH_SIZE / 128); i++)
             {
                 int b = i * 128 + tid;
 
@@ -509,7 +509,7 @@ public static partial class Program
             __syncthreads();
 
             #pragma unroll
-            for (int i = 0; i < 4; i++)
+            for (int i = 0; i < (BATCH_SIZE / 64); i++)
             {
                 int b = i * 64 + tid;
                 float x_val = __half2float(d_fc1_inputs[b * 256 + input_idx]);
@@ -649,12 +649,9 @@ public static partial class Program
                         for (int x = 0; x < 8; x++)
                         {
                             __half g = s_grad[y][x];
-                            if (__half2float(g) != 0.0f)
-                            {
-                                int in_x = x + fx;
-                                int in_y = y + fy;
-                                w_grad += g * s_conv1_out[(in_y * 12 + in_x) * 6 + c];
-                            }
+                            int in_x = x + fx;
+                            int in_y = y + fy;
+                            w_grad += g * s_conv1_out[(in_y * 12 + in_x) * 6 + c];
                         }
                     }
                     s_filter_grad[i] += w_grad;
@@ -869,15 +866,17 @@ public static partial class Program
             
             int total_steps = TOTAL_STEPS;
             float lr = 0.0f;
-            int decay_start = (int)(total_steps * 0.75f);
-            if (step_val < decay_start)
+            float pct = (float)step_val / total_steps;
+            float warmup_pct = 0.30f;
+            if (pct < warmup_pct)
             {
-                lr = max_lr;
+                float alpha = pct / warmup_pct;
+                lr = max_lr * (0.1f + 0.9f * alpha);
             }
             else
             {
-                float phase_pct = (float)(step_val - decay_start) / (total_steps - decay_start);
-                float cos_val = cosf(3.14159265f * phase_pct);
+                float alpha = (pct - warmup_pct) / (1.0f - warmup_pct);
+                float cos_val = cosf(3.14159265f * alpha);
                 lr = max_lr * 0.5f * (1.0f + cos_val);
             }
 
