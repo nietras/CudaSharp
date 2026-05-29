@@ -292,7 +292,7 @@ public unsafe partial class Program
         Console.WriteLine("CudaSharp Ultra-Fast MNIST CNN Training Simulator");
         Console.WriteLine("==================================================");
 
-        var version = "V2";
+        var version = "V3";
         var profile = false;
         for (var i = 0; i < args.Length; i++)
         {
