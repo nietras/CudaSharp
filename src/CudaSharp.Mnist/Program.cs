@@ -99,6 +99,46 @@ public unsafe partial class Program
         MaxLR = 0.025f
     };
 
+    public static readonly NetworkConfig ConfigV21 = new()
+    {
+        Name = "V21",
+        CudaSource = CudaSourceV10,
+        IsHalf = true,
+        IsV7Based = true,
+        BatchSize = 128,
+        Conv1FilterCount = 8,
+        Conv1FilterSize = 2,
+        Conv2FilterCount = 16,
+        Conv2FilterSize = 2,
+        Pool2OutSize = 6,
+        HasFC1 = true,
+        FC1Outputs = 120,
+        FC1Inputs = 576,
+        BatchesPerEpoch = 400,
+        TotalSteps = 155,
+        MaxLR = 0.014f
+    };
+
+    public static readonly NetworkConfig ConfigV22 = new()
+    {
+        Name = "V22",
+        CudaSource = CudaSourceV10,
+        IsHalf = true,
+        IsV7Based = true,
+        BatchSize = 128,
+        Conv1FilterCount = 8,
+        Conv1FilterSize = 4,
+        Conv2FilterCount = 16,
+        Conv2FilterSize = 4,
+        Pool2OutSize = 4,
+        HasFC1 = true,
+        FC1Outputs = 120,
+        FC1Inputs = 256,
+        BatchesPerEpoch = 400,
+        TotalSteps = 155,
+        MaxLR = 0.014f
+    };
+
     public static readonly NetworkConfig ConfigV10 = new()
     {
         Name = "V10",
@@ -323,9 +363,9 @@ public unsafe partial class Program
                 else if (num == 9) activeConfig = ConfigV9;
                 else if (num == 10) activeConfig = ConfigV10;
                 else if (num == 11) activeConfig = ConfigV11;
-                else if (num == 12) activeConfig = ConfigV12;
-                else if (num == 13) activeConfig = ConfigV13;
                 else if (num == 14) activeConfig = ConfigV14;
+                else if (num == 21) activeConfig = ConfigV21;
+                else if (num == 22) activeConfig = ConfigV22;
                 else
                 {
                     var batchSize = (num % 4) switch
@@ -393,6 +433,8 @@ public unsafe partial class Program
                 "V12" => ConfigV12,
                 "V13" => ConfigV13,
                 "V14" => ConfigV14,
+                "V21" => ConfigV21,
+                "V22" => ConfigV22,
                 _ => throw new ArgumentException($"Unknown version: {version}")
             };
         }
@@ -452,7 +494,9 @@ public unsafe partial class Program
                 $"-DMAX_LR={activeConfig.MaxLR}f",
                 $"-DFC1_OUTPUTS={activeConfig.FC1Outputs}",
                 $"-DCONV1_CHUNKS={conv1Chunks}",
-                $"-DCONV2_CHUNKS={conv2Chunks}"
+                $"-DCONV2_CHUNKS={conv2Chunks}",
+                $"-DFILTER1_SIZE={activeConfig.Conv1FilterSize}",
+                $"-DFILTER2_SIZE={activeConfig.Conv2FilterSize}"
             };
             var cudaPath = Environment.GetEnvironmentVariable("CUDA_PATH");
             if (!string.IsNullOrEmpty(cudaPath))
@@ -555,7 +599,7 @@ public unsafe partial class Program
             {
                 var fc1OutCount = activeConfig.Name == "V8" ? 784 : activeConfig.FC1Outputs;
                 fc1OutSize = (nuint)(BatchSize * fc1OutCount);
-                if (activeConfig.Name == "V10" || activeConfig.Name == "V11" || activeConfig.Name == "V12" || activeConfig.Name == "V13" || activeConfig.Name == "V14")
+                if (activeConfig.IsHalf)
                 {
                     fc1UnpooledSize = (nuint)(BatchSize * fc1OutCount);
                 }
@@ -765,14 +809,14 @@ public unsafe partial class Program
                 ? new void*[] { &d_conv2Out, &d_fc1Out }
                 : (activeConfig.Name == "V5"
                     ? new void*[] { &d_trainImages, &d_fc1Weights, &d_fc1Biases, &d_fc1Out, &d_step, &isTrainingTrue }
-                    : (activeConfig.Name == "V10" || activeConfig.Name == "V11" || activeConfig.Name == "V12" || activeConfig.Name == "V13" || activeConfig.Name == "V14"
+                    : (activeConfig.IsHalf
                         ? new void*[] { &d_conv2Out, &d_fc1Weights, &d_fc1Biases, &d_fc1Out, &d_fc1Unpooled }
                         : new void*[] { &d_conv2Out, &d_fc1Weights, &d_fc1Biases, &d_fc1Out }));
             var fc2Params = new void*[]
             {
                 &d_fc2In, &d_fc2Weights, &d_fc2Biases, &d_fc2Out
             };
-            var fc2BwdParams = activeConfig.Name == "V10" || activeConfig.Name == "V11" || activeConfig.Name == "V12" || activeConfig.Name == "V13" || activeConfig.Name == "V14"
+            var fc2BwdParams = activeConfig.IsHalf
                 ? new void*[]
                 {
                     &d_fc2Out, &d_trainLabels, &d_fc2In, &d_fc2Weights,
@@ -862,7 +906,7 @@ public unsafe partial class Program
                 if (activeConfig.HasFC1)
                 {
                     currentDependencies[0] = lastNode;
-                    var fc1BlockSize = activeConfig.Name == "V8" ? 784u : (activeConfig.Name == "V9" || activeConfig.Name == "V10" || activeConfig.Name == "V11" || activeConfig.Name == "V12" || activeConfig.Name == "V13" || activeConfig.Name == "V14" ? 256u : 128u);
+                    var fc1BlockSize = activeConfig.Name == "V8" ? 784u : (activeConfig.IsHalf ? (uint)activeConfig.FC1Inputs : 128u);
                     lastNode = AddKernelNode(epochGraph, currentDependencies,
                         f_fc1, (uint)BatchSize, 1u, 1u,
                         fc1BlockSize, 1u, 1u, fc1Params);
@@ -914,10 +958,10 @@ public unsafe partial class Program
                     if (activeConfig.Name != "V8")
                     {
                         currentDependencies[0] = lastNode;
-                        if (activeConfig.Name == "V9" || activeConfig.Name == "V10" || activeConfig.Name == "V11" || activeConfig.Name == "V12" || activeConfig.Name == "V13" || activeConfig.Name == "V14")
+                        if (activeConfig.IsHalf)
                         {
                             lastNode = AddKernelNode(epochGraph, currentDependencies,
-                                f_fc1_bwd_weights, 256u, 1u, 1u,
+                                f_fc1_bwd_weights, (uint)activeConfig.FC1Inputs, 1u, 1u,
                                 64u, 1u, 1u, fc1BwdWeightsParams);
                         }
                         else if (activeConfig.Name == "V5")
@@ -1016,6 +1060,9 @@ public unsafe partial class Program
 
             var measuredTimes = new System.Collections.Generic.List<double>();
             var measuredAccuracies = new System.Collections.Generic.List<double>();
+            var profileTimes = new System.Collections.Generic.Dictionary<string, System.Collections.Generic.List<float>>();
+            double warmupAcc = 0.0;
+            double warmupTime = 0.0;
 
             for (var sIndex = 0; sIndex < 4; sIndex++)
             {
@@ -1096,7 +1143,7 @@ public unsafe partial class Program
 
                         if (activeConfig.HasFC1)
                         {
-                            var fc1FwdBlockSize = activeConfig.Name == "V8" ? 784u : (activeConfig.Name == "V9" || activeConfig.Name == "V10" || activeConfig.Name == "V11" || activeConfig.Name == "V12" || activeConfig.Name == "V13" || activeConfig.Name == "V14" ? 256u : 128u);
+                            var fc1FwdBlockSize = activeConfig.Name == "V8" ? 784u : (activeConfig.IsHalf ? (uint)activeConfig.FC1Inputs : 128u);
                             fc1Times.Add(MeasureKernel(f_fc1, (uint)BatchSize, 1u, 1u, fc1FwdBlockSize, 1u, 1u, fc1Params));
                         }
 
@@ -1117,10 +1164,10 @@ public unsafe partial class Program
                                 fc1BwdTimes.Add(MeasureKernel(f_fc1_bwd, (uint)BatchSize, 1u, 1u, 784u, 1u, 1u, fc1BwdParams));
                                 fc1BwdWTimes.Add(MeasureKernel(f_fc1_bwd_weights, (uint)conv2FilterCount * (uint)conv2Chunks, 1u, 1u, 128u, 1u, 1u, fc1BwdWeightsParams));
                             }
-                            else if (activeConfig.Name == "V9" || activeConfig.Name == "V10" || activeConfig.Name == "V11" || activeConfig.Name == "V12" || activeConfig.Name == "V13" || activeConfig.Name == "V14")
+                            else if (activeConfig.IsHalf)
                             {
-                                fc1BwdTimes.Add(MeasureKernel(f_fc1_bwd, (uint)BatchSize, 1u, 1u, 256u, 1u, 1u, fc1BwdParams));
-                                fc1BwdWTimes.Add(MeasureKernel(f_fc1_bwd_weights, 256u, 1u, 1u, 64u, 1u, 1u, fc1BwdWeightsParams));
+                                fc1BwdTimes.Add(MeasureKernel(f_fc1_bwd, (uint)BatchSize, 1u, 1u, (uint)activeConfig.FC1Inputs, 1u, 1u, fc1BwdParams));
+                                fc1BwdWTimes.Add(MeasureKernel(f_fc1_bwd_weights, (uint)activeConfig.FC1Inputs, 1u, 1u, 64u, 1u, 1u, fc1BwdWeightsParams));
                             }
                             else if (activeConfig.Name == "V5")
                             {
@@ -1187,6 +1234,19 @@ public unsafe partial class Program
                         PrintStats("conv1_backward", conv1BwdTimes);
                         PrintStats("adam_update", adamTimes);
                         Console.WriteLine("==================================================");
+
+                        profileTimes["clear_gradient"] = clearTimes;
+                        profileTimes["conv1_forward"] = conv1Times;
+                        profileTimes["conv2_forward"] = conv2Times;
+                        profileTimes["fc1_forward"] = fc1Times;
+                        profileTimes["fc2_forward"] = fc2Times;
+                        profileTimes["fc2_backward"] = fc2BwdTimes;
+                        profileTimes["fc2_bwd_weights"] = fc2BwdWTimes;
+                        profileTimes["fc1_backward"] = fc1BwdTimes;
+                        profileTimes["fc1_bwd_weights"] = fc1BwdWTimes;
+                        profileTimes["conv2_backward"] = conv2BwdTimes;
+                        profileTimes["conv1_backward"] = conv1BwdTimes;
+                        profileTimes["adam_update"] = adamTimes;
                     }
                 }
                 else
@@ -1310,6 +1370,8 @@ public unsafe partial class Program
                 if (isWarmup)
                 {
                     Console.WriteLine($"[WARMUP RESULTS] Accuracy: {accuracy:F2}%, GPU Time: {trainingTime:F3} ms");
+                    warmupAcc = accuracy;
+                    warmupTime = trainingTime;
                 }
                 else
                 {
@@ -1344,6 +1406,18 @@ public unsafe partial class Program
             Console.WriteLine($"GPU Training Time: Min = {minTime:F3} ms | Mean = {meanTime:F3} ms | Max = {maxTime:F3} ms");
             Console.WriteLine($"Test Accuracy:     Min = {minAcc:F2}% | Mean = {meanAcc:F2}% | Max = {maxAcc:F2}%");
             Console.WriteLine("==================================================");
+
+            WriteMarkdownReport(
+                activeConfig,
+                deviceName,
+                $"{major}{minor}",
+                warmupAcc,
+                warmupTime,
+                measuredAccuracies.ToArray(),
+                measuredTimes.ToArray(),
+                meanAcc,
+                meanTime,
+                profileTimes);
 
             arena.Dispose();
 
@@ -1467,7 +1541,7 @@ public unsafe partial class Program
                 for (var i = 0; i < h_biases.Length; i++) h_biases[i] = 0.1f;
                 cuMemcpyHtoD(d_fc1Biases, (IntPtr)Unsafe.AsPointer(ref h_biases[0]), (nuint)(h_biases.Length * sizeof(float))).Ok();
             }
-            if (activeConfig.Name == "V1" || activeConfig.Name == "V4" || activeConfig.Name == "V8" || activeConfig.Name == "V9" || activeConfig.Name == "V10" || activeConfig.Name == "V11" || activeConfig.Name == "V12" || activeConfig.Name == "V13" || activeConfig.Name == "V14")
+            if (activeConfig.Name == "V1" || activeConfig.Name == "V4" || activeConfig.IsHalf)
             {
                 var scale = (activeConfig.Name == "V1" || activeConfig.Name == "V4") ? 0.02f : ((activeConfig.Name == "V14") ? 0.15f : 0.05f);
                 ScaleDownDeviceBuffer(d_fc1Weights, fc1.OutFeatures * fc1.InFeatures, scale, isHalf);
@@ -1588,5 +1662,140 @@ public unsafe partial class Program
         }
 
         return labels;
+    }
+
+    static void WriteMarkdownReport(
+        NetworkConfig config,
+        string deviceName,
+        string cc,
+        double warmupAcc,
+        double warmupTime,
+        double[] measuredAccs,
+        double[] measuredTimes,
+        double meanAcc,
+        double meanTime,
+        System.Collections.Generic.Dictionary<string, System.Collections.Generic.List<float>>? profileTimes = null)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine($"# MNIST GPU Training Report: {config.Name}");
+        sb.AppendLine();
+        sb.AppendLine("> [!NOTE]");
+        sb.AppendLine($"> Programmatic report automatically generated by CudaSharp on {DateTime.Now:yyyy-MM-dd HH:mm:ss}.");
+        sb.AppendLine();
+        sb.AppendLine("## 1. Hardware Environment");
+        sb.AppendLine();
+        sb.AppendLine($"* **Active GPU Device**: {deviceName}");
+        sb.AppendLine($"* **Compute Capability**: sm_{cc}");
+        sb.AppendLine();
+        sb.AppendLine("## 2. Network Architecture");
+        sb.AppendLine();
+        sb.AppendLine("| Component / Layer | Details | Rationale / Settings |");
+        sb.AppendLine("| :--- | :--- | :--- |");
+        sb.AppendLine($"| **Model Name** | `{config.Name}` | Target identifier |");
+        sb.AppendLine($"| **Element Precision** | {(config.IsHalf ? "FP16 (Half Precision)" : "FP32 (Single Precision)")} | Low-precision bandwidth optimization |");
+        sb.AppendLine($"| **Activation Type** | `{config.ActivationType}` | GELU preventing dead neurons vs ReLU |");
+        sb.AppendLine($"| **Input Map** | 28x28 1-Bit CPU Packed Register | Packed 32 pixels/register for Layer 1 efficiency |");
+        sb.AppendLine($"| **Conv1 (Layer 1)** | {config.Conv1FilterSize}x{config.Conv1FilterSize} Conv ({config.Conv1FilterCount} channels), Pool (2x2) | Spatial feature extraction |");
+        sb.AppendLine($"| **Conv2 (Layer 2)** | {config.Conv2FilterSize}x{config.Conv2FilterSize} Conv ({config.Conv2FilterCount} channels), Pool (2x2) | Deep spatial channel representation |");
+        if (config.HasFC1)
+        {
+            sb.AppendLine($"| **FC1 (Layer 3)** | {config.FC1Inputs} -> {config.FC1Outputs} dense hidden projection | Hidden feature scaling |");
+        }
+        sb.AppendLine($"| **FC2 (Output Layer)**| {config.FC2Inputs} -> 10 classification logits | Final softmax classification |");
+        sb.AppendLine();
+        sb.AppendLine("## 3. Weight Initialization Strategy");
+        sb.AppendLine();
+        sb.AppendLine($"* **Weight Standard Deviation Formula**: `Math.Sqrt(2.0 / inFeatures)` (He Normal initialization)");
+        if (config.HasFC1)
+        {
+            var scale = (config.Name == "V1" || config.Name == "V4") ? "0.02f" : ((config.Name == "V14") ? "0.15f" : "0.05f");
+            sb.AppendLine($"* **FC1 Dense Weights Scale Factor**: `{scale}` (Prevents early pre-activation explosion)");
+        }
+        var fc2Scale = (config.Name == "V1" || config.Name == "V4") ? "0.05f" : "1.0f";
+        sb.AppendLine($"* **FC2 Dense Weights Scale Factor**: `{fc2Scale}` (Stabilizes output logit distribution)");
+        var biasInit = (config.Name == "V1" || config.Name == "V4") ? "0.1f positive constant (Prevents dead ReLUs in FP32)" : "0.0f flat";
+        sb.AppendLine($"* **FC1 Bias Initialization**: `{biasInit}`");
+        sb.AppendLine();
+        sb.AppendLine("## 4. Optimizer & Schedules");
+        sb.AppendLine();
+        sb.AppendLine("* **Optimizer**: Unified Adam / AdamW with Weight Decay");
+        sb.AppendLine($"* **Momentum Hyperparameters**: $\\beta_1 = {config.Beta1}$, $\\beta_2 = {config.Beta2}$, $\\epsilon = 1e-8$");
+        sb.AppendLine($"* **Learning Rate Schedule**: Cosine Annealing (OneCycleLR) peaked at **{config.MaxLR:F5}** (Start = LR/25, End = LR/1000)");
+        sb.AppendLine();
+        sb.AppendLine("## 5. Training Hyperparameters");
+        sb.AppendLine();
+        sb.AppendLine($"* **Batch Size**: {config.BatchSize}");
+        sb.AppendLine($"* **Total Training Steps**: {config.TotalSteps}");
+        sb.AppendLine($"* **Batches per Epoch**: {config.BatchesPerEpoch}");
+        sb.AppendLine();
+        sb.AppendLine("## 6. Performance Results");
+        sb.AppendLine();
+        sb.AppendLine("| Phase / Run | Test Accuracy (%) | GPU Training Time (ms) |");
+        sb.AppendLine("| :--- | :---: | :---: |");
+        sb.AppendLine($"| **Warmup Run** | {warmupAcc:F2}% | {warmupTime:F3} ms |");
+        for (var i = 0; i < measuredAccs.Length; i++)
+        {
+            sb.AppendLine($"| **Measured Run #{i + 1}** | {measuredAccs[i]:F2}% | {measuredTimes[i]:F3} ms |");
+        }
+        sb.AppendLine($"| **MEAN METRIC** | **{meanAcc:F2}%** | **{meanTime:F3} ms** |");
+        sb.AppendLine();
+
+        if (profileTimes != null && profileTimes.Count > 0)
+        {
+            sb.AppendLine("## 7. Microsecond-Level Per-Kernel Timing Breakdown");
+            sb.AppendLine();
+            sb.AppendLine("The table below breaks down the measured step execution times for the different layers/operations within a single training iteration under profiling mode (host event synchronization active).");
+            sb.AppendLine();
+            sb.AppendLine("| Kernel / Operation | Min (ms) | Mean (ms) | Max (ms) | Total (ms) | Description / Role |");
+            sb.AppendLine("| :--- | :---: | :---: | :---: | :---: | :--- |");
+
+            void AddRow(string name, string desc)
+            {
+                if (profileTimes.TryGetValue(name, out var list) && list.Count > 0)
+                {
+                    float min = float.MaxValue, max = float.MinValue, sum = 0;
+                    for (var i = 0; i < list.Count; i++)
+                    {
+                        var t = list[i];
+                        if (t < min) min = t;
+                        if (t > max) max = t;
+                        sum += t;
+                    }
+                    var mean = sum / list.Count;
+                    sb.AppendLine($"| `{name}` | {min:F3} | {mean:F3} | {max:F3} | {sum:F2} | {desc} |");
+                }
+            }
+
+            AddRow("clear_gradient", "Resets weight/bias gradient buffers before step");
+            AddRow("conv1_forward", "1-bit input spatial convolution, ReLU + MaxPool");
+            AddRow("conv2_forward", "Channel-wise convolution, ReLU + MaxPool");
+            AddRow("fc1_forward", "Fully connected hidden layer forward projection");
+            AddRow("fc2_forward", "Fully connected final projection (logits)");
+            AddRow("fc2_backward", "Logits Softmax backprop and activation gradient");
+            AddRow("fc2_bwd_weights", "Parallel shared reduction weights gradient (Zero-Atomics)");
+            AddRow("fc1_backward", "Backpropagation of FC1 hidden layer activation gradients");
+            AddRow("fc1_bwd_weights", "Backpropagation of FC1 filter & bias gradients");
+            AddRow("conv2_backward", "Backpropagation of Conv2 filter & bias gradients");
+            AddRow("conv1_backward", "Backpropagation of Conv1 filter & bias gradients");
+            AddRow("adam_update", "Parameter update step with dynamic Cosine Annealing");
+            sb.AppendLine();
+        }
+
+        sb.AppendLine("---");
+
+        var dir = AppDomain.CurrentDomain.BaseDirectory;
+        while (!string.IsNullOrEmpty(dir) && !File.Exists(Path.Combine(dir, "CudaSharp.slnx")))
+        {
+            dir = Path.GetDirectoryName(dir);
+        }
+        var reportsDir = string.IsNullOrEmpty(dir)
+            ? Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "reports")
+            : Path.Combine(dir, "reports");
+
+        Directory.CreateDirectory(reportsDir);
+        var fileName = config.Name.StartsWith("V", StringComparison.OrdinalIgnoreCase) ? $"{config.Name}_report.md" : $"V{config.Name}_report.md";
+        var reportPath = Path.Combine(reportsDir, fileName);
+        File.WriteAllText(reportPath, sb.ToString());
+        Console.WriteLine($"[REPORT] Programmatic markdown report written to reports/{fileName} successfully!");
     }
 }
