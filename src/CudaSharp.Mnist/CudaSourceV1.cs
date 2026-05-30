@@ -396,79 +396,59 @@ public static partial class Program
             }
         }
 
-        // FC1 Weights Gradient Kernel (chunked batch accumulation!)
+        // FC1 Weights Gradient Kernel (Zero atomics, block-level parallel reductions!)
         extern "C" __global__ void fc1_backward_weights(
             const float* __restrict__ d_fc1_out_grad, // [BatchSize x 256]
             const float* __restrict__ d_fc1_outputs,  // [BatchSize x 256]
             const float* __restrict__ d_conv2_outputs, // [BatchSize x 400]
             float* __restrict__ d_fc1_weights_grad)   // [400 x 256]
         {
-            #define FC1_CHUNKS 8
-            #define FC1_BATCH_PER_CHUNK (BATCH_SIZE / FC1_CHUNKS)
+            const int input_idx = blockIdx.x; // 0..399
+            const int tid = threadIdx.x;      // 0..31
 
-            // Grid: 8 x 8 x 8 = 512 blocks.
-            // blockIdx.x: row-chunk (0..7, each handles 50 rows)
-            // blockIdx.y: col-chunk (0..7, each handles 32 cols)
-            // blockIdx.z: batch-chunk (0..7, each handles 32 batch elements)
-            // Block size: 128 threads (1D)
-            
-            const int row_start = blockIdx.x * 50;
-            const int col_start = blockIdx.y * 32;
-            const int chunk_idx = blockIdx.z;
-            const int tid = threadIdx.x;
-            
-            __shared__ float s_w_grad[50][32];
-            
-            // Initialize shared memory
-            for (int i = tid; i < 1600; i += 128)
+            __shared__ float s_accum[32][256];
+
+            #pragma unroll 4
+            for (int c = 0; c < 256; c++)
             {
-                int r = i / 32;
-                int c = i % 32;
-                s_w_grad[r][c] = 0.0f;
+                s_accum[tid][c] = 0.0f;
             }
             __syncthreads();
-            
-            const int start_b = chunk_idx * FC1_BATCH_PER_CHUNK;
-            const int end_b = start_b + FC1_BATCH_PER_CHUNK;
-            
-            for (int b = start_b; b < end_b; b++)
+
+            #pragma unroll
+            for (int i = 0; i < (BATCH_SIZE / 32); i++)
             {
-                __shared__ float s_input[50];
-                __shared__ float s_out_grad[32];
-                
-                // Parallel load inputs and out_grads for this batch element
-                if (tid < 50)
+                int b = i * 32 + tid;
+                float x_val = d_conv2_outputs[b * 400 + input_idx];
+                #pragma unroll 4
+                for (int c = 0; c < 256; c++)
                 {
-                    s_input[tid] = d_conv2_outputs[b * 400 + row_start + tid];
+                    float out_val = d_fc1_outputs[b * 256 + c];
+                    float g_val = out_val > 0.0f ? d_fc1_out_grad[b * 256 + c] : 0.0f;
+                    s_accum[tid][c] += x_val * g_val;
                 }
-                if (tid < 32)
+            }
+            __syncthreads();
+
+            for (int stride = 16; stride > 0; stride >>= 1)
+            {
+                if (tid < stride)
                 {
-                    float out_val = d_fc1_outputs[b * 256 + col_start + tid];
-                    s_out_grad[tid] = out_val > 0.0f ? d_fc1_out_grad[b * 256 + col_start + tid] : 0.0f;
-                }
-                __syncthreads();
-                
-                // Accumulate products
-                for (int i = tid; i < 1600; i += 128)
-                {
-                    int r = i / 32;
-                    int c = i % 32;
-                    s_w_grad[r][c] += s_input[r] * s_out_grad[c];
+                    #pragma unroll 4
+                    for (int c = 0; c < 256; c++)
+                    {
+                        s_accum[tid][c] += s_accum[tid + stride][c];
+                    }
                 }
                 __syncthreads();
             }
-            
-            // Write to global memory using atomicAdd
-            for (int i = tid; i < 1600; i += 128)
+
+            if (tid == 0)
             {
-                int r = i / 32;
-                int c = i % 32;
-                int global_row = row_start + r;
-                int global_col = col_start + c;
-                float val = s_w_grad[r][c];
-                if (val != 0.0f)
+                #pragma unroll 4
+                for (int c = 0; c < 256; c++)
                 {
-                    atomicAdd(&d_fc1_weights_grad[global_row * 256 + global_col], val);
+                    d_fc1_weights_grad[input_idx * 256 + c] = s_accum[0][c];
                 }
             }
         }
@@ -768,7 +748,7 @@ public static partial class Program
             int step_val = *d_step + 1; // 1-indexed for beta power
             
             // Get learning rate for this step using OneCycleLR formula
-            float max_lr = 0.028f; 
+            float max_lr = MAX_LR; 
             float beta1 = 0.7f;
             float beta2 = 0.9f;
             float epsilon = 1e-8f;

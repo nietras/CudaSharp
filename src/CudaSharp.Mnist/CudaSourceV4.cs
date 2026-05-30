@@ -6,7 +6,7 @@ public static partial class Program
         .Replace("\r\n", "\n")
         .Replace("#define BATCH_SIZE 128", "#define BATCH_SIZE 128")
         .Replace("#define TOTAL_STEPS 400", "#define TOTAL_STEPS 190")
-        .Replace("float max_lr = 0.028f;", "float max_lr = 0.028f;")
+        .Replace("float max_lr = MAX_LR;", "float max_lr = MAX_LR;")
         .Replace("float beta1 = 0.7f;", "float beta1 = 0.9f;")
         .Replace("float beta2 = 0.9f;", "float beta2 = 0.999f;")
         .Replace(@"            float pct = (float)step_val / total_steps;
