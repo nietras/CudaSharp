@@ -23,7 +23,7 @@ public unsafe partial class Program
     {
         Console.WriteLine("CudaSharp Ultra-Fast MNIST CNN Training Simulator");
 
-        var version = "V8";
+        var version = "ALL";
         var profile = false;
         for (var i = 0; i < args.Length; i++)
         {
@@ -164,7 +164,7 @@ public unsafe partial class Program
         var conv2Chunks = Math.Max(16, activeConfig.BatchSize / 8);
 
         Console.WriteLine("[JIT] Compiling CUDA kernels...");
-        var cudaSourceStr = activeConfig.Name == "V8"
+        var cudaSourceStr = activeConfig.UseCustomCudaSource
             ? activeConfig.CudaSource
             : (activeConfig.IsHalf ? CudaKernelLibrary.BuildLeNetSource(activeConfig) : activeConfig.CudaSource);
         nvrtcCreateProgram(out var program, cudaSourceStr, "mnist_kernels", 0, [], []).Ok();
@@ -246,18 +246,9 @@ public unsafe partial class Program
             CUfunction f_fc1 = default, f_fc1_bwd = default, f_fc1_bwd_weights = default;
             if (activeConfig.HasFC1)
             {
-                var fc1FwdName = activeConfig.Name == "V8" ? "pool2_forward" : "fc1_forward";
-                var fc1BwdName = activeConfig.Name == "V8" ? "pool2_backward" : "fc1_backward";
-                cuModuleGetFunction(out f_fc1, module, fc1FwdName).Ok();
-                cuModuleGetFunction(out f_fc1_bwd, module, fc1BwdName).Ok();
-                if (activeConfig.Name == "V8")
-                {
-                    cuModuleGetFunction(out f_fc1_bwd_weights, module, "fc1_backward").Ok();
-                }
-                else
-                {
-                    cuModuleGetFunction(out f_fc1_bwd_weights, module, "fc1_backward_weights").Ok();
-                }
+                cuModuleGetFunction(out f_fc1, module, activeConfig.FC1ForwardKernelName).Ok();
+                cuModuleGetFunction(out f_fc1_bwd, module, activeConfig.FC1BackwardKernelName).Ok();
+                cuModuleGetFunction(out f_fc1_bwd_weights, module, activeConfig.FC1BackwardWeightsKernelName).Ok();
             }
 
             var conv1BlockX = (uint)activeConfig.Pool1OutSize;
@@ -285,7 +276,7 @@ public unsafe partial class Program
             nuint fc1UnpooledSize = 0;
             if (activeConfig.HasFC1)
             {
-                var fc1OutCount = activeConfig.Name == "V8" ? 784 : activeConfig.FC1Outputs;
+                var fc1OutCount = activeConfig.FC1OutputElementsOverride ?? activeConfig.FC1Outputs;
                 fc1OutSize = (nuint)(BatchSize * fc1OutCount);
                 if (activeConfig.IsHalf)
                 {
@@ -301,12 +292,15 @@ public unsafe partial class Program
             nuint fc1OutGradSize = 0;
             nuint arenaIntermediateGradSize = 0;
 
-            if (activeConfig.Name == "V8")
+            if (activeConfig.UsesPooledConv2AsFc1Input)
             {
-                fc2InGradSize = (nuint)(BatchSize * 784);
-                conv2OutGradSize = (nuint)(BatchSize * 3136);
-                fc1OutGradSize = (nuint)(BatchSize * 784);
-                arenaIntermediateGradSize = (nuint)(BatchSize * 3136);
+                fc2InGradSize = (nuint)(BatchSize * activeConfig.FC2Inputs);
+                conv2OutGradSize = (nuint)(BatchSize * activeConfig.Conv2OutPerSample);
+                fc1OutGradSize = (nuint)(BatchSize * (activeConfig.FC1OutputElementsOverride ?? activeConfig.FC1Outputs));
+                if (activeConfig.RequiresIntermediateGradBuffer)
+                {
+                    arenaIntermediateGradSize = (nuint)(BatchSize * activeConfig.Conv2OutPerSample);
+                }
             }
             else if (activeConfig.HasFC1)
             {
@@ -435,12 +429,15 @@ public unsafe partial class Program
 
             CUdeviceptr d_fc1OutGrad = default, d_conv2OutGrad = default, d_intermediateGrad = default;
             CUdeviceptr d_fc2InGrad = default;
-            if (activeConfig.Name == "V8")
+            if (activeConfig.UsesPooledConv2AsFc1Input)
             {
                 d_fc2InGrad = arena.Rent(fc2InGradSize * (nuint)elementSize);
                 d_conv2OutGrad = arena.Rent(conv2OutGradSize * (nuint)elementSize);
                 d_fc1OutGrad = arena.Rent(fc1OutGradSize * (nuint)elementSize);
-                d_intermediateGrad = arena.Rent(arenaIntermediateGradSize * (nuint)elementSize);
+                if (activeConfig.RequiresIntermediateGradBuffer)
+                {
+                    d_intermediateGrad = arena.Rent(arenaIntermediateGradSize * (nuint)elementSize);
+                }
             }
             else if (activeConfig.HasFC1)
             {
@@ -482,7 +479,7 @@ public unsafe partial class Program
                 &d_trainImages, &d_conv1Filters, &d_conv1Biases,
                 &d_conv1Out, &d_conv1Unpooled, &d_step, &isTrainingTrue
             };
-            var conv2Params = activeConfig.Name == "V8"
+            var conv2Params = activeConfig.UsesPooledConv2AsFc1Input
                 ? new void*[]
                 {
                     &d_conv1Out, &d_conv2Filters, &d_conv2Biases,
@@ -493,7 +490,7 @@ public unsafe partial class Program
                     &d_conv1Out, &d_conv2Filters, &d_conv2Biases,
                     &d_conv2Out, &d_conv2Unpooled
                 };
-            var fc1Params = activeConfig.Name == "V8"
+            var fc1Params = activeConfig.UsesPooledConv2AsFc1Input
                 ? new void*[] { &d_conv2Out, &d_fc1Out }
                 : (activeConfig.Name == "V5"
                     ? new void*[] { &d_trainImages, &d_fc1Weights, &d_fc1Biases, &d_fc1Out, &d_step, &isTrainingTrue }
@@ -520,14 +517,14 @@ public unsafe partial class Program
             {
                 &d_fc2Out, &d_trainLabels, &d_fc2In, &d_fc2WeightsGrad, &d_step
             };
-            var fc1BwdParams = activeConfig.Name == "V8"
+            var fc1BwdParams = activeConfig.UsesPooledConv2AsFc1Input
                 ? new void*[] { &d_fc1OutGrad, &d_fc1Out, &d_conv2Out, &d_conv2OutGrad }
                 : new void*[]
                 {
                     &d_fc1OutGrad, &d_fc1Out, &d_conv2Out, &d_fc1Weights,
                     &d_fc1BiasesGrad, &d_conv2OutGrad
                 };
-            var fc1BwdWeightsParams = activeConfig.Name == "V8"
+            var fc1BwdWeightsParams = activeConfig.UsesPooledConv2AsFc1Input
                 ? new void*[]
                 {
                     &d_intermediateGrad, &d_conv2Unpooled, &d_conv1Out, &d_conv2Filters,
@@ -536,7 +533,7 @@ public unsafe partial class Program
                 : (activeConfig.Name == "V5"
                     ? new void*[] { &d_fc1OutGrad, &d_fc1Out, &d_trainImages, &d_fc1WeightsGrad, &d_step }
                     : new void*[] { &d_fc1OutGrad, &d_fc1Out, &d_conv2Out, &d_fc1WeightsGrad });
-            var conv2BwdParams = activeConfig.Name == "V8"
+            var conv2BwdParams = activeConfig.UsesPooledConv2AsFc1Input
                 ? new void*[]
                 {
                     &d_conv2OutGrad, &d_conv2Out, &d_conv2Unpooled, &d_conv1Out,
@@ -568,10 +565,10 @@ public unsafe partial class Program
                     (uint)((conv1OutGradSize + 255) / 256), 1u, 1u,
                     256u, 1u, 1u, clearGradParams);
 
-                if (activeConfig.Name == "V8")
+                if (activeConfig.RequiresIntermediateGradBuffer)
                 {
                     currentDependencies[0] = lastNode;
-                    var intermediateGradSize = BatchSize * 3136;
+                    var intermediateGradSize = BatchSize * activeConfig.Conv2OutPerSample;
                     var clearIntermediateParams = new void*[] { &d_intermediateGrad, &intermediateGradSize };
                     lastNode = AddKernelNode(epochGraph, currentDependencies, f_clear,
                         (uint)((intermediateGradSize + 255) / 256), 1u, 1u,
@@ -594,7 +591,7 @@ public unsafe partial class Program
                 if (activeConfig.HasFC1)
                 {
                     currentDependencies[0] = lastNode;
-                    var fc1BlockSize = activeConfig.Name == "V8" ? 784u : (activeConfig.IsHalf ? (uint)activeConfig.FC1Inputs : 128u);
+                    var fc1BlockSize = activeConfig.UsesPooledConv2AsFc1Input ? (uint)activeConfig.FC2Inputs : (activeConfig.IsHalf ? (uint)activeConfig.FC1Inputs : 128u);
                     lastNode = AddKernelNode(epochGraph, currentDependencies,
                         f_fc1, (uint)BatchSize, 1u, 1u,
                         fc1BlockSize, 1u, 1u, fc1Params);
@@ -624,11 +621,11 @@ public unsafe partial class Program
                 if (activeConfig.HasFC1)
                 {
                     currentDependencies[0] = lastNode;
-                    if (activeConfig.Name == "V8")
+                    if (activeConfig.UsesPooledConv2AsFc1Input)
                     {
                         lastNode = AddKernelNode(epochGraph, currentDependencies,
                             f_fc1_bwd, (uint)BatchSize, 1u, 1u,
-                            784u, 1u, 1u, fc1BwdParams);
+                            (uint)activeConfig.FC2Inputs, 1u, 1u, fc1BwdParams);
                     }
                     else if (activeConfig.Name == "V5")
                     {
@@ -643,7 +640,7 @@ public unsafe partial class Program
                             256u, 1u, 1u, fc1BwdParams);
                     }
 
-                    if (activeConfig.Name != "V8")
+                    if (!activeConfig.UsesPooledConv2AsFc1Input)
                     {
                         currentDependencies[0] = lastNode;
                         if (activeConfig.IsHalf)
@@ -680,7 +677,7 @@ public unsafe partial class Program
                         f_conv2_bwd, (uint)conv2FilterCount * (uint)conv2Chunks, 1u, 1u,
                         128u, 1u, 1u, conv2BwdParams);
 
-                    if (activeConfig.Name == "V8")
+                    if (activeConfig.UsesPooledConv2AsFc1Input)
                     {
                         currentDependencies[0] = lastNode;
                         lastNode = AddKernelNode(epochGraph, currentDependencies,
@@ -975,7 +972,7 @@ public unsafe partial class Program
                         cuLaunchKernel(f_conv1, (uint)BatchSize, (uint)conv1FilterCount, 1u,
                             conv1BlockX, conv1BlockY, 1u, 0u, stream, argsTestConv1, null).Ok();
 
-                        if (activeConfig.Name == "V8")
+                        if (activeConfig.UseCustomEvaluationPath)
                         {
                             var argsConv2_v8 = new void*[]
                             {
@@ -992,7 +989,7 @@ public unsafe partial class Program
                                 cuLaunchKernel(f_conv2, (uint)BatchSize, 1u, 1u,
                                     256u, 1u, 1u, 0u, stream, pArgs2, null).Ok();
                                 cuLaunchKernel(f_fc1, (uint)BatchSize, 1u, 1u,
-                                    784u, 1u, 1u, 0u, stream, pArgs1, null).Ok();
+                                    (uint)activeConfig.FC2Inputs, 1u, 1u, 0u, stream, pArgs1, null).Ok();
                                 cuLaunchKernel(f_fc2, (uint)BatchSize, 1u, 1u,
                                     256u, 1u, 1u, 0u, stream, pArgsLogits, null).Ok();
                             }

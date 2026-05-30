@@ -17,6 +17,15 @@ public sealed class NetworkConfig
     public required string CudaSource { get; init; }
     public bool IsHalf { get; init; } = true;
     public bool IsV7Based { get; init; } = false;
+    public bool UseCustomCudaSource { get; init; } = false;
+    public string FC1ForwardKernelName { get; init; } = "fc1_forward";
+    public string FC1BackwardKernelName { get; init; } = "fc1_backward";
+    public string FC1BackwardWeightsKernelName { get; init; } = "fc1_backward_weights";
+    public bool UsesPooledConv2AsFc1Input { get; init; } = false;
+    public int? FC1OutputElementsOverride { get; init; }
+    public int? FC2InputsOverride { get; init; }
+    public bool RequiresIntermediateGradBuffer { get; init; } = false;
+    public bool UseCustomEvaluationPath { get; init; } = false;
 
     // Conv1 layer
     public required int Conv1FilterCount { get; init; }
@@ -62,9 +71,9 @@ public sealed class NetworkConfig
     public int Conv1OutSize => 28 - Conv1FilterSize + 1;
     public int Pool1OutSize => Conv1OutSize / 2;
     public int Conv1OutPerSample => Pool1OutSize * Pool1OutSize * Conv1FilterCount;
-    public int Conv1UnpooledPerSample => Name == "V8" ? 3136 : Conv1OutSize * Conv1OutSize * Conv1FilterCount;
+    public int Conv1UnpooledPerSample => UsesPooledConv2AsFc1Input ? 3136 : Conv1OutSize * Conv1OutSize * Conv1FilterCount;
     public int Conv2OutSize => Pool1OutSize - Conv2FilterSize + 1;
-    public int Conv2OutPerSample => Name == "V8" ? 3136 : Pool2OutSize * Pool2OutSize * Conv2FilterCount;
+    public int Conv2OutPerSample => UsesPooledConv2AsFc1Input ? 3136 : Pool2OutSize * Pool2OutSize * Conv2FilterCount;
 
     public int Conv2UnpooledPerSample
     {
@@ -81,7 +90,7 @@ public sealed class NetworkConfig
         get => _fc1Inputs > 0 ? _fc1Inputs : ((Name == "V5" || Name == "V6") ? 784 : Conv2OutPerSample);
         init => _fc1Inputs = value;
     }
-    public int FC2Inputs => Name == "V8" ? 784 : (HasFC1 ? FC1Outputs : Conv2OutPerSample);
+    public int FC2Inputs => FC2InputsOverride ?? (HasFC1 ? FC1Outputs : Conv2OutPerSample);
 
     // Contiguous parameter layout
     ParamGroup[]? _paramGroups;
