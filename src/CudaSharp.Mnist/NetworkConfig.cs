@@ -41,11 +41,29 @@ public sealed class NetworkConfig
     public float Beta1 { get; init; } = 0.7f;
     public float Beta2 { get; init; } = 0.9f;
 
+    // Capability flags (replace version-name string checks)
+    public bool HasFc1Unpooled { get; init; } = false;
+    public bool HasSeparateBackwardWeights { get; init; } = false;
+    public float FC1WeightScale { get; init; } = 1.0f;
+    public bool IsResNet { get; init; } = false;
+    public bool IsMlpOnly { get; init; } = false;
+
+    // Modern Techniques
+    public bool HasDropout { get; init; } = false;
+    public float DropoutRate { get; init; } = 0.5f;
+    public bool HasWeightDecay { get; init; } = false;
+    public float WeightDecayRate { get; init; } = 0.01f;
+    public bool IsFusedForward { get; init; } = false;
+    public bool HasLayerNorm { get; init; } = false;
+    public bool IsGlobalAveragePooling { get; init; } = false;
+    public string ActivationType { get; init; } = "GELU";
+
     // Computed architecture sizes
     public int Conv1OutSize => 28 - Conv1FilterSize + 1;
-    public int Pool1OutSize => Name == "V8" ? 14 : Conv1OutSize / 2;
+    public int Pool1OutSize => Conv1OutSize / 2;
     public int Conv1OutPerSample => Pool1OutSize * Pool1OutSize * Conv1FilterCount;
     public int Conv1UnpooledPerSample => Name == "V8" ? 3136 : Conv1OutSize * Conv1OutSize * Conv1FilterCount;
+    public int Conv2OutSize => Pool1OutSize - Conv2FilterSize + 1;
     public int Conv2OutPerSample => Name == "V8" ? 3136 : Pool2OutSize * Pool2OutSize * Conv2FilterCount;
 
     public int Conv2UnpooledPerSample
@@ -112,6 +130,14 @@ public sealed class NetworkConfig
         if (HasFC1)
         {
             Add("fc1", FC1Outputs, FC1Inputs);
+            if (HasLayerNorm)
+            {
+                // LayerNorm has gamma (weight) and beta (bias). Both are size FC1Outputs.
+                // We'll map Gamma to OutFeatures (BiasCount) and Beta to InFeatures (WeightCount) or vice-versa?
+                // Actually, ParamGroup is OutFeatures * InFeatures + OutFeatures.
+                // If OutFeatures = FC1Outputs, InFeatures = 1, then WeightCount = FC1Outputs, BiasCount = FC1Outputs. Perfect!
+                Add("fc1_ln", FC1Outputs, 1);
+            }
         }
 
         Add("fc2", 10, FC2Inputs);

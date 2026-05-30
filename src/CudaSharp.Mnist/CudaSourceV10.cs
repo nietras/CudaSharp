@@ -384,10 +384,13 @@ public static partial class Program
             int batchOffset = ((*d_step) % BATCHES_PER_EPOCH) * BATCH_SIZE;
 
             __shared__ __half s_fc2_outputs[BATCH_SIZE][10];
-            #pragma unroll
-            for (int c = 0; c < 10; c++)
+            for (int i = tid; i < BATCH_SIZE; i += 128)
             {
-                s_fc2_outputs[tid][c] = d_fc2_outputs[tid * 10 + c];
+                #pragma unroll
+                for (int c = 0; c < 10; c++)
+                {
+                    s_fc2_outputs[i][c] = d_fc2_outputs[i * 10 + c];
+                }
             }
 
             __shared__ float s_weight_grads[128][10];

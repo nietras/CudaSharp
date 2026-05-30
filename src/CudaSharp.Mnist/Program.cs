@@ -435,8 +435,9 @@ public unsafe partial class Program
         var conv1Chunks = Math.Max(16, activeConfig.BatchSize / 8);
         var conv2Chunks = Math.Max(16, activeConfig.BatchSize / 8);
 
-        Console.WriteLine("[JIT] Compiling fused CUDA kernels...");
-        nvrtcCreateProgram(out var program, activeConfig.CudaSource, "mnist_kernels", 0, [], []).Ok();
+        Console.WriteLine("[JIT] Compiling CUDA kernels...");
+        var cudaSourceStr = activeConfig.IsHalf ? CudaKernelLibrary.BuildLeNetSource(activeConfig) : activeConfig.CudaSource;
+        nvrtcCreateProgram(out var program, cudaSourceStr, "mnist_kernels", 0, [], []).Ok();
         CUcontext context = default;
         try
         {
@@ -532,34 +533,120 @@ public unsafe partial class Program
             var conv1BwdBlockX = activeConfig.IsV7Based ? 16u : 24u;
             var conv1BwdBlockY = activeConfig.IsV7Based ? 16u : 24u;
 
-            Console.WriteLine("[MEM] Allocating GPU memory buffers...");
+            var conv1FilterCount = activeConfig.Conv1FilterCount;
+            var conv2FilterCount = activeConfig.Conv2FilterCount;
+            var totalParamElements = activeConfig.TotalParamElements;
+            var elementSize = activeConfig.IsHalf ? sizeof(ushort) : sizeof(float);
+            var paramBytes = (nuint)(totalParamElements * elementSize);
 
-            cuMemAlloc(out var d_trainImages, (nuint)(h_trainImages.Length * sizeof(uint))).Ok();
-            cuMemAlloc(out var d_trainLabels, (nuint)(h_trainLabels.Length * sizeof(int))).Ok();
-            cuMemAlloc(out var d_testImages, (nuint)(h_testImages.Length * sizeof(uint))).Ok();
-            cuMemAlloc(out var d_testLabels, (nuint)(h_testLabels.Length * sizeof(int))).Ok();
+            var trainImagesSize = (nuint)(h_trainImages.Length * sizeof(uint));
+            var trainLabelsSize = (nuint)(h_trainLabels.Length * sizeof(int));
+            var testImagesSize = (nuint)(h_testImages.Length * sizeof(uint));
+            var testLabelsSize = (nuint)(h_testLabels.Length * sizeof(int));
+
+            var conv1OutSize = (nuint)(BatchSize * activeConfig.Conv1OutPerSample);
+            var conv1UnpooledSize = (nuint)(BatchSize * activeConfig.Conv1UnpooledPerSample);
+            var conv2OutSize = (nuint)(BatchSize * activeConfig.Conv2OutPerSample);
+            var conv2UnpooledSize = (nuint)(BatchSize * activeConfig.Conv2UnpooledPerSample);
+
+            nuint fc1OutSize = 0;
+            nuint fc1UnpooledSize = 0;
+            if (activeConfig.HasFC1)
+            {
+                var fc1OutCount = activeConfig.Name == "V8" ? 784 : activeConfig.FC1Outputs;
+                fc1OutSize = (nuint)(BatchSize * fc1OutCount);
+                if (activeConfig.Name == "V10" || activeConfig.Name == "V11" || activeConfig.Name == "V12" || activeConfig.Name == "V13" || activeConfig.Name == "V14")
+                {
+                    fc1UnpooledSize = (nuint)(BatchSize * fc1OutCount);
+                }
+            }
+            var fc2OutSize = (nuint)(BatchSize * 10);
+
+            var conv1OutGradSize = (nuint)(BatchSize * activeConfig.Conv1OutPerSample);
+
+            nuint fc2InGradSize = 0;
+            nuint conv2OutGradSize = 0;
+            nuint fc1OutGradSize = 0;
+            nuint arenaIntermediateGradSize = 0;
+
+            if (activeConfig.Name == "V8")
+            {
+                fc2InGradSize = (nuint)(BatchSize * 784);
+                conv2OutGradSize = (nuint)(BatchSize * 3136);
+                fc1OutGradSize = (nuint)(BatchSize * 784);
+                arenaIntermediateGradSize = (nuint)(BatchSize * 3136);
+            }
+            else if (activeConfig.HasFC1)
+            {
+                fc1OutGradSize = (nuint)(BatchSize * activeConfig.FC1Outputs);
+                conv2OutGradSize = (nuint)(BatchSize * activeConfig.FC1Inputs);
+            }
+            else
+            {
+                fc2InGradSize = (nuint)(BatchSize * activeConfig.FC2Inputs);
+            }
+
+            var stepSize = (nuint)sizeof(int);
+
+            // Compute total required bytes including 256-byte alignments
+            nuint totalRequiredBytes = 0;
+            nuint alignment = 256;
+            void AddSize(nuint sz)
+            {
+                if (sz > 0)
+                {
+                    nuint alignedSize = (sz + alignment - 1) & ~(alignment - 1);
+                    totalRequiredBytes += alignedSize;
+                }
+            }
+
+            AddSize(trainImagesSize);
+            AddSize(trainLabelsSize);
+            AddSize(testImagesSize);
+            AddSize(testLabelsSize);
+            AddSize(paramBytes);
+            AddSize(paramBytes);
+            AddSize(paramBytes);
+            AddSize(paramBytes);
+            AddSize(conv1OutSize * (nuint)elementSize);
+            AddSize(conv1UnpooledSize * (nuint)elementSize);
+            AddSize(conv2OutSize * (nuint)elementSize);
+            AddSize(conv2UnpooledSize * (nuint)elementSize);
+            AddSize(fc1OutSize * (nuint)elementSize);
+            AddSize(fc1UnpooledSize * (nuint)elementSize);
+            AddSize(fc2OutSize * (nuint)elementSize);
+            AddSize(conv1OutGradSize * (nuint)elementSize);
+            AddSize(fc2InGradSize * (nuint)elementSize);
+            AddSize(conv2OutGradSize * (nuint)elementSize);
+            AddSize(fc1OutGradSize * (nuint)elementSize);
+            AddSize(arenaIntermediateGradSize * (nuint)elementSize);
+            AddSize(stepSize);
+
+            // Allocate unified memory arena
+            var arena = new GpuMemoryArena();
+            arena.Allocate(totalRequiredBytes);
+
+            // Rent segments
+            var d_trainImages = arena.Rent(trainImagesSize);
+            var d_trainLabels = arena.Rent(trainLabelsSize);
+            var d_testImages = arena.Rent(testImagesSize);
+            var d_testLabels = arena.Rent(testLabelsSize);
 
             fixed (uint* pTrainImages = h_trainImages)
             fixed (int* pTrainLabels = h_trainLabels)
             fixed (uint* pTestImages = h_testImages)
             fixed (int* pTestLabels = h_testLabels)
             {
-                cuMemcpyHtoD(d_trainImages, (IntPtr)pTrainImages, (nuint)(h_trainImages.Length * sizeof(uint))).Ok();
-                cuMemcpyHtoD(d_trainLabels, (IntPtr)pTrainLabels, (nuint)(h_trainLabels.Length * sizeof(int))).Ok();
-                cuMemcpyHtoD(d_testImages, (IntPtr)pTestImages, (nuint)(h_testImages.Length * sizeof(uint))).Ok();
-                cuMemcpyHtoD(d_testLabels, (IntPtr)pTestLabels, (nuint)(h_testLabels.Length * sizeof(int))).Ok();
+                cuMemcpyHtoD(d_trainImages, (IntPtr)pTrainImages, trainImagesSize).Ok();
+                cuMemcpyHtoD(d_trainLabels, (IntPtr)pTrainLabels, trainLabelsSize).Ok();
+                cuMemcpyHtoD(d_testImages, (IntPtr)pTestImages, testImagesSize).Ok();
+                cuMemcpyHtoD(d_testLabels, (IntPtr)pTestLabels, testLabelsSize).Ok();
             }
 
-            var conv1FilterCount = activeConfig.Conv1FilterCount;
-            var conv2FilterCount = activeConfig.Conv2FilterCount;
-            var totalParamElements = activeConfig.TotalParamElements;
-
-            var elementSize = activeConfig.IsHalf ? sizeof(ushort) : sizeof(float);
-            var paramBytes = (nuint)(totalParamElements * elementSize);
-            cuMemAlloc(out var d_allParams, paramBytes).Ok();
-            cuMemAlloc(out var d_allParamGrads, paramBytes).Ok();
-            cuMemAlloc(out var d_allParamM, paramBytes).Ok();
-            cuMemAlloc(out var d_allParamV, paramBytes).Ok();
+            var d_allParams = arena.Rent(paramBytes);
+            var d_allParamGrads = arena.Rent(paramBytes);
+            var d_allParamM = arena.Rent(paramBytes);
+            var d_allParamV = arena.Rent(paramBytes);
 
             cuMemsetD8(d_allParamGrads, 0, paramBytes).Ok();
             cuMemsetD8(d_allParamM, 0, paramBytes).Ok();
@@ -595,52 +682,45 @@ public unsafe partial class Program
                 d_fc1BiasesGrad = SliceDevicePtr(d_allParamGrads, fc1Param.BiasOffset, elementSize);
             }
 
-            var conv1OutSize = BatchSize * activeConfig.Conv1OutPerSample;
-            var conv1UnpooledSize = BatchSize * activeConfig.Conv1UnpooledPerSample;
-            var conv2OutSize = BatchSize * activeConfig.Conv2OutPerSample;
-            var conv2UnpooledSize = BatchSize * activeConfig.Conv2UnpooledPerSample;
-
-            cuMemAlloc(out var d_conv1Out, (nuint)(conv1OutSize * elementSize)).Ok();
-            cuMemAlloc(out var d_conv1Unpooled, (nuint)(conv1UnpooledSize * elementSize)).Ok();
-            cuMemAlloc(out var d_conv2Out, (nuint)(conv2OutSize * elementSize)).Ok();
-            cuMemAlloc(out var d_conv2Unpooled, (nuint)(conv2UnpooledSize * elementSize)).Ok();
+            var d_conv1Out = arena.Rent(conv1OutSize * (nuint)elementSize);
+            var d_conv1Unpooled = arena.Rent(conv1UnpooledSize * (nuint)elementSize);
+            var d_conv2Out = arena.Rent(conv2OutSize * (nuint)elementSize);
+            var d_conv2Unpooled = arena.Rent(conv2UnpooledSize * (nuint)elementSize);
 
             CUdeviceptr d_fc1Out = default;
             CUdeviceptr d_fc1Unpooled = default;
             if (activeConfig.HasFC1)
             {
-                var fc1OutCount = activeConfig.Name == "V8" ? 784 : activeConfig.FC1Outputs;
-                cuMemAlloc(out d_fc1Out, (nuint)(BatchSize * fc1OutCount * elementSize)).Ok();
-                if (activeConfig.Name == "V10" || activeConfig.Name == "V11" || activeConfig.Name == "V12" || activeConfig.Name == "V13" || activeConfig.Name == "V14")
+                d_fc1Out = arena.Rent(fc1OutSize * (nuint)elementSize);
+                if (fc1UnpooledSize > 0)
                 {
-                    cuMemAlloc(out d_fc1Unpooled, (nuint)(BatchSize * fc1OutCount * elementSize)).Ok();
+                    d_fc1Unpooled = arena.Rent(fc1UnpooledSize * (nuint)elementSize);
                 }
             }
-            cuMemAlloc(out var d_fc2Out, (nuint)(BatchSize * 10 * elementSize)).Ok();
+            var d_fc2Out = arena.Rent(fc2OutSize * (nuint)elementSize);
 
-            var conv1OutGradSize = BatchSize * activeConfig.Conv1OutPerSample;
-            cuMemAlloc(out var d_conv1OutGrad, (nuint)(conv1OutGradSize * elementSize)).Ok();
+            var d_conv1OutGrad = arena.Rent(conv1OutGradSize * (nuint)elementSize);
 
             CUdeviceptr d_fc1OutGrad = default, d_conv2OutGrad = default, d_intermediateGrad = default;
             CUdeviceptr d_fc2InGrad = default;
             if (activeConfig.Name == "V8")
             {
-                cuMemAlloc(out d_fc2InGrad, (nuint)(BatchSize * 784 * elementSize)).Ok();
-                cuMemAlloc(out d_conv2OutGrad, (nuint)(BatchSize * 3136 * elementSize)).Ok();
-                cuMemAlloc(out d_fc1OutGrad, (nuint)(BatchSize * 784 * elementSize)).Ok();
-                cuMemAlloc(out d_intermediateGrad, (nuint)(BatchSize * 3136 * elementSize)).Ok();
+                d_fc2InGrad = arena.Rent(fc2InGradSize * (nuint)elementSize);
+                d_conv2OutGrad = arena.Rent(conv2OutGradSize * (nuint)elementSize);
+                d_fc1OutGrad = arena.Rent(fc1OutGradSize * (nuint)elementSize);
+                d_intermediateGrad = arena.Rent(arenaIntermediateGradSize * (nuint)elementSize);
             }
             else if (activeConfig.HasFC1)
             {
-                cuMemAlloc(out d_fc1OutGrad, (nuint)(BatchSize * activeConfig.FC1Outputs * elementSize)).Ok();
-                cuMemAlloc(out d_conv2OutGrad, (nuint)(BatchSize * activeConfig.FC1Inputs * elementSize)).Ok();
+                d_fc1OutGrad = arena.Rent(fc1OutGradSize * (nuint)elementSize);
+                d_conv2OutGrad = arena.Rent(conv2OutGradSize * (nuint)elementSize);
             }
             else
             {
-                cuMemAlloc(out d_fc2InGrad, (nuint)(BatchSize * activeConfig.FC2Inputs * elementSize)).Ok();
+                d_fc2InGrad = arena.Rent(fc2InGradSize * (nuint)elementSize);
             }
 
-            cuMemAlloc(out var d_step, (nuint)sizeof(int)).Ok();
+            var d_step = arena.Rent(stepSize);
 
             var fc2BlockSize = activeConfig.Name == "V5" ? 128u : 256u;
             var fc1Chunks = 8;
@@ -803,7 +883,7 @@ public unsafe partial class Program
                 if (activeConfig.IsV7Based)
                 {
                     currentDependencies[0] = lastNode;
-                    var fc2BwdWGridX = activeConfig.Name == "V8" ? 784u : (activeConfig.Name == "V9" || activeConfig.Name == "V10" || activeConfig.Name == "V11" || activeConfig.Name == "V12" || activeConfig.Name == "V13" || activeConfig.Name == "V14" ? 120u : 400u);
+                    var fc2BwdWGridX = (uint)activeConfig.FC2Inputs;
                     lastNode = AddKernelNode(epochGraph, currentDependencies,
                         f_fc2_bwd_weights, fc2BwdWGridX, 1u, 1u,
                         128u, 1u, 1u, fc2BwdWeightsParams);
@@ -1020,7 +1100,7 @@ public unsafe partial class Program
 
                         if (activeConfig.IsV7Based)
                         {
-                            var fc2BwdWGridX = activeConfig.Name == "V8" ? 784u : (activeConfig.Name == "V9" || activeConfig.Name == "V10" || activeConfig.Name == "V11" || activeConfig.Name == "V12" || activeConfig.Name == "V13" || activeConfig.Name == "V14" ? 120u : 400u);
+                            var fc2BwdWGridX = (uint)activeConfig.FC2Inputs;
                             fc2BwdWTimes.Add(MeasureKernel(f_fc2_bwd_weights, fc2BwdWGridX, 1u, 1u, 128u, 1u, 1u, fc2BwdWeightsParams));
                         }
 
@@ -1254,46 +1334,7 @@ public unsafe partial class Program
             Console.WriteLine($"Test Accuracy:     Min = {minAcc:F2}% | Mean = {meanAcc:F2}% | Max = {maxAcc:F2}%");
             Console.WriteLine("==================================================");
 
-            cuMemFree(d_trainImages).Ok();
-            cuMemFree(d_trainLabels).Ok();
-            cuMemFree(d_testImages).Ok();
-            cuMemFree(d_testLabels).Ok();
-
-            cuMemFree(d_allParams).Ok();
-            cuMemFree(d_allParamGrads).Ok();
-            cuMemFree(d_allParamM).Ok();
-            cuMemFree(d_allParamV).Ok();
-
-            cuMemFree(d_conv1Out).Ok();
-            cuMemFree(d_conv1Unpooled).Ok();
-            cuMemFree(d_conv2Out).Ok();
-            cuMemFree(d_conv2Unpooled).Ok();
-            if (activeConfig.HasFC1)
-            {
-                cuMemFree(d_fc1Out).Ok();
-                if (d_fc1Unpooled.Value != IntPtr.Zero)
-                {
-                    cuMemFree(d_fc1Unpooled).Ok();
-                }
-            }
-            cuMemFree(d_fc2Out).Ok();
-
-            if (activeConfig.HasFC1)
-            {
-                cuMemFree(d_fc1OutGrad).Ok();
-                cuMemFree(d_conv2OutGrad).Ok();
-                if (d_intermediateGrad.Value != IntPtr.Zero)
-                {
-                    cuMemFree(d_intermediateGrad).Ok();
-                }
-            }
-            else
-            {
-                cuMemFree(d_fc2InGrad).Ok();
-            }
-            cuMemFree(d_conv1OutGrad).Ok();
-
-            cuMemFree(d_step).Ok();
+            arena.Dispose();
 
             cuGraphExecDestroy(epochGraphExec).Ok();
             cuGraphDestroy(epochGraph).Ok();

@@ -143,16 +143,15 @@ public static partial class Program
             __shared__ float s_input[1152]; // Flat 1D layout: [12][12][8]
             __shared__ float s_filters[3200]; // 16 filters x 5 x 5 x 8 channels = 3200 elements
 
-            // Parallel perfectly coalesced load of 1,152 input elements
-            for (int i = tid; i < 1152; i += 256)
+            // Vectorized load of 1,152 input elements (288 float4s) and 3,200 filter weights (800 float4s) using float4
+            for (int i = tid; i < 288; i += 256)
             {
-                s_input[i] = d_inputs[batch_idx * 1152 + i];
+                ((float4*)s_input)[i] = ((const float4*)d_inputs)[batch_idx * 288 + i];
             }
 
-            // Parallel load of all 3,200 filter weights
-            for (int i = tid; i < 3200; i += 256)
+            for (int i = tid; i < 800; i += 256)
             {
-                s_filters[i] = d_filters[i];
+                ((float4*)s_filters)[i] = ((const float4*)d_filters)[i];
             }
             __syncthreads();
 
@@ -222,7 +221,11 @@ public static partial class Program
             const int tid = threadIdx.x; // 0..255
 
             __shared__ float s_input[256];
-            s_input[tid] = d_inputs[batch_idx * 256 + tid];
+            // Vectorized load of 256 input elements (64 float4s)
+            if (tid < 64)
+            {
+                ((float4*)s_input)[tid] = ((const float4*)d_inputs)[batch_idx * 64 + tid];
+            }
             __syncthreads();
 
             if (tid < 10)
@@ -354,10 +357,10 @@ public static partial class Program
 
             for (int b = start_b; b < end_b; b++)
             {
-                // Parallel coalesced load of 1,152 elements
-                for (int i = tid; i < 1152; i += 128)
+                // Vectorized load of 1,152 input elements (288 float4s) using float4
+                for (int i = tid; i < 288; i += 128)
                 {
-                    s_conv1_out[i] = d_conv1_out[b * 1152 + i];
+                    ((float4*)s_conv1_out)[i] = ((const float4*)d_conv1_out)[b * 288 + i];
                 }
 
                 float out_grad = d_conv2_out_grad[b * 256 + pool_idx];

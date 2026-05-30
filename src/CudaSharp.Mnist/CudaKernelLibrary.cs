@@ -1,0 +1,1400 @@
+﻿namespace CudaSharp.Mnist;
+
+public static class CudaKernelLibrary
+{
+    public static readonly string Preamble =
+        """
+        #include <cuda_fp16.h>
+
+        typedef unsigned int uint32_t;
+
+        #ifndef BATCH_SIZE
+        #define BATCH_SIZE 256
+        #endif
+        #ifndef FILTER1_SIZE
+        #define FILTER1_SIZE 5
+        #endif
+        #ifndef FILTER2_SIZE
+        #define FILTER2_SIZE 5
+        #endif
+        #define INPUT_SIZE 28
+        #ifndef POOL1_SIZE
+        #define POOL1_SIZE 12
+        #endif
+        #ifndef POOL2_SIZE
+        #define POOL2_SIZE 4
+        #endif
+        #ifndef FC1_INPUTS
+        #define FC1_INPUTS 256
+        #endif
+        #ifndef FC1_OUTPUTS
+        #define FC1_OUTPUTS 120
+        #endif
+        #define FC2_OUTPUTS 10
+
+        #ifndef BATCHES_PER_EPOCH
+        #define BATCHES_PER_EPOCH 200
+        #endif
+        #ifndef TOTAL_STEPS
+        #define TOTAL_STEPS 300
+        #endif
+        """;
+
+    public static readonly string ClearGradient =
+        """
+
+        extern "C" __global__ void clear_gradient(
+            __half* __restrict__ d_grad, int num_elements)
+        {
+            int tid = blockIdx.x * blockDim.x + threadIdx.x;
+            int stride = blockDim.x * gridDim.x;
+            __half zero = __float2half(0.0f);
+            for (int i = tid; i < num_elements; i += stride)
+            {
+                d_grad[i] = zero;
+            }
+        }
+        """;
+
+    public static readonly string ActivationGelu =
+        """
+
+        __device__ inline __half gelu(__half x)
+        {
+            float val = __half2float(x);
+            float c = 0.79788456f;
+            float tanh_arg = c * (val + 0.044715f * val * val * val);
+            float g = 0.5f * val * (1.0f + tanhf(tanh_arg));
+            return __float2half(g);
+        }
+
+        __device__ inline __half d_gelu(__half x, __half dy)
+        {
+            float val = __half2float(x);
+            if (val < -1000.0f) return __float2half(0.0f);
+            float g_dy = __half2float(dy);
+            float c = 0.79788456f;
+            float tanh_arg = c * (val + 0.044715f * val * val * val);
+            float t = tanhf(tanh_arg);
+            float sech2 = 1.0f - t * t;
+            float dtanh = c * (1.0f + 3.0f * 0.044715f * val * val) * sech2;
+            float derivative = 0.5f * (1.0f + t) + 0.5f * val * dtanh;
+            return __float2half(g_dy * derivative);
+        }
+        """;
+
+    public static readonly string ActivationSilu =
+        """
+
+        __device__ inline __half silu(__half x)
+        {
+            float val = __half2float(x);
+            float sigmoid = 1.0f / (1.0f + expf(-val));
+            return __float2half(val * sigmoid);
+        }
+
+        __device__ inline __half d_silu(__half x, __half dy)
+        {
+            float val = __half2float(x);
+            if (val < -1000.0f) return __float2half(0.0f);
+            float g_dy = __half2float(dy);
+            float sigmoid = 1.0f / (1.0f + expf(-val));
+            float silu_val = val * sigmoid;
+            float derivative = sigmoid + silu_val * (1.0f - sigmoid);
+            return __float2half(g_dy * derivative);
+        }
+        """;
+
+    public static readonly string DummyFusedKernels =
+        """
+
+        extern "C" __global__ void fused_forward(
+            const uint32_t* d_inputs, const __half* d_conv1_filters,
+            const __half* d_conv1_biases, const __half* d_conv2_filters,
+            const __half* d_conv2_biases, const __half* d_fc2_weights,
+            const __half* d_fc2_biases, __half* d_conv1_out,
+            __half* d_conv1_unpooled, __half* d_conv2_out,
+            __half* d_conv2_unpooled, __half* d_fc2_out,
+            const int* d_step, int is_training) {}
+
+        extern "C" __global__ void fused_backward(
+            const __half* d_fc2_out, const int* d_labels,
+            const __half* d_conv2_out, const __half* d_fc2_weights,
+            __half* d_fc2_weights_grad, __half* d_fc2_biases_grad,
+            const __half* d_conv2_unpooled, const __half* d_conv1_out,
+            const __half* d_conv2_filters, __half* d_conv2_filters_grad,
+            __half* d_conv2_biases_grad, const __half* d_conv1_unpooled,
+            const uint32_t* d_inputs, __half* d_conv1_filters_grad,
+            __half* d_conv1_biases_grad, const int* d_step) {}
+        """;
+
+    public static readonly string Conv1Forward =
+        """
+
+        extern "C" __global__ void conv1_forward(
+            const uint32_t* __restrict__ d_inputs,
+            const __half* __restrict__ d_filters,
+            const __half* __restrict__ d_biases,
+            __half* __restrict__ d_outputs,
+            __half* __restrict__ d_unpooled_vals,
+            const int* __restrict__ d_step,
+            int is_training)
+        {
+            const int batch_idx = blockIdx.x;
+            const int filter_idx = blockIdx.y;
+            const int out_x = threadIdx.x;
+            const int out_y = threadIdx.y;
+
+            if (out_x >= POOL1_SIZE || out_y >= POOL1_SIZE) return;
+
+            int batchOffset = ((*d_step) % BATCHES_PER_EPOCH) * BATCH_SIZE;
+
+            __shared__ __half s_filter[FILTER1_SIZE][FILTER1_SIZE];
+            int tid_flat = threadIdx.y * POOL1_SIZE + threadIdx.x;
+            if (tid_flat < FILTER1_SIZE * FILTER1_SIZE)
+            {
+                s_filter[tid_flat / FILTER1_SIZE][tid_flat % FILTER1_SIZE] =
+                    d_filters[filter_idx * FILTER1_SIZE * FILTER1_SIZE + tid_flat];
+            }
+
+            __shared__ uint32_t s_image[28];
+            if (tid_flat < 28)
+            {
+                s_image[tid_flat] =
+                    d_inputs[(batchOffset + batch_idx) * 28 + tid_flat];
+            }
+            __syncthreads();
+
+            const int conv_x_base = out_x * 2;
+            const int conv_y_base = out_y * 2;
+
+            int seed = batch_idx + *d_step;
+            int dx = (is_training == 1)
+                ? ((seed * 1103515245 + 12345) % 3 - 1) : 0;
+            int dy = (is_training == 1)
+                ? (((seed * 1103515245 + 12345) / 3) % 3 - 1) : 0;
+
+            __half max_val = __float2half(-1e9f);
+
+            #pragma unroll
+            for (int py = 0; py < 2; py++)
+            {
+                #pragma unroll
+                for (int px = 0; px < 2; px++)
+                {
+                    const int cx = conv_x_base + px;
+                    const int cy = conv_y_base + py;
+
+                    __half sum = d_biases[filter_idx];
+
+                    #pragma unroll
+                    for (int fy = 0; fy < FILTER1_SIZE; fy++)
+                    {
+                        int shift_y = cy + fy + dy;
+                        uint32_t row_bits = 0;
+                        if (shift_y >= 0 && shift_y < 28)
+                        {
+                            row_bits = s_image[shift_y];
+                        }
+                        #pragma unroll
+                        for (int fx = 0; fx < FILTER1_SIZE; fx++)
+                        {
+                            int img_x = cx + fx + dx;
+                            uint32_t pixel = 0;
+                            if (img_x >= 0 && img_x < 28)
+                            {
+                                pixel = (row_bits >> img_x) & 1u;
+                            }
+                            sum += __half((float)pixel) * s_filter[fy][fx];
+                        }
+                    }
+
+                    int conv_out_w = POOL1_SIZE * 2;
+                    int unpooled_idx = (batch_idx * conv_out_w * conv_out_w
+                        + cy * conv_out_w + cx) * CONV1_FILTER_COUNT + filter_idx;
+                    d_unpooled_vals[unpooled_idx] = sum;
+
+                    __half activated = ACTIVATION_FWD(sum);
+                    if (__hgt(activated, max_val))
+                    {
+                        max_val = activated;
+                    }
+                }
+            }
+
+            const int out_idx = batch_idx * POOL1_SIZE * POOL1_SIZE
+                * CONV1_FILTER_COUNT
+                + (out_y * POOL1_SIZE + out_x) * CONV1_FILTER_COUNT
+                + filter_idx;
+            d_outputs[out_idx] = max_val;
+        }
+        """;
+
+    public static readonly string Conv2Forward =
+        """
+
+        extern "C" __global__ void conv2_forward(
+            const __half* __restrict__ d_inputs,
+            const __half* __restrict__ d_filters,
+            const __half* __restrict__ d_biases,
+            __half* __restrict__ d_outputs,
+            __half* __restrict__ d_unpooled_vals)
+        {
+            const int batch_idx = blockIdx.x;
+            const int tid = threadIdx.x;
+
+            const int conv1_out_per_sample =
+                POOL1_SIZE * POOL1_SIZE * CONV1_FILTER_COUNT;
+            const int filter_weights =
+                CONV2_FILTER_COUNT * CONV1_FILTER_COUNT
+                * FILTER2_SIZE * FILTER2_SIZE;
+
+            __shared__ __half s_input[POOL1_SIZE * POOL1_SIZE
+                * CONV1_FILTER_COUNT];
+            __shared__ __half s_filters[CONV2_FILTER_COUNT
+                * CONV1_FILTER_COUNT * FILTER2_SIZE * FILTER2_SIZE];
+
+            for (int i = tid; i < conv1_out_per_sample; i += 256)
+            {
+                s_input[i] = d_inputs[batch_idx * conv1_out_per_sample + i];
+            }
+
+            for (int i = tid; i < filter_weights; i += 256)
+            {
+                s_filters[i] = d_filters[i];
+            }
+            __syncthreads();
+
+            #if IS_GAP == 1
+            if (tid < CONV2_FILTER_COUNT)
+            {
+                int filter_idx = tid;
+                float gap_sum = 0.0f;
+
+                for (int cy = 0; cy < 8; cy++)
+                {
+                    for (int cx = 0; cx < 8; cx++)
+                    {
+                        __half sum = d_biases[filter_idx];
+
+                        #pragma unroll
+                        for (int c = 0; c < CONV1_FILTER_COUNT; c++)
+                        {
+                            #pragma unroll
+                            for (int fy = 0; fy < FILTER2_SIZE; fy++)
+                            {
+                                #pragma unroll
+                                for (int fx = 0; fx < FILTER2_SIZE; fx++)
+                                {
+                                    int in_x = cx + fx;
+                                    int in_y = cy + fy;
+                                    sum += s_input[
+                                        (in_y * POOL1_SIZE + in_x)
+                                        * CONV1_FILTER_COUNT + c]
+                                        * s_filters[
+                                        filter_idx * CONV1_FILTER_COUNT
+                                        * FILTER2_SIZE * FILTER2_SIZE
+                                        + (fy * FILTER2_SIZE + fx)
+                                        * CONV1_FILTER_COUNT + c];
+                                }
+                            }
+                        }
+
+                        int unpooled_idx = (batch_idx * 64 + cy * 8 + cx)
+                            * CONV2_FILTER_COUNT + filter_idx;
+                        d_unpooled_vals[unpooled_idx] = sum;
+
+                        gap_sum += __half2float(ACTIVATION_FWD(sum));
+                    }
+                }
+
+                gap_sum /= 64.0f;
+                d_outputs[batch_idx * CONV2_FILTER_COUNT + filter_idx] = __float2half(gap_sum);
+            }
+            #else
+            const int conv2_spatial = POOL2_SIZE * POOL2_SIZE;
+            const int total_outputs = CONV2_FILTER_COUNT * conv2_spatial;
+
+            #pragma unroll
+            for (int out_idx = tid; out_idx < total_outputs; out_idx += 256)
+            {
+                int filter_idx = out_idx / conv2_spatial;
+                int spatial_idx = out_idx % conv2_spatial;
+                int out_x = spatial_idx % POOL2_SIZE;
+                int out_y = spatial_idx / POOL2_SIZE;
+
+                const int conv_x_base = out_x * 2;
+                const int conv_y_base = out_y * 2;
+
+                __half max_val = __float2half(-1e9f);
+
+                #pragma unroll
+                for (int py = 0; py < 2; py++)
+                {
+                    #pragma unroll
+                    for (int px = 0; px < 2; px++)
+                    {
+                        const int cx = conv_x_base + px;
+                        const int cy = conv_y_base + py;
+
+                        __half sum = d_biases[filter_idx];
+
+                        #pragma unroll
+                        for (int c = 0; c < CONV1_FILTER_COUNT; c++)
+                        {
+                            #pragma unroll
+                            for (int fy = 0; fy < FILTER2_SIZE; fy++)
+                            {
+                                #pragma unroll
+                                for (int fx = 0; fx < FILTER2_SIZE; fx++)
+                                {
+                                    int in_x = cx + fx;
+                                    int in_y = cy + fy;
+                                    sum += s_input[
+                                        (in_y * POOL1_SIZE + in_x)
+                                        * CONV1_FILTER_COUNT + c]
+                                        * s_filters[
+                                        (filter_idx * CONV1_FILTER_COUNT + c) * FILTER2_SIZE * FILTER2_SIZE + fy * FILTER2_SIZE + fx];
+                                }
+                            }
+                        }
+
+                        int conv2_out_w = POOL2_SIZE * 2;
+                        int unpooled_idx = (batch_idx * conv2_out_w
+                            * conv2_out_w + cy * conv2_out_w + cx)
+                            * CONV2_FILTER_COUNT + filter_idx;
+                        d_unpooled_vals[unpooled_idx] = sum;
+
+                        __half activated = ACTIVATION_FWD(sum);
+                        if (__hgt(activated, max_val))
+                        {
+                            max_val = activated;
+                        }
+                    }
+                }
+
+                const int out_idx_global = batch_idx
+                    * CONV2_FILTER_COUNT * conv2_spatial
+                    + (out_y * POOL2_SIZE + out_x)
+                    * CONV2_FILTER_COUNT + filter_idx;
+                d_outputs[out_idx_global] = max_val;
+            }
+            #endif
+        }
+        """;
+
+    public static readonly string Fc1Forward =
+        """
+
+        #if HAS_DROPOUT == 1
+        extern "C" __global__ void fc1_forward(
+            const __half* __restrict__ d_inputs,
+            const __half* __restrict__ d_weights,
+            const __half* __restrict__ d_biases,
+            __half* __restrict__ d_outputs,
+            __half* __restrict__ d_unpooled_vals,
+            const int* __restrict__ d_step,
+            const int is_training)
+        #else
+        extern "C" __global__ void fc1_forward(
+            const __half* __restrict__ d_inputs,
+            const __half* __restrict__ d_weights,
+            const __half* __restrict__ d_biases,
+            __half* __restrict__ d_outputs,
+            __half* __restrict__ d_unpooled_vals)
+        #endif
+        {
+            const int batch_idx = blockIdx.x;
+            const int tid = threadIdx.x;
+
+            __shared__ __half s_input[FC1_INPUTS];
+            if (tid < FC1_INPUTS)
+            {
+                s_input[tid] = d_inputs[batch_idx * FC1_INPUTS + tid];
+            }
+            __syncthreads();
+
+            #if USE_HALF2 == 1
+            if (tid < FC1_OUTPUTS / 2)
+            {
+                const __half2* d_weights_h2 = (const __half2*)d_weights;
+                __half2 sum2 = ((const __half2*)d_biases)[tid];
+                #pragma unroll
+                for (int i = 0; i < FC1_INPUTS; i++)
+                {
+                    __half2 in2 = __halves2half2(s_input[i], s_input[i]);
+                    sum2 = __hfma2(in2, d_weights_h2[i * (FC1_OUTPUTS / 2) + tid], sum2);
+                }
+                
+                #if HAS_DROPOUT == 1
+                if (is_training == 1)
+                {
+                    uint32_t state = (batch_idx + *d_step) * 1103515245 + tid * 12345 + 12345;
+                    state = (state * 1103515245 + 12345);
+                    float rand_val = (float)(state & 0x7fffffff) / 2147483648.0f;
+                    
+                    __half2* d_unpooled_h2 = (__half2*)d_unpooled_vals;
+                    __half2* d_outputs_h2 = (__half2*)d_outputs;
+                    
+                    if (rand_val < DROPOUT_RATE)
+                    {
+                        d_unpooled_h2[batch_idx * (FC1_OUTPUTS / 2) + tid] = __halves2half2(__float2half(-1e9f), __float2half(-1e9f));
+                        d_outputs_h2[batch_idx * (FC1_OUTPUTS / 2) + tid] = __halves2half2(__float2half(0.0f), __float2half(0.0f));
+                    }
+                    else
+                    {
+                        d_unpooled_h2[batch_idx * (FC1_OUTPUTS / 2) + tid] = sum2;
+                        float scale = 1.0f / (1.0f - DROPOUT_RATE);
+                        __half act0 = __float2half(__half2float(ACTIVATION_FWD(sum2.x)) * scale);
+                        __half act1 = __float2half(__half2float(ACTIVATION_FWD(sum2.y)) * scale);
+                        d_outputs_h2[batch_idx * (FC1_OUTPUTS / 2) + tid] = __halves2half2(act0, act1);
+                    }
+                }
+                else
+                {
+                    ((__half2*)d_unpooled_vals)[batch_idx * (FC1_OUTPUTS / 2) + tid] = sum2;
+                    ((__half2*)d_outputs)[batch_idx * (FC1_OUTPUTS / 2) + tid] = __halves2half2(ACTIVATION_FWD(sum2.x), ACTIVATION_FWD(sum2.y));
+                }
+                #else
+                ((__half2*)d_unpooled_vals)[batch_idx * (FC1_OUTPUTS / 2) + tid] = sum2;
+                ((__half2*)d_outputs)[batch_idx * (FC1_OUTPUTS / 2) + tid] = __halves2half2(ACTIVATION_FWD(sum2.x), ACTIVATION_FWD(sum2.y));
+                #endif
+            }
+            #else
+            if (tid < FC1_OUTPUTS)
+            {
+                __half sum = d_biases[tid];
+                #pragma unroll
+                for (int i = 0; i < FC1_INPUTS; i++)
+                {
+                    sum += s_input[i] * d_weights[i * FC1_OUTPUTS + tid];
+                }
+                
+                #if HAS_DROPOUT == 1
+                if (is_training == 1)
+                {
+                    uint32_t state = (batch_idx + *d_step) * 1103515245 + tid * 12345 + 12345;
+                    state = (state * 1103515245 + 12345);
+                    float rand_val = (float)(state & 0x7fffffff) / 2147483648.0f;
+                    
+                    if (rand_val < DROPOUT_RATE)
+                    {
+                        d_unpooled_vals[batch_idx * FC1_OUTPUTS + tid] = __float2half(-1e9f);
+                        d_outputs[batch_idx * FC1_OUTPUTS + tid] = __float2half(0.0f);
+                    }
+                    else
+                    {
+                        d_unpooled_vals[batch_idx * FC1_OUTPUTS + tid] = sum;
+                        float scale = 1.0f / (1.0f - DROPOUT_RATE);
+                        d_outputs[batch_idx * FC1_OUTPUTS + tid] = __float2half(__half2float(ACTIVATION_FWD(sum)) * scale);
+                    }
+                }
+                else
+                {
+                    d_unpooled_vals[batch_idx * FC1_OUTPUTS + tid] = sum;
+                    d_outputs[batch_idx * FC1_OUTPUTS + tid] = ACTIVATION_FWD(sum);
+                }
+                #else
+                d_unpooled_vals[batch_idx * FC1_OUTPUTS + tid] = sum;
+                d_outputs[batch_idx * FC1_OUTPUTS + tid] = ACTIVATION_FWD(sum);
+                #endif
+            }
+            #endif
+        }
+        """;
+
+    public static readonly string Fc2Forward =
+        """
+
+        extern "C" __global__ void fc2_forward(
+            const __half* __restrict__ d_inputs,
+            const __half* __restrict__ d_weights,
+            const __half* __restrict__ d_biases,
+            __half* __restrict__ d_outputs)
+        {
+            const int batch_idx = blockIdx.x;
+            const int tid = threadIdx.x;
+
+            __shared__ __half s_input[FC2_INPUTS];
+            if (tid < FC2_INPUTS)
+            {
+                s_input[tid] = d_inputs[batch_idx * FC2_INPUTS + tid];
+            }
+            __syncthreads();
+
+            #if USE_HALF2 == 1
+            if (tid < 5)
+            {
+                const __half2* d_weights_h2 = (const __half2*)d_weights;
+                __half2 sum2 = ((const __half2*)d_biases)[tid];
+                #pragma unroll
+                for (int i = 0; i < FC2_INPUTS; i++)
+                {
+                    __half2 in2 = __halves2half2(s_input[i], s_input[i]);
+                    sum2 = __hfma2(in2, d_weights_h2[i * 5 + tid], sum2);
+                }
+                ((__half2*)d_outputs)[batch_idx * 5 + tid] = sum2;
+            }
+            #else
+            if (tid < 10)
+            {
+                __half sum = d_biases[tid];
+                #pragma unroll
+                for (int i = 0; i < FC2_INPUTS; i++)
+                {
+                    sum += s_input[i] * d_weights[i * 10 + tid];
+                }
+                d_outputs[batch_idx * 10 + tid] = sum;
+            }
+            #endif
+        }
+        """;
+
+    public static readonly string Fc2Backward =
+        """
+
+        extern "C" __global__ void fc2_backward(
+            const __half* __restrict__ d_fc2_outputs,
+            const int* __restrict__ d_labels,
+            const __half* __restrict__ d_fc1_outputs,
+            const __half* __restrict__ d_fc2_weights,
+            __half* __restrict__ d_fc2_weights_grad,
+            __half* __restrict__ d_fc2_biases_grad,
+            __half* __restrict__ d_fc1_out_grad,
+            const int* __restrict__ d_step,
+            const __half* __restrict__ d_fc1_unpooled)
+        {
+            const int batch_idx = blockIdx.x;
+            const int tid = threadIdx.x;
+
+            __shared__ __half s_grad[10];
+
+            int batchOffset = ((*d_step) % BATCHES_PER_EPOCH) * BATCH_SIZE;
+
+            if (tid < 10)
+            {
+                float max_logit = -1e9f;
+                for (int i = 0; i < 10; i++)
+                {
+                    float logit = __half2float(
+                        d_fc2_outputs[batch_idx * 10 + i]);
+                    if (logit > max_logit) max_logit = logit;
+                }
+
+                float sum_exp = 0.0f;
+                for (int i = 0; i < 10; i++)
+                {
+                    sum_exp += expf(__half2float(
+                        d_fc2_outputs[batch_idx * 10 + i]) - max_logit);
+                }
+
+                float prob = expf(__half2float(
+                    d_fc2_outputs[batch_idx * 10 + tid]) - max_logit)
+                    / sum_exp;
+                int correct_label = d_labels[batchOffset + batch_idx];
+                s_grad[tid] = __float2half(
+                    prob - (tid == correct_label ? 1.0f : 0.0f));
+            }
+            __syncthreads();
+
+            if (tid < FC2_INPUTS)
+            {
+                #if USE_HALF2 == 1
+                __half2 sum2 = __float2half2_rn(0.0f);
+                const __half2* d_fc2_weights_h2 = (const __half2*)&d_fc2_weights[tid * 10];
+                const __half2* s_grad_h2 = (const __half2*)s_grad;
+                #pragma unroll
+                for (int c2 = 0; c2 < 5; c2++)
+                {
+                    sum2 = __hfma2(s_grad_h2[c2], d_fc2_weights_h2[c2], sum2);
+                }
+                __half sum_input_grad = sum2.x + sum2.y;
+                #else
+                __half sum_input_grad = __float2half(0.0f);
+                #pragma unroll
+                for (int c = 0; c < 10; c++)
+                {
+                    sum_input_grad += s_grad[c] * d_fc2_weights[tid * 10 + c];
+                }
+                #endif
+                
+                #if HAS_FC1 == 1
+                __half fc1_unpooled = d_fc1_unpooled[batch_idx * FC2_INPUTS + tid];
+                __half out_grad = ACTIVATION_BWD(fc1_unpooled, sum_input_grad);
+                #if HAS_DROPOUT == 1
+                if (__half2float(fc1_unpooled) > -1e8f) {
+                    out_grad = __float2half(__half2float(out_grad) * (1.0f / (1.0f - DROPOUT_RATE)));
+                } else {
+                    out_grad = __float2half(0.0f);
+                }
+                #endif
+                d_fc1_out_grad[batch_idx * FC2_INPUTS + tid] = out_grad;
+                #else
+                d_fc1_out_grad[batch_idx * FC2_INPUTS + tid] = sum_input_grad;
+                #endif
+            }
+
+            if (tid < 10)
+            {
+                __half b_grad = s_grad[tid];
+                if (__half2float(b_grad) != 0.0f)
+                {
+                    atomicAdd(&d_fc2_biases_grad[tid], b_grad);
+                }
+            }
+        }
+        """;
+
+    public static readonly string Fc2BackwardWeights =
+        """
+
+        extern "C" __global__ void fc2_backward_weights(
+            const __half* __restrict__ d_fc2_outputs,
+            const int* __restrict__ d_labels,
+            const __half* __restrict__ d_fc1_outputs,
+            __half* __restrict__ d_fc2_weights_grad,
+            const int* __restrict__ d_step)
+        {
+            const int input_idx = blockIdx.x;
+            const int tid = threadIdx.x;
+
+            int batchOffset = ((*d_step) % BATCHES_PER_EPOCH) * BATCH_SIZE;
+
+            __shared__ __half s_fc2_outputs[BATCH_SIZE][10];
+            for (int i = tid; i < BATCH_SIZE; i += 128)
+            {
+                #pragma unroll
+                for (int c = 0; c < 10; c++)
+                {
+                    s_fc2_outputs[i][c] = d_fc2_outputs[i * 10 + c];
+                }
+            }
+
+            __shared__ float s_weight_grads[128][10];
+
+            #pragma unroll
+            for (int c = 0; c < 10; c++)
+            {
+                s_weight_grads[tid][c] = 0.0f;
+            }
+            __syncthreads();
+
+            #pragma unroll
+            for (int i = 0; i < (BATCH_SIZE / 128); i++)
+            {
+                int b = i * 128 + tid;
+
+                float max_logit = -1e9f;
+                for (int c = 0; c < 10; c++)
+                {
+                    float logit = __half2float(s_fc2_outputs[b][c]);
+                    if (logit > max_logit) max_logit = logit;
+                }
+
+                float sum_exp = 0.0f;
+                for (int c = 0; c < 10; c++)
+                {
+                    sum_exp += expf(__half2float(
+                        d_fc2_outputs[b * 10 + c]) - max_logit);
+                }
+
+                int correct_label = d_labels[batchOffset + b];
+                float x_val = __half2float(
+                    d_fc1_outputs[b * FC2_INPUTS + input_idx]);
+
+                #pragma unroll
+                for (int c = 0; c < 10; c++)
+                {
+                    float prob = expf(__half2float(
+                        d_fc2_outputs[b * 10 + c]) - max_logit)
+                        / sum_exp;
+                    float g_val = prob
+                        - (c == correct_label ? 1.0f : 0.0f);
+                    s_weight_grads[tid][c] += g_val * x_val;
+                }
+            }
+            __syncthreads();
+
+            for (int stride = 64; stride > 0; stride >>= 1)
+            {
+                if (tid < stride)
+                {
+                    #pragma unroll
+                    for (int c = 0; c < 10; c++)
+                    {
+                        s_weight_grads[tid][c] +=
+                            s_weight_grads[tid + stride][c];
+                    }
+                }
+                __syncthreads();
+            }
+
+            if (tid == 0)
+            {
+                #pragma unroll
+                for (int c = 0; c < 10; c++)
+                {
+                    d_fc2_weights_grad[input_idx * 10 + c] =
+                        __float2half(s_weight_grads[0][c]);
+                }
+            }
+        }
+        """;
+
+    public static readonly string Fc1Backward =
+        """
+
+        extern "C" __global__ void fc1_backward(
+            const __half* __restrict__ d_fc1_out_grad,
+            const __half* __restrict__ d_fc1_outputs,
+            const __half* __restrict__ d_fc2_inputs,
+            const __half* __restrict__ d_fc1_weights,
+            __half* __restrict__ d_fc1_biases_grad,
+            __half* __restrict__ d_conv2_out_grad)
+        {
+            const int batch_idx = blockIdx.x;
+            const int tid = threadIdx.x;
+
+            __shared__ __half s_grad[FC1_OUTPUTS];
+            __shared__ __half s_weights[FC1_INPUTS][FC1_OUTPUTS];
+
+            if (tid < FC1_OUTPUTS)
+            {
+                s_grad[tid] = d_fc1_out_grad[
+                    batch_idx * FC1_OUTPUTS + tid];
+            }
+
+            int warp_id = tid / 32;
+            int lane_id = tid % 32;
+            int warp_row_start = warp_id * 32;
+
+            int total_warp_elements = 32 * FC1_OUTPUTS;
+            #pragma unroll
+            for (int i = lane_id; i < total_warp_elements; i += 32)
+            {
+                int r = i / FC1_OUTPUTS;
+                int c = i % FC1_OUTPUTS;
+                s_weights[warp_row_start + r][c] =
+                    d_fc1_weights[(warp_row_start + r)
+                    * FC1_OUTPUTS + c];
+            }
+            __syncthreads();
+
+            __half sum_grad = __float2half(0.0f);
+            #pragma unroll
+            for (int c = 0; c < FC1_OUTPUTS; c++)
+            {
+                sum_grad += s_grad[c] * s_weights[tid][c];
+            }
+
+            d_conv2_out_grad[batch_idx * FC1_INPUTS + tid] = sum_grad;
+
+            if (tid < FC1_OUTPUTS)
+            {
+                __half b_grad = s_grad[tid];
+                if (__half2float(b_grad) != 0.0f)
+                {
+                    atomicAdd(&d_fc1_biases_grad[tid], b_grad);
+                }
+            }
+        }
+        """;
+
+    public static readonly string Fc1BackwardWeights =
+        """
+
+        extern "C" __global__ void fc1_backward_weights(
+            const __half* __restrict__ d_fc1_out_grad,
+            const __half* __restrict__ d_fc1_outputs,
+            const __half* __restrict__ d_fc1_inputs,
+            __half* __restrict__ d_fc1_weights_grad)
+        {
+            const int input_idx = blockIdx.x;
+            const int tid = threadIdx.x;
+
+            __shared__ float s_accum[64][FC1_OUTPUTS];
+
+            #pragma unroll
+            for (int c = 0; c < FC1_OUTPUTS; c++)
+            {
+                s_accum[tid][c] = 0.0f;
+            }
+            __syncthreads();
+
+            #pragma unroll
+            for (int i = 0; i < (BATCH_SIZE / 64); i++)
+            {
+                int b = i * 64 + tid;
+                float x_val = __half2float(
+                    d_fc1_inputs[b * FC1_INPUTS + input_idx]);
+                #pragma unroll
+                for (int c = 0; c < FC1_OUTPUTS; c++)
+                {
+                    s_accum[tid][c] += x_val * __half2float(
+                        d_fc1_out_grad[b * FC1_OUTPUTS + c]);
+                }
+            }
+            __syncthreads();
+
+            for (int stride = 32; stride > 0; stride >>= 1)
+            {
+                if (tid < stride)
+                {
+                    #pragma unroll
+                    for (int c = 0; c < FC1_OUTPUTS; c++)
+                    {
+                        s_accum[tid][c] +=
+                            s_accum[tid + stride][c];
+                    }
+                }
+                __syncthreads();
+            }
+
+            if (tid == 0)
+            {
+                #pragma unroll
+                for (int c = 0; c < FC1_OUTPUTS; c++)
+                {
+                    d_fc1_weights_grad[input_idx * FC1_OUTPUTS + c] =
+                        __float2half(s_accum[0][c]);
+                }
+            }
+        }
+        """;
+
+    public static readonly string Conv2Backward =
+        """
+
+        extern "C" __global__ void conv2_backward(
+            const __half* __restrict__ d_conv2_out_grad,
+            const __half* __restrict__ d_conv2_out_val,
+            const __half* __restrict__ d_conv2_unpooled_vals,
+            const __half* __restrict__ d_conv1_out,
+            const __half* __restrict__ d_conv2_filters,
+            __half* __restrict__ d_conv2_filters_grad,
+            __half* __restrict__ d_conv2_biases_grad,
+            __half* __restrict__ d_conv1_out_grad)
+        {
+            #define CONV2_BATCH_PER_CHUNK (BATCH_SIZE / CONV2_CHUNKS)
+
+            const int filter_idx = blockIdx.x / CONV2_CHUNKS;
+            const int chunk_idx = blockIdx.x % CONV2_CHUNKS;
+            const int tid = threadIdx.x;
+
+            const int conv1_out_per_sample =
+                POOL1_SIZE * POOL1_SIZE * CONV1_FILTER_COUNT;
+            const int filter_wt_per_filter =
+                CONV1_FILTER_COUNT * FILTER2_SIZE * FILTER2_SIZE;
+            #if IS_GAP == 1
+            const int conv2_out_w = 8;
+            #else
+            const int conv2_out_w = POOL2_SIZE * 2;
+            #endif
+
+            __shared__ __half s_conv1_out[POOL1_SIZE * POOL1_SIZE
+                * CONV1_FILTER_COUNT];
+            __shared__ __half s_filter_grad[CONV1_FILTER_COUNT
+                * FILTER2_SIZE * FILTER2_SIZE];
+            __shared__ __half s_bias_grad;
+            #if IS_GAP == 1
+            __shared__ __half s_grad[8][8];
+            #else
+            __shared__ __half s_grad[POOL2_SIZE * 2][POOL2_SIZE * 2];
+            #endif
+
+            __half zero = __float2half(0.0f);
+
+            for (int i = tid; i < filter_wt_per_filter; i += 128)
+            {
+                s_filter_grad[i] = zero;
+            }
+            if (tid == 0)
+            {
+                s_bias_grad = zero;
+            }
+            __syncthreads();
+
+            const int cx = (tid < conv2_out_w * conv2_out_w)
+                ? (tid % conv2_out_w) : 0;
+            const int cy = (tid < conv2_out_w * conv2_out_w)
+                ? (tid / conv2_out_w) : 0;
+            const int px = cx / 2;
+            const int py = cy / 2;
+
+            const int start_b = chunk_idx * CONV2_BATCH_PER_CHUNK;
+            const int end_b = start_b + CONV2_BATCH_PER_CHUNK;
+
+            int c_arr[4], fx_arr[4], fy_arr[4];
+            int i_count = 0;
+            for (int i = tid; i < filter_wt_per_filter; i += 128)
+            {
+                fx_arr[i_count] = i % FILTER2_SIZE;
+                fy_arr[i_count] = (i / FILTER2_SIZE) % FILTER2_SIZE;
+                c_arr[i_count] = i / (FILTER2_SIZE * FILTER2_SIZE);
+                i_count++;
+            }
+
+            for (int b = start_b; b < end_b; b++)
+            {
+                for (int i = tid; i < conv1_out_per_sample; i += 128)
+                {
+                    s_conv1_out[i] =
+                        d_conv1_out[b * conv1_out_per_sample + i];
+                }
+
+                #if IS_GAP == 1
+                __half out_grad = d_conv2_out_grad[b * CONV2_FILTER_COUNT + filter_idx];
+                out_grad = __float2half(__half2float(out_grad) / 64.0f);
+                
+                __half my_val = zero;
+                if (tid < 64)
+                {
+                    my_val = d_conv2_unpooled_vals[
+                        (b * 64 + tid)
+                        * CONV2_FILTER_COUNT + filter_idx];
+                }
+
+                __half grad = zero;
+                if (tid < 64)
+                {
+                    grad = ACTIVATION_BWD(my_val, out_grad);
+                }
+                #else
+                __half out_grad = zero;
+                __half out_val = zero;
+                if (tid < conv2_out_w * conv2_out_w
+                    && px < POOL2_SIZE && py < POOL2_SIZE)
+                {
+                    int pool_idx = (py * POOL2_SIZE + px)
+                        * CONV2_FILTER_COUNT + filter_idx;
+                    out_grad = d_conv2_out_grad[
+                        b * CONV2_FILTER_COUNT * POOL2_SIZE * POOL2_SIZE
+                        + pool_idx];
+                    out_val = d_conv2_out_val[
+                        b * CONV2_FILTER_COUNT * POOL2_SIZE * POOL2_SIZE
+                        + pool_idx];
+                }
+
+                __half my_val = zero;
+                if (tid < conv2_out_w * conv2_out_w)
+                {
+                    my_val = d_conv2_unpooled_vals[
+                        (b * conv2_out_w * conv2_out_w + tid)
+                        * CONV2_FILTER_COUNT + filter_idx];
+                }
+
+                __half grad = zero;
+                if (tid < conv2_out_w * conv2_out_w
+                    && __heq(ACTIVATION_FWD(my_val), out_val))
+                {
+                    grad = ACTIVATION_BWD(my_val, out_grad);
+                }
+                #endif
+                if (tid < conv2_out_w * conv2_out_w)
+                {
+                    s_grad[cy][cx] = grad;
+                }
+                __syncthreads();
+
+                int idx = 0;
+                for (int i = tid; i < filter_wt_per_filter; i += 128)
+                {
+                    int c = c_arr[idx];
+                    int fx = fx_arr[idx];
+                    int fy = fy_arr[idx];
+                    idx++;
+
+                    __half w_grad = zero;
+                    #pragma unroll
+                    for (int y = 0; y < conv2_out_w; y++)
+                    {
+                        #pragma unroll
+                        for (int x = 0; x < conv2_out_w; x++)
+                        {
+                            __half g = s_grad[y][x];
+                            int in_x = x + fx;
+                            int in_y = y + fy;
+                            w_grad += g * s_conv1_out[
+                                (in_y * POOL1_SIZE + in_x)
+                                * CONV1_FILTER_COUNT + c];
+                        }
+                    }
+                    s_filter_grad[i] += w_grad;
+                }
+
+                if (tid == 0)
+                {
+                    __half b_grad = zero;
+                    for (int y = 0; y < conv2_out_w; y++)
+                    {
+                        for (int x = 0; x < conv2_out_w; x++)
+                        {
+                            b_grad += s_grad[y][x];
+                        }
+                    }
+                    s_bias_grad += b_grad;
+                }
+
+                for (int i = tid; i < conv1_out_per_sample; i += 128)
+                {
+                    int c = i % CONV1_FILTER_COUNT;
+                    int spatial_idx = i / CONV1_FILTER_COUNT;
+                    int ix = spatial_idx % POOL1_SIZE;
+                    int iy = spatial_idx / POOL1_SIZE;
+
+                    __half sum_grad = zero;
+                    #pragma unroll
+                    for (int fy = 0; fy < FILTER2_SIZE; fy++)
+                    {
+                        #pragma unroll
+                        for (int fx = 0; fx < FILTER2_SIZE; fx++)
+                        {
+                            int x = ix - fx;
+                            int y = iy - fy;
+                            if (x >= 0 && x < conv2_out_w
+                                && y >= 0 && y < conv2_out_w)
+                            {
+                                int f_idx = filter_idx
+                                    * filter_wt_per_filter
+                                    + c * FILTER2_SIZE * FILTER2_SIZE
+                                    + fy * FILTER2_SIZE + fx;
+                                sum_grad += s_grad[y][x]
+                                    * d_conv2_filters[f_idx];
+                            }
+                        }
+                    }
+                    if (__half2float(sum_grad) != 0.0f)
+                    {
+                        atomicAdd(&d_conv1_out_grad[
+                            b * conv1_out_per_sample + i], sum_grad);
+                    }
+                }
+                __syncthreads();
+            }
+
+            for (int i = tid; i < filter_wt_per_filter; i += 128)
+            {
+                atomicAdd(&d_conv2_filters_grad[
+                    filter_idx * filter_wt_per_filter + i],
+                    s_filter_grad[i]);
+            }
+            if (tid == 0)
+            {
+                atomicAdd(&d_conv2_biases_grad[filter_idx], s_bias_grad);
+            }
+        }
+        """;
+
+    public static readonly string Conv1Backward =
+        """
+
+        extern "C" __global__ void conv1_backward(
+            const __half* __restrict__ d_conv1_out_grad,
+            const __half* __restrict__ d_conv1_out_val,
+            const __half* __restrict__ d_conv1_unpooled_vals,
+            const uint32_t* __restrict__ d_inputs,
+            __half* __restrict__ d_conv1_filters_grad,
+            __half* __restrict__ d_conv1_biases_grad,
+            const int* __restrict__ d_step,
+            int is_training)
+        {
+            #define CONV1_BATCH_PER_CHUNK (BATCH_SIZE / CONV1_CHUNKS)
+
+            const int filter_idx = blockIdx.x / CONV1_CHUNKS;
+            const int chunk_idx = blockIdx.x % CONV1_CHUNKS;
+            const int tid = threadIdx.y * 16 + threadIdx.x;
+
+            const int conv1_out_w = POOL1_SIZE * 2;
+            const int conv1_out_per_sample =
+                POOL1_SIZE * POOL1_SIZE * CONV1_FILTER_COUNT;
+            const int filter_size_sq =
+                FILTER1_SIZE * FILTER1_SIZE;
+
+            __shared__ __half s_filter_grad[FILTER1_SIZE * FILTER1_SIZE];
+            __shared__ __half s_bias_grad;
+            __shared__ __half s_grad[POOL1_SIZE * 2][POOL1_SIZE * 2];
+            __shared__ uint32_t s_image[28];
+
+            __half zero = __float2half(0.0f);
+
+            if (tid < filter_size_sq)
+            {
+                s_filter_grad[tid] = zero;
+            }
+            if (tid == 0)
+            {
+                s_bias_grad = zero;
+            }
+            __syncthreads();
+
+            const int batchOffset =
+                ((*d_step) % BATCHES_PER_EPOCH) * BATCH_SIZE;
+
+            const int start_b = chunk_idx * CONV1_BATCH_PER_CHUNK;
+            const int end_b = start_b + CONV1_BATCH_PER_CHUNK;
+
+            int fx = tid % FILTER1_SIZE;
+            int fy = tid / FILTER1_SIZE;
+
+            for (int b = start_b; b < end_b; b++)
+            {
+                if (tid < 28)
+                {
+                    s_image[tid] =
+                        d_inputs[(batchOffset + b) * 28 + tid];
+                }
+
+                for (int i = tid; i < conv1_out_w * conv1_out_w;
+                    i += 256)
+                {
+                    int gy = i / conv1_out_w;
+                    int gx = i % conv1_out_w;
+                    int px2 = gx / 2;
+                    int py2 = gy / 2;
+                    int pool_idx = (py2 * POOL1_SIZE + px2)
+                        * CONV1_FILTER_COUNT + filter_idx;
+
+                    __half out_grad = d_conv1_out_grad[
+                        b * conv1_out_per_sample + pool_idx];
+                    __half out_val = d_conv1_out_val[
+                        b * conv1_out_per_sample + pool_idx];
+                    __half my_val = d_conv1_unpooled_vals[
+                        (b * conv1_out_w * conv1_out_w
+                        + gy * conv1_out_w + gx)
+                        * CONV1_FILTER_COUNT + filter_idx];
+
+                    __half grad = zero;
+                    if (__heq(ACTIVATION_FWD(my_val), out_val))
+                    {
+                        grad = ACTIVATION_BWD(my_val, out_grad);
+                    }
+                    s_grad[gy][gx] = grad;
+                }
+                __syncthreads();
+
+                int seed = b + *d_step;
+                int dx = (is_training == 1)
+                    ? ((seed * 1103515245 + 12345) % 3 - 1) : 0;
+                int dy = (is_training == 1)
+                    ? (((seed * 1103515245 + 12345) / 3) % 3 - 1) : 0;
+
+                if (tid < filter_size_sq)
+                {
+                    __half w_grad = zero;
+                    #pragma unroll
+                    for (int y = 0; y < conv1_out_w; y++)
+                    {
+                        int shift_y = y + fy + dy;
+                        uint32_t row_bits = 0;
+                        if (shift_y >= 0 && shift_y < 28)
+                        {
+                            row_bits = s_image[shift_y];
+                        }
+                        #pragma unroll
+                        for (int x = 0; x < conv1_out_w; x++)
+                        {
+                            int img_x = x + fx + dx;
+                            uint32_t pixel = 0;
+                            if (img_x >= 0 && img_x < 28)
+                            {
+                                pixel = (row_bits >> img_x) & 1u;
+                            }
+                            w_grad += __half((float)pixel)
+                                * s_grad[y][x];
+                        }
+                    }
+                    s_filter_grad[tid] += w_grad;
+                }
+
+                if (tid == 0)
+                {
+                    __half b_grad = zero;
+                    for (int y = 0; y < conv1_out_w; y++)
+                    {
+                        for (int x = 0; x < conv1_out_w; x++)
+                        {
+                            b_grad += s_grad[y][x];
+                        }
+                    }
+                    s_bias_grad += b_grad;
+                }
+                __syncthreads();
+            }
+
+            if (tid < filter_size_sq)
+            {
+                atomicAdd(&d_conv1_filters_grad[
+                    filter_idx * filter_size_sq + tid],
+                    s_filter_grad[tid]);
+            }
+            if (tid == 0)
+            {
+                atomicAdd(&d_conv1_biases_grad[filter_idx],
+                    s_bias_grad);
+            }
+        }
+        """;
+
+    public static readonly string AdamUpdate =
+        """
+
+        extern "C" __global__ void adam_update(
+            __half* __restrict__ d_param,
+            __half* __restrict__ d_grad,
+            __half* __restrict__ d_m,
+            __half* __restrict__ d_v,
+            int num_elements,
+            int* __restrict__ d_step)
+        {
+            int tid = blockIdx.x * blockDim.x + threadIdx.x;
+            int stride = blockDim.x * gridDim.x;
+
+            int step_val = *d_step + 1;
+
+            #ifndef MAX_LR
+            #define MAX_LR 0.006f
+            #endif
+            float max_lr = MAX_LR;
+            float beta1 = 0.7f;
+            float beta2 = 0.9f;
+            float epsilon = 1e-4f;
+
+            int total_steps = TOTAL_STEPS;
+
+            __shared__ float s_lr;
+            __shared__ float s_beta1_t;
+            __shared__ float s_beta2_t;
+
+            if (threadIdx.x == 0)
+            {
+                s_beta1_t = powf(beta1, (float)step_val);
+                s_beta2_t = powf(beta2, (float)step_val);
+
+                float pct = (float)step_val / total_steps;
+                float warmup_pct = 0.20f;
+                float local_lr = 0.0f;
+                if (pct < warmup_pct)
+                {
+                    float alpha = pct / warmup_pct;
+                    local_lr = max_lr * (0.1f + 0.9f * alpha);
+                }
+                else
+                {
+                    float alpha =
+                        (pct - warmup_pct) / (1.0f - warmup_pct);
+                    float cos_val = cosf(3.14159265f * alpha);
+                    local_lr = max_lr * 0.5f * (1.0f + cos_val);
+                }
+                s_lr = local_lr;
+            }
+            __syncthreads();
+
+            float lr = s_lr;
+            float beta1_t = s_beta1_t;
+            float beta2_t = s_beta2_t;
+
+            for (int i = tid; i < num_elements; i += stride)
+            {
+                float g = __half2float(d_grad[i]) / BATCH_SIZE;
+                float m = beta1 * __half2float(d_m[i])
+                    + (1.0f - beta1) * g;
+                float v = beta2 * __half2float(d_v[i])
+                    + (1.0f - beta2) * g * g;
+
+                d_m[i] = __float2half(m);
+                d_v[i] = __float2half(v);
+
+                float m_hat = m / (1.0f - beta1_t);
+                float v_hat = v / (1.0f - beta2_t);
+
+                float param_val = __half2float(d_param[i]);
+                
+                #ifndef WEIGHT_DECAY
+                #define WEIGHT_DECAY 0.0f
+                #endif
+                
+                param_val -= lr * WEIGHT_DECAY * param_val;
+                param_val -= lr * m_hat / (sqrtf(v_hat) + epsilon);
+                
+                d_param[i] = __float2half(param_val);
+                d_grad[i] = __float2half(0.0f);
+            }
+
+            if (threadIdx.x == 0 && blockIdx.x == 0)
+            {
+                *d_step = step_val;
+            }
+        }
+        """;
+
+    public static string BuildLeNetSource(NetworkConfig config)
+    {
+        var sb = new System.Text.StringBuilder(32768);
+        sb.AppendLine(Preamble);
+
+        if (config.ActivationType == "SILU")
+        {
+            sb.AppendLine("#define ACTIVATION_FWD(x) silu(x)");
+            sb.AppendLine("#define ACTIVATION_BWD(x, dy) d_silu(x, dy)");
+        }
+        else
+        {
+            sb.AppendLine("#define ACTIVATION_FWD(x) gelu(x)");
+            sb.AppendLine("#define ACTIVATION_BWD(x, dy) d_gelu(x, dy)");
+        }
+
+        // Architecture macros
+        sb.AppendLine($"#define CONV1_FILTER_COUNT {config.Conv1FilterCount}");
+        sb.AppendLine($"#define CONV2_FILTER_COUNT {config.Conv2FilterCount}");
+        sb.AppendLine($"#define HAS_DROPOUT {(config.HasDropout ? 1 : 0)}");
+        sb.AppendLine($"#define DROPOUT_RATE {config.DropoutRate}f");
+        sb.AppendLine($"#define USE_HALF2 {(config.IsHalf ? 1 : 0)}");
+
+        if (config.IsGlobalAveragePooling)
+        {
+            sb.AppendLine("#define IS_GAP 1");
+        }
+        else
+        {
+            sb.AppendLine("#define IS_GAP 0");
+        }
+
+        int fc2Inputs = config.HasFC1 ? config.FC1Outputs : (config.Conv2FilterCount * config.Pool2OutSize * config.Pool2OutSize);
+        sb.AppendLine($"#define FC2_INPUTS {fc2Inputs}");
+
+        sb.Append(ClearGradient);
+
+        if (config.ActivationType == "SILU")
+        {
+            sb.Append(ActivationSilu);
+        }
+        else
+        {
+            sb.Append(ActivationGelu);
+        }
+        sb.Append(DummyFusedKernels);
+        if (config.IsFusedForward)
+        {
+            sb.Append(CudaSourceFused.FusedForward);
+        }
+        else
+        {
+            sb.Append(Conv1Forward);
+            sb.Append(Conv2Forward);
+            if (config.HasFC1) sb.Append(Fc1Forward);
+            sb.Append(Fc2Forward);
+        }
+        sb.Append(Fc2Backward);
+        sb.Append(Fc2BackwardWeights);
+        if (config.HasFC1)
+        {
+            sb.Append(Fc1Backward);
+            sb.Append(Fc1BackwardWeights);
+        }
+        sb.Append(Conv2Backward);
+        sb.Append(Conv1Backward);
+        sb.Append(AdamUpdate);
+
+        return sb.ToString();
+    }
+}
