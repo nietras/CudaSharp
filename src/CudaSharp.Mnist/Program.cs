@@ -19,320 +19,11 @@ public unsafe partial class Program
     const int TrainImagesCount = 51200; // 400 batches of size 128
     const int TestImagesCount = 10240;   // Padded to multiple of BatchSize (128 * 80 = 10240)
 
-    public static readonly NetworkConfig ConfigV11 = new()
-    {
-        Name = "V11",
-        CudaSource = CudaSourceV10,
-        IsHalf = true,
-        IsV7Based = true,
-        BatchSize = 128,
-        Conv1FilterCount = 6,
-        Conv1FilterSize = 5,
-        Conv2FilterCount = 16,
-        Conv2FilterSize = 5,
-        Pool2OutSize = 4,
-        HasFC1 = true,
-        FC1Outputs = 120,
-        FC1Inputs = 256,
-        BatchesPerEpoch = 400,
-        TotalSteps = 155,
-        MaxLR = 0.014f
-    };
-
-    public static readonly NetworkConfig ConfigV12 = new()
-    {
-        Name = "V12",
-        CudaSource = CudaSourceV10,
-        IsHalf = true,
-        IsV7Based = true,
-        BatchSize = 128,
-        Conv1FilterCount = 6,
-        Conv1FilterSize = 5,
-        Conv2FilterCount = 16,
-        Conv2FilterSize = 5,
-        Pool2OutSize = 4,
-        HasFC1 = true,
-        FC1Outputs = 120,
-        FC1Inputs = 256,
-        BatchesPerEpoch = 400,
-        TotalSteps = 155,
-        MaxLR = 0.016f
-    };
-
-    public static readonly NetworkConfig ConfigV13 = new()
-    {
-        Name = "V13",
-        CudaSource = CudaSourceV10,
-        IsHalf = true,
-        IsV7Based = true,
-        BatchSize = 128,
-        Conv1FilterCount = 6,
-        Conv1FilterSize = 5,
-        Conv2FilterCount = 16,
-        Conv2FilterSize = 5,
-        Pool2OutSize = 4,
-        HasFC1 = true,
-        FC1Outputs = 120,
-        FC1Inputs = 256,
-        BatchesPerEpoch = 400,
-        TotalSteps = 100,
-        MaxLR = 0.010f
-    };
-
-    public static readonly NetworkConfig ConfigV14 = new()
-    {
-        Name = "V14",
-        CudaSource = CudaSourceV10,
-        IsHalf = true,
-        IsV7Based = true,
-        BatchSize = 128,
-        Conv1FilterCount = 6,
-        Conv1FilterSize = 5,
-        Conv2FilterCount = 16,
-        Conv2FilterSize = 5,
-        Pool2OutSize = 4,
-        HasFC1 = true,
-        FC1Outputs = 120,
-        FC1Inputs = 256,
-        BatchesPerEpoch = 400,
-        TotalSteps = 80,
-        MaxLR = 0.025f
-    };
-
-    public static readonly NetworkConfig ConfigV21 = new()
-    {
-        Name = "V21",
-        CudaSource = CudaSourceV10,
-        IsHalf = true,
-        IsV7Based = true,
-        BatchSize = 128,
-        Conv1FilterCount = 8,
-        Conv1FilterSize = 2,
-        Conv2FilterCount = 16,
-        Conv2FilterSize = 2,
-        Pool2OutSize = 6,
-        HasFC1 = true,
-        FC1Outputs = 120,
-        FC1Inputs = 576,
-        BatchesPerEpoch = 400,
-        TotalSteps = 155,
-        MaxLR = 0.014f
-    };
-
-    public static readonly NetworkConfig ConfigV22 = new()
-    {
-        Name = "V22",
-        CudaSource = CudaSourceV10,
-        IsHalf = true,
-        IsV7Based = true,
-        BatchSize = 128,
-        Conv1FilterCount = 8,
-        Conv1FilterSize = 4,
-        Conv2FilterCount = 16,
-        Conv2FilterSize = 4,
-        Pool2OutSize = 4,
-        HasFC1 = true,
-        FC1Outputs = 120,
-        FC1Inputs = 256,
-        BatchesPerEpoch = 400,
-        TotalSteps = 155,
-        MaxLR = 0.014f
-    };
-
-    public static readonly NetworkConfig ConfigV10 = new()
-    {
-        Name = "V10",
-        CudaSource = CudaSourceV10,
-        IsHalf = true,
-        IsV7Based = true,
-        BatchSize = 256,
-        Conv1FilterCount = 6,
-        Conv1FilterSize = 5,
-        Conv2FilterCount = 16,
-        Conv2FilterSize = 5,
-        Pool2OutSize = 4,
-        HasFC1 = true,
-        FC1Outputs = 120,
-        FC1Inputs = 256,
-        BatchesPerEpoch = 200,
-        TotalSteps = 300,
-        MaxLR = 0.006f
-    };
-
-    public static readonly NetworkConfig ConfigV9 = new()
-    {
-        Name = "V9",
-        CudaSource = CudaSourceV9,
-        IsHalf = true,
-        IsV7Based = true,
-        BatchSize = 256,
-        Conv1FilterCount = 6,
-        Conv1FilterSize = 5,
-        Conv2FilterCount = 16,
-        Conv2FilterSize = 5,
-        Pool2OutSize = 4,
-        HasFC1 = true,
-        FC1Outputs = 120,
-        FC1Inputs = 256,
-        BatchesPerEpoch = 200,
-        TotalSteps = 300,
-        MaxLR = 0.006f
-    };
-
-    public static readonly NetworkConfig ConfigV8 = new()
-    {
-        Name = "V8",
-        CudaSource = CudaSourceV8,
-        IsHalf = true,
-        IsV7Based = true,
-        BatchSize = 256,
-        Conv1FilterCount = 16,
-        Conv1FilterSize = 3,
-        Conv2FilterCount = 16,
-        Conv2FilterSize = 3,
-        Pool2OutSize = 7,
-        HasFC1 = true,
-        FC1Outputs = 16,
-        FC1Inputs = 144,
-        BatchesPerEpoch = 200,
-        TotalSteps = 300,
-        MaxLR = 0.006f
-    };
-
-    public static readonly NetworkConfig ConfigV7 = new()
-    {
-        Name = "V7",
-        CudaSource = CudaSourceV7,
-        IsHalf = true,
-        IsV7Based = true,
-        BatchSize = 256,
-        Conv1FilterCount = 8,
-        Conv1FilterSize = 3,
-        Conv2FilterCount = 16,
-        Conv2FilterSize = 3,
-        Pool2OutSize = 5,
-        HasFC1 = false,
-        BatchesPerEpoch = 200,
-        TotalSteps = 300,
-        MaxLR = 0.006f
-    };
-
-    public static readonly NetworkConfig ConfigV6 = new()
-    {
-        Name = "V6",
-        CudaSource = CudaSourceV6,
-        IsHalf = true,
-        IsV7Based = false,
-        BatchSize = 128,
-        Conv1FilterCount = 16,
-        Conv1FilterSize = 5,
-        Conv2FilterCount = 32,
-        Conv2FilterSize = 5,
-        Pool2OutSize = 4,
-        HasFC1 = false,
-        BatchesPerEpoch = 240,
-        TotalSteps = 240,
-        MaxLR = 0.007f
-    };
-
-    public static readonly NetworkConfig ConfigV5 = new()
-    {
-        Name = "V5",
-        CudaSource = CudaSourceV5,
-        IsHalf = false,
-        IsV7Based = false,
-        BatchSize = 128,
-        Conv1FilterCount = 1,
-        Conv1FilterSize = 1,
-        Conv2FilterCount = 1,
-        Conv2FilterSize = 1,
-        Pool2OutSize = 1,
-        HasFC1 = true,
-        FC1Outputs = 256,
-        BatchesPerEpoch = 180,
-        TotalSteps = 180,
-        MaxLR = 0.009f
-    };
-
-    public static readonly NetworkConfig ConfigV4 = new()
-    {
-        Name = "V4",
-        CudaSource = CudaSourceV4,
-        IsHalf = false,
-        IsV7Based = false,
-        BatchSize = 128,
-        Conv1FilterCount = 16,
-        Conv1FilterSize = 5,
-        Conv2FilterCount = 16,
-        Conv2FilterSize = 3,
-        Pool2OutSize = 5,
-        HasFC1 = true,
-        FC1Outputs = 256,
-        BatchesPerEpoch = 200,
-        TotalSteps = 190,
-        MaxLR = 0.003f
-    };
-
-    public static readonly NetworkConfig ConfigV3 = new()
-    {
-        Name = "V3",
-        CudaSource = CudaSourceV3,
-        IsHalf = true,
-        IsV7Based = false,
-        Conv1FilterCount = 8,
-        Conv1FilterSize = 5,
-        Conv2FilterCount = 16,
-        Conv2FilterSize = 5,
-        Pool2OutSize = 4,
-        HasFC1 = false,
-        BatchSize = 128,
-        BatchesPerEpoch = 200,
-        TotalSteps = 200,
-        MaxLR = 0.05f
-    };
-
-    public static readonly NetworkConfig ConfigV1 = new()
-    {
-        Name = "V1",
-        CudaSource = CudaSourceV1,
-        IsHalf = false,
-        IsV7Based = false,
-        Conv1FilterCount = 16,
-        Conv1FilterSize = 5,
-        Conv2FilterCount = 16,
-        Conv2FilterSize = 3,
-        Pool2OutSize = 5,
-        HasFC1 = true,
-        FC1Outputs = 256,
-        BatchesPerEpoch = 200,
-        TotalSteps = 400,
-        MaxLR = 0.003f
-    };
-
-    public static readonly NetworkConfig ConfigV2 = new()
-    {
-        Name = "V2",
-        CudaSource = CudaSourceV2,
-        IsHalf = false,
-        IsV7Based = false,
-        Conv1FilterCount = 8,
-        Conv1FilterSize = 5,
-        Conv2FilterCount = 16,
-        Conv2FilterSize = 5,
-        Pool2OutSize = 4,
-        HasFC1 = false,
-        BatchesPerEpoch = 300,
-        TotalSteps = 600,
-        MaxLR = 0.06f
-    };
-
     public static void Main(string[] args)
     {
-        Console.WriteLine("==================================================");
         Console.WriteLine("CudaSharp Ultra-Fast MNIST CNN Training Simulator");
-        Console.WriteLine("==================================================");
 
-        var version = "V3";
+        var version = "ALL";
         var profile = false;
         for (var i = 0; i < args.Length; i++)
         {
@@ -347,99 +38,94 @@ public unsafe partial class Program
         }
         Console.WriteLine($"[CONFIG] Network Version: {version} (Profile Mode: {profile})");
 
-        NetworkConfig activeConfig;
-        if (version.StartsWith("V0") || (version.StartsWith("V") && version.Length > 2 && int.TryParse(version.AsSpan(1), out _)))
+        if (string.Equals(version, "ALL", StringComparison.OrdinalIgnoreCase))
+        {
+            var comparisonResults = new System.Collections.Generic.List<(NetworkConfig Config, double MeanAccuracy, double MeanTime)>();
+            foreach (var config in OrderedNetworkConfigs)
+            {
+                Console.WriteLine();
+                Console.WriteLine($"[COMPARE] Running {config.Name}...");
+                comparisonResults.Add(RunConfig(config, profile));
+            }
+
+            Console.WriteLine();
+            Console.WriteLine("### ALL CONFIG COMPARISON ###");
+            foreach (var result in comparisonResults)
+            {
+                Console.WriteLine($"{result.Config.Name,-4} | Accuracy: {result.MeanAccuracy,6:F2}% | Time: {result.MeanTime,9:F3} ms");
+            }
+            return;
+        }
+
+        var activeConfig = ResolveNetworkConfig(version);
+        RunConfig(activeConfig, profile);
+    }
+
+    static NetworkConfig ResolveNetworkConfig(string version)
+    {
+        if (NetworkConfigs.TryGetValue(version, out var config))
+        {
+            return config;
+        }
+
+        if (version.StartsWith("V0", StringComparison.OrdinalIgnoreCase)
+            || (version.StartsWith("V", StringComparison.OrdinalIgnoreCase)
+                && version.Length > 2
+                && int.TryParse(version.AsSpan(1), out _)))
         {
             if (int.TryParse(version.AsSpan(1), out var num) && num >= 1 && num <= 99)
             {
-                if (num == 1) activeConfig = ConfigV1;
-                else if (num == 2) activeConfig = ConfigV2;
-                else if (num == 3) activeConfig = ConfigV3;
-                else if (num == 4) activeConfig = ConfigV4;
-                else if (num == 5) activeConfig = ConfigV5;
-                else if (num == 6) activeConfig = ConfigV6;
-                else if (num == 7) activeConfig = ConfigV7;
-                else if (num == 8) activeConfig = ConfigV8;
-                else if (num == 9) activeConfig = ConfigV9;
-                else if (num == 10) activeConfig = ConfigV10;
-                else if (num == 11) activeConfig = ConfigV11;
-                else if (num == 14) activeConfig = ConfigV14;
-                else if (num == 21) activeConfig = ConfigV21;
-                else if (num == 22) activeConfig = ConfigV22;
-                else
+                var batchSize = (num % 4) switch
                 {
-                    var batchSize = (num % 4) switch
-                    {
-                        0 => 64,
-                        1 => 128,
-                        2 => 256,
-                        3 => 512,
-                        _ => 256
-                    };
-                    var maxLR = ((num / 4) % 4) switch
-                    {
-                        0 => 0.003f,
-                        1 => 0.006f,
-                        2 => 0.009f,
-                        3 => 0.012f,
-                        _ => 0.006f
-                    };
-                    var totalSteps = ((num / 16) % 3) switch
-                    {
-                        0 => 150,
-                        1 => 300,
-                        2 => 450,
-                        _ => 300
-                    };
-                    activeConfig = new NetworkConfig
-                    {
-                        Name = version,
-                        CudaSource = CudaSourceV7,
-                        IsHalf = true,
-                        IsV7Based = true,
-                        BatchSize = batchSize,
-                        Conv1FilterCount = 8,
-                        Conv1FilterSize = 3,
-                        Conv2FilterCount = 16,
-                        Conv2FilterSize = 3,
-                        Pool2OutSize = 5,
-                        HasFC1 = false,
-                        BatchesPerEpoch = 51200 / batchSize,
-                        TotalSteps = totalSteps,
-                        MaxLR = maxLR
-                    };
-                }
-            }
-            else
-            {
-                throw new ArgumentException($"Unknown version: {version}");
+                    0 => 64,
+                    1 => 128,
+                    2 => 256,
+                    3 => 512,
+                    _ => 256
+                };
+                var maxLR = ((num / 4) % 4) switch
+                {
+                    0 => 0.003f,
+                    1 => 0.006f,
+                    2 => 0.009f,
+                    3 => 0.012f,
+                    _ => 0.006f
+                };
+                var totalSteps = ((num / 16) % 3) switch
+                {
+                    0 => 150,
+                    1 => 300,
+                    2 => 450,
+                    _ => 300
+                };
+                return new NetworkConfig
+                {
+                    Name = version,
+                    CudaSource = CudaSourceV7,
+                    IsHalf = true,
+                    IsV7Based = true,
+                    BatchSize = batchSize,
+                    Conv1FilterCount = 8,
+                    Conv1FilterSize = 3,
+                    Conv2FilterCount = 16,
+                    Conv2FilterSize = 3,
+                    Pool2OutSize = 5,
+                    HasFC1 = false,
+                    BatchesPerEpoch = 51200 / batchSize,
+                    TotalSteps = totalSteps,
+                    MaxLR = maxLR
+                };
             }
         }
-        else
-        {
-            activeConfig = version switch
-            {
-                "V1" => ConfigV1,
-                "V2" => ConfigV2,
-                "V3" => ConfigV3,
-                "V4" => ConfigV4,
-                "V5" => ConfigV5,
-                "V6" => ConfigV6,
-                "V7" => ConfigV7,
-                "V8" => ConfigV8,
-                "V9" => ConfigV9,
-                "V10" => ConfigV10,
-                "V11" => ConfigV11,
-                "V12" => ConfigV12,
-                "V13" => ConfigV13,
-                "V14" => ConfigV14,
-                "V21" => ConfigV21,
-                "V22" => ConfigV22,
-                _ => throw new ArgumentException($"Unknown version: {version}")
-            };
-        }
-        BatchSize = activeConfig.BatchSize;
 
+        throw new ArgumentException($"Unknown version: {version}");
+    }
+
+    static (NetworkConfig Config, double MeanAccuracy, double MeanTime) RunConfig(NetworkConfig activeConfig, bool profile)
+    {
+        BatchSize = activeConfig.BatchSize;
+        double meanAcc = 0.0;
+        double meanTime = 0.0;
         CuInit.EnsureInit();
 
         cuDeviceGet(out var device, 0).Ok();
@@ -1218,9 +904,7 @@ public unsafe partial class Program
 
                     if (!isWarmup)
                     {
-                        Console.WriteLine("==================================================");
                         Console.WriteLine("### GPU KERNEL PROFILING REPORT (Measured Run) ###");
-                        Console.WriteLine("==================================================");
                         PrintStats("clear_gradient", clearTimes);
                         PrintStats("conv1_forward", conv1Times);
                         PrintStats("conv2_forward", conv2Times);
@@ -1233,7 +917,6 @@ public unsafe partial class Program
                         PrintStats("conv2_backward", conv2BwdTimes);
                         PrintStats("conv1_backward", conv1BwdTimes);
                         PrintStats("adam_update", adamTimes);
-                        Console.WriteLine("==================================================");
 
                         profileTimes["clear_gradient"] = clearTimes;
                         profileTimes["conv1_forward"] = conv1Times;
@@ -1366,7 +1049,6 @@ public unsafe partial class Program
                 }
 
                 var accuracy = (double)correctPredictions / (testStepCount * BatchSize) * 100.0;
-                Console.WriteLine("==================================================");
                 if (isWarmup)
                 {
                     Console.WriteLine($"[WARMUP RESULTS] Accuracy: {accuracy:F2}%, GPU Time: {trainingTime:F3} ms");
@@ -1379,7 +1061,6 @@ public unsafe partial class Program
                     measuredTimes.Add(trainingTime);
                     measuredAccuracies.Add(accuracy);
                 }
-                Console.WriteLine("==================================================");
             }
 
             double minTime = double.MaxValue, maxTime = double.MinValue, sumTime = 0;
@@ -1398,14 +1079,12 @@ public unsafe partial class Program
                 sumAcc += a;
             }
 
-            var meanTime = sumTime / measuredTimes.Count;
-            var meanAcc = sumAcc / measuredAccuracies.Count;
+            meanTime = sumTime / measuredTimes.Count;
+            meanAcc = sumAcc / measuredAccuracies.Count;
 
-            Console.WriteLine("==================================================");
             Console.WriteLine("### SUMMARY METRICS FOR MEASURED RUNS ###");
             Console.WriteLine($"GPU Training Time: Min = {minTime:F3} ms | Mean = {meanTime:F3} ms | Max = {maxTime:F3} ms");
             Console.WriteLine($"Test Accuracy:     Min = {minAcc:F2}% | Mean = {meanAcc:F2}% | Max = {maxAcc:F2}%");
-            Console.WriteLine("==================================================");
 
             WriteMarkdownReport(
                 activeConfig,
@@ -1433,6 +1112,8 @@ public unsafe partial class Program
                 cuCtxDestroy(context).Ok();
             }
         }
+
+        return (activeConfig, meanAcc, meanTime);
     }
 
     static CUgraphNode AddKernelNode(
