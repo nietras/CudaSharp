@@ -23,7 +23,7 @@ public unsafe partial class Program
     {
         Console.WriteLine("CudaSharp Ultra-Fast MNIST CNN Training Simulator");
 
-        var version = "ALL";
+        var version = "V8";
         var profile = false;
         for (var i = 0; i < args.Length; i++)
         {
@@ -164,7 +164,9 @@ public unsafe partial class Program
         var conv2Chunks = Math.Max(16, activeConfig.BatchSize / 8);
 
         Console.WriteLine("[JIT] Compiling CUDA kernels...");
-        var cudaSourceStr = activeConfig.IsHalf ? CudaKernelLibrary.BuildLeNetSource(activeConfig) : activeConfig.CudaSource;
+        var cudaSourceStr = activeConfig.Name == "V8"
+            ? activeConfig.CudaSource
+            : (activeConfig.IsHalf ? CudaKernelLibrary.BuildLeNetSource(activeConfig) : activeConfig.CudaSource);
         nvrtcCreateProgram(out var program, cudaSourceStr, "mnist_kernels", 0, [], []).Ok();
         CUcontext context = default;
         try
