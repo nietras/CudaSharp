@@ -120,6 +120,7 @@ public unsafe partial class Program
         CudaSource = CudaSourceV7,
         IsHalf = true,
         IsV7Based = true,
+        UseCustomCudaSource = true,
         BatchSize = 256,
         Conv1FilterCount = 8,
         Conv1FilterSize = 3,

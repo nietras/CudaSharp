@@ -752,17 +752,44 @@ public static partial class Program
             for (int i = tid; i < num_elements; i += stride)
             {
                 float g = __half2float(d_grad[i]) / BATCH_SIZE;
+                if (!isfinite(g))
+                {
+                    d_grad[i] = __float2half(0.0f);
+                    continue;
+                }
+
                 float m = beta1 * __half2float(d_m[i]) + (1.0f - beta1) * g;
                 float v = beta2 * __half2float(d_v[i]) + (1.0f - beta2) * g * g;
+
+                if (!isfinite(m) || !isfinite(v))
+                {
+                    d_m[i] = __float2half(0.0f);
+                    d_v[i] = __float2half(0.0f);
+                    d_grad[i] = __float2half(0.0f);
+                    continue;
+                }
 
                 d_m[i] = __float2half(m);
                 d_v[i] = __float2half(v);
 
                 float m_hat = m / (1.0f - beta1_t);
                 float v_hat = v / (1.0f - beta2_t);
+                if (!isfinite(m_hat) || !isfinite(v_hat) || v_hat < 0.0f)
+                {
+                    d_grad[i] = __float2half(0.0f);
+                    continue;
+                }
 
                 float param_val = __half2float(d_param[i]);
                 param_val -= lr * m_hat / (sqrtf(v_hat) + epsilon);
+                if (!isfinite(param_val))
+                {
+                    d_m[i] = __float2half(0.0f);
+                    d_v[i] = __float2half(0.0f);
+                    d_grad[i] = __float2half(0.0f);
+                    continue;
+                }
+
                 d_param[i] = __float2half(param_val);
                 d_grad[i] = __float2half(0.0f);
             }
