@@ -343,6 +343,68 @@ public unsafe partial class Program
         MaxLR = 0.014f
     };
 
+    public static readonly NetworkConfig ConfigV23 = new()
+    {
+        Name = "V23",
+        CudaSource = CudaSourceV23,
+        IsHalf = true,
+        IsV7Based = true,
+        BatchSize = 128,
+        Conv1FilterCount = 16,
+        Conv1FilterSize = 5,
+        Conv2FilterCount = 16,
+        Conv2FilterSize = 5,
+        Pool2OutSize = 4,
+        HasFC1 = true,
+        FC1Outputs = 128,
+        FC1Inputs = 256,
+        BatchesPerEpoch = 400,
+        TotalSteps = 155,
+        MaxLR = 0.014f
+    };
+
+    public static readonly NetworkConfig ConfigFP4 = new()
+    {
+        Name = "FP4",
+        CudaSource = CudaSourceFP4,
+        UseCustomCudaSource = true,
+        IsHalf = true,
+        IsV7Based = true,
+        BatchSize = 128,
+        Conv1FilterCount = 16,
+        Conv1FilterSize = 5,
+        Conv2FilterCount = 16,
+        Conv2FilterSize = 5,
+        Pool2OutSize = 4,
+        HasFC1 = true,
+        FC1Outputs = 128,
+        FC1Inputs = 256,
+        BatchesPerEpoch = 400,
+        TotalSteps = 155,
+        MaxLR = 0.014f
+    };
+
+    public static readonly NetworkConfig ConfigCELM = new()
+    {
+        Name = "CELM",
+        CudaSource = CudaSourceCELM,
+        UseCustomCudaSource = true,
+        IsHalf = true,
+        IsV7Based = true,
+        BatchSize = 128,
+        Conv1FilterCount = 16,
+        Conv1FilterSize = 5,
+        Conv2FilterCount = 16,
+        Conv2FilterSize = 5,
+        Pool2OutSize = 4,
+        HasFC1 = true,
+        FC1Outputs = 4000,
+        FC1Inputs = 256,
+        BatchesPerEpoch = 400,
+        TotalSteps = 80,
+        MaxLR = 0.5f
+    };
+
     public static readonly IReadOnlyList<NetworkConfig> OrderedNetworkConfigs =
     [
         ConfigV1,
@@ -361,7 +423,10 @@ public unsafe partial class Program
         ConfigV14,
         ConfigV20,
         ConfigV21,
-        ConfigV22
+        ConfigV22,
+        ConfigV23,
+        ConfigFP4,
+        ConfigCELM
     ];
 
     public static readonly IReadOnlyDictionary<string, NetworkConfig> NetworkConfigs = CreateNetworkConfigs();
