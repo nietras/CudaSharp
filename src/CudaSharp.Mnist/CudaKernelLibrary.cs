@@ -1,4 +1,4 @@
-﻿namespace CudaSharp.Mnist;
+namespace CudaSharp.Mnist;
 
 public static class CudaKernelLibrary
 {
@@ -59,49 +59,62 @@ public static class CudaKernelLibrary
     public static readonly string ActivationGelu =
         """
 
+        __device__ inline __half htanh(__half x)
+        {
+            __half clamped_x = __hmin(__hmax(x, __float2half(-5.5f)), __float2half(5.5f));
+            __half two_x = __hmul(__float2half(2.0f), clamped_x);
+            __half exp_two_x = hexp(two_x);
+            return __hdiv(__hsub(exp_two_x, __float2half(1.0f)), __hadd(exp_two_x, __float2half(1.0f)));
+        }
+
         __device__ inline __half gelu(__half x)
         {
-            float val = __half2float(x);
-            float c = 0.79788456f;
-            float tanh_arg = c * (val + 0.044715f * val * val * val);
-            float g = 0.5f * val * (1.0f + tanhf(tanh_arg));
-            return __float2half(g);
+            __half x3 = __hmul(__hmul(x, x), x);
+            __half inner = __hadd(x, __hmul(__float2half(0.044715f), x3));
+            __half tanh_arg = __hmul(__float2half(0.79788456f), inner);
+            __half t = htanh(tanh_arg);
+            return __hmul(__float2half(0.5f), __hmul(x, __hadd(__float2half(1.0f), t)));
         }
 
         __device__ inline __half d_gelu(__half x, __half dy)
         {
-            float val = __half2float(x);
-            if (val < -1000.0f) return __float2half(0.0f);
-            float g_dy = __half2float(dy);
-            float c = 0.79788456f;
-            float tanh_arg = c * (val + 0.044715f * val * val * val);
-            float t = tanhf(tanh_arg);
-            float sech2 = 1.0f - t * t;
-            float dtanh = c * (1.0f + 3.0f * 0.044715f * val * val) * sech2;
-            float derivative = 0.5f * (1.0f + t) + 0.5f * val * dtanh;
-            return __float2half(g_dy * derivative);
+            __half x2 = __hmul(x, x);
+            __half x3 = __hmul(x2, x);
+            __half inner = __hadd(x, __hmul(__float2half(0.044715f), x3));
+            __half tanh_arg = __hmul(__float2half(0.79788456f), inner);
+            __half t = htanh(tanh_arg);
+            __half t2 = __hmul(t, t);
+            __half sech2 = __hsub(__float2half(1.0f), t2);
+            __half dtanh_coef = __hmul(__float2half(0.79788456f), __hadd(__float2half(1.0f), __hmul(__float2half(0.134145f), x2)));
+            __half dtanh = __hmul(dtanh_coef, sech2);
+            __half term1 = __hmul(__float2half(0.5f), __hadd(__float2half(1.0f), t));
+            __half term2 = __hmul(__hmul(__float2half(0.5f), x), dtanh);
+            __half derivative = __hadd(term1, term2);
+            return __hmul(dy, derivative);
         }
         """;
+
 
     public static readonly string ActivationSilu =
         """
 
         __device__ inline __half silu(__half x)
         {
-            float val = __half2float(x);
-            float sigmoid = 1.0f / (1.0f + expf(-val));
-            return __float2half(val * sigmoid);
+            __half clamped_x = __hmin(__hmax(x, __float2half(-10.0f)), __float2half(10.0f));
+            __half exp_neg_x = hexp(__hneg(clamped_x));
+            __half sigmoid = __hdiv(__float2half(1.0f), __hadd(__float2half(1.0f), exp_neg_x));
+            return __hmul(x, sigmoid);
         }
 
         __device__ inline __half d_silu(__half x, __half dy)
         {
-            float val = __half2float(x);
-            if (val < -1000.0f) return __float2half(0.0f);
-            float g_dy = __half2float(dy);
-            float sigmoid = 1.0f / (1.0f + expf(-val));
-            float silu_val = val * sigmoid;
-            float derivative = sigmoid + silu_val * (1.0f - sigmoid);
-            return __float2half(g_dy * derivative);
+            __half clamped_x = __hmin(__hmax(x, __float2half(-10.0f)), __float2half(10.0f));
+            __half exp_neg_x = hexp(__hneg(clamped_x));
+            __half sigmoid = __hdiv(__float2half(1.0f), __hadd(__float2half(1.0f), exp_neg_x));
+            __half silu_val = __hmul(x, sigmoid);
+            __half one_minus_sig = __hsub(__float2half(1.0f), sigmoid);
+            __half derivative = __hadd(sigmoid, __hmul(silu_val, one_minus_sig));
+            return __hmul(dy, derivative);
         }
         """;
 
@@ -205,7 +218,10 @@ public static class CudaKernelLibrary
                             {
                                 pixel = (row_bits >> img_x) & 1u;
                             }
-                            sum += __half((float)pixel) * s_filter[fy][fx];
+                            if (pixel != 0)
+                            {
+                                sum = __hadd(sum, s_filter[fy][fx]);
+                            }
                         }
                     }
 
@@ -670,12 +686,12 @@ public static class CudaKernelLibrary
                 }
             }
 
-            __shared__ float s_weight_grads[128][10];
+            __shared__ __half s_weight_grads[128][10];
 
             #pragma unroll
             for (int c = 0; c < 10; c++)
             {
-                s_weight_grads[tid][c] = 0.0f;
+                s_weight_grads[tid][c] = __float2half(0.0f);
             }
             __syncthreads();
 
@@ -694,23 +710,18 @@ public static class CudaKernelLibrary
                 float sum_exp = 0.0f;
                 for (int c = 0; c < 10; c++)
                 {
-                    sum_exp += expf(__half2float(
-                        d_fc2_outputs[b * 10 + c]) - max_logit);
+                    sum_exp += expf(__half2float(s_fc2_outputs[b][c]) - max_logit);
                 }
 
                 int correct_label = d_labels[batchOffset + b];
-                float x_val = __half2float(
-                    d_fc1_outputs[b * FC2_INPUTS + input_idx]);
+                __half x_val = d_fc1_outputs[b * FC2_INPUTS + input_idx];
 
                 #pragma unroll
                 for (int c = 0; c < 10; c++)
                 {
-                    float prob = expf(__half2float(
-                        d_fc2_outputs[b * 10 + c]) - max_logit)
-                        / sum_exp;
-                    float g_val = prob
-                        - (c == correct_label ? 1.0f : 0.0f);
-                    s_weight_grads[tid][c] += g_val * x_val;
+                    float prob = expf(__half2float(s_fc2_outputs[b][c]) - max_logit) / sum_exp;
+                    __half g_val = __float2half(prob - (c == correct_label ? 1.0f : 0.0f));
+                    s_weight_grads[tid][c] = __hfma(g_val, x_val, s_weight_grads[tid][c]);
                 }
             }
             __syncthreads();
@@ -722,8 +733,7 @@ public static class CudaKernelLibrary
                     #pragma unroll
                     for (int c = 0; c < 10; c++)
                     {
-                        s_weight_grads[tid][c] +=
-                            s_weight_grads[tid + stride][c];
+                        s_weight_grads[tid][c] = __hadd(s_weight_grads[tid][c], s_weight_grads[tid + stride][c]);
                     }
                 }
                 __syncthreads();
@@ -734,8 +744,7 @@ public static class CudaKernelLibrary
                 #pragma unroll
                 for (int c = 0; c < 10; c++)
                 {
-                    d_fc2_weights_grad[input_idx * 10 + c] =
-                        __float2half(s_weight_grads[0][c]);
+                    d_fc2_weights_grad[input_idx * 10 + c] = s_weight_grads[0][c];
                 }
             }
         }
@@ -812,12 +821,12 @@ public static class CudaKernelLibrary
             const int input_idx = blockIdx.x;
             const int tid = threadIdx.x;
 
-            __shared__ float s_accum[64][FC1_OUTPUTS];
+            __shared__ __half s_accum[64][FC1_OUTPUTS];
 
             #pragma unroll
             for (int c = 0; c < FC1_OUTPUTS; c++)
             {
-                s_accum[tid][c] = 0.0f;
+                s_accum[tid][c] = __float2half(0.0f);
             }
             __syncthreads();
 
@@ -825,13 +834,11 @@ public static class CudaKernelLibrary
             for (int i = 0; i < (BATCH_SIZE / 64); i++)
             {
                 int b = i * 64 + tid;
-                float x_val = __half2float(
-                    d_fc1_inputs[b * FC1_INPUTS + input_idx]);
+                __half x_val = d_fc1_inputs[b * FC1_INPUTS + input_idx];
                 #pragma unroll
                 for (int c = 0; c < FC1_OUTPUTS; c++)
                 {
-                    s_accum[tid][c] += x_val * __half2float(
-                        d_fc1_out_grad[b * FC1_OUTPUTS + c]);
+                    s_accum[tid][c] = __hfma(x_val, d_fc1_out_grad[b * FC1_OUTPUTS + c], s_accum[tid][c]);
                 }
             }
             __syncthreads();
@@ -843,8 +850,7 @@ public static class CudaKernelLibrary
                     #pragma unroll
                     for (int c = 0; c < FC1_OUTPUTS; c++)
                     {
-                        s_accum[tid][c] +=
-                            s_accum[tid + stride][c];
+                        s_accum[tid][c] = __hadd(s_accum[tid][c], s_accum[tid + stride][c]);
                     }
                 }
                 __syncthreads();
@@ -855,8 +861,7 @@ public static class CudaKernelLibrary
                 #pragma unroll
                 for (int c = 0; c < FC1_OUTPUTS; c++)
                 {
-                    d_fc1_weights_grad[input_idx * FC1_OUTPUTS + c] =
-                        __float2half(s_accum[0][c]);
+                    d_fc1_weights_grad[input_idx * FC1_OUTPUTS + c] = s_accum[0][c];
                 }
             }
         }
@@ -944,7 +949,7 @@ public static class CudaKernelLibrary
 
                 #if IS_GAP == 1
                 __half out_grad = d_conv2_out_grad[b * CONV2_FILTER_COUNT + filter_idx];
-                out_grad = __float2half(__half2float(out_grad) / 64.0f);
+                out_grad = __hmul(out_grad, __float2half(0.015625f));
                 
                 __half my_val = zero;
                 if (tid < 64)
@@ -1063,7 +1068,7 @@ public static class CudaKernelLibrary
                             }
                         }
                     }
-                    if (__half2float(sum_grad) != 0.0f)
+                    if (__hne(sum_grad, zero))
                     {
                         atomicAdd(&d_conv1_out_grad[
                             b * conv1_out_per_sample + i], sum_grad);
@@ -1199,8 +1204,10 @@ public static class CudaKernelLibrary
                             {
                                 pixel = (row_bits >> img_x) & 1u;
                             }
-                            w_grad += __half((float)pixel)
-                                * s_grad[y][x];
+                            if (pixel != 0)
+                            {
+                                w_grad = __hadd(w_grad, s_grad[y][x]);
+                            }
                         }
                     }
                     s_filter_grad[tid] += w_grad;
@@ -1254,21 +1261,21 @@ public static class CudaKernelLibrary
             #ifndef MAX_LR
             #define MAX_LR 0.006f
             #endif
-            float max_lr = MAX_LR;
-            float beta1 = 0.7f;
-            float beta2 = 0.9f;
-            float epsilon = 1e-4f;
+            __half max_lr = __float2half(MAX_LR);
+            __half beta1 = __float2half(0.7f);
+            __half beta2 = __float2half(0.9f);
+            __half epsilon = __float2half(1e-4f);
 
             int total_steps = TOTAL_STEPS;
 
-            __shared__ float s_lr;
-            __shared__ float s_beta1_t;
-            __shared__ float s_beta2_t;
+            __shared__ __half s_lr;
+            __shared__ __half s_beta1_t;
+            __shared__ __half s_beta2_t;
 
             if (threadIdx.x == 0)
             {
-                s_beta1_t = powf(beta1, (float)step_val);
-                s_beta2_t = powf(beta2, (float)step_val);
+                float f_beta1_t = powf(0.7f, (float)step_val);
+                float f_beta2_t = powf(0.9f, (float)step_val);
 
                 float pct = (float)step_val / total_steps;
                 float warmup_pct = 0.20f;
@@ -1276,53 +1283,143 @@ public static class CudaKernelLibrary
                 if (pct < warmup_pct)
                 {
                     float alpha = pct / warmup_pct;
-                    local_lr = max_lr * (0.1f + 0.9f * alpha);
+                    local_lr = __half2float(max_lr) * (0.1f + 0.9f * alpha);
                 }
                 else
                 {
-                    float alpha =
-                        (pct - warmup_pct) / (1.0f - warmup_pct);
+                    float alpha = (pct - warmup_pct) / (1.0f - warmup_pct);
                     float cos_val = cosf(3.14159265f * alpha);
-                    local_lr = max_lr * 0.5f * (1.0f + cos_val);
+                    local_lr = __half2float(max_lr) * 0.5f * (1.0f + cos_val);
                 }
-                s_lr = local_lr;
+                s_lr = __float2half(local_lr);
+                s_beta1_t = __float2half(f_beta1_t);
+                s_beta2_t = __float2half(f_beta2_t);
             }
             __syncthreads();
 
-            float lr = s_lr;
-            float beta1_t = s_beta1_t;
-            float beta2_t = s_beta2_t;
+            __half lr = s_lr;
+            __half beta1_t = s_beta1_t;
+            __half beta2_t = s_beta2_t;
+
+            __half h_one_minus_beta1 = __float2half(0.3f);
+            __half h_one_minus_beta2 = __float2half(0.1f);
+            __half h_one_minus_beta1_t = __hsub(__float2half(1.0f), beta1_t);
+            __half h_one_minus_beta2_t = __hsub(__float2half(1.0f), beta2_t);
+            __half h_batch_size = __float2half((float)BATCH_SIZE);
 
             for (int i = tid; i < num_elements; i += stride)
             {
-                float g = __half2float(d_grad[i]) / BATCH_SIZE;
-                float m = beta1 * __half2float(d_m[i])
-                    + (1.0f - beta1) * g;
-                float v = beta2 * __half2float(d_v[i])
-                    + (1.0f - beta2) * g * g;
+                __half g = __hdiv(d_grad[i], h_batch_size);
+                __half m = __hadd(__hmul(beta1, d_m[i]), __hmul(h_one_minus_beta1, g));
+                __half v = __hadd(__hmul(beta2, d_v[i]), __hmul(h_one_minus_beta2, __hmul(g, g)));
 
-                d_m[i] = __float2half(m);
-                d_v[i] = __float2half(v);
+                d_m[i] = m;
+                d_v[i] = v;
 
-                float m_hat = m / (1.0f - beta1_t);
-                float v_hat = v / (1.0f - beta2_t);
+                __half m_hat = __hdiv(m, h_one_minus_beta1_t);
+                __half v_hat = __hdiv(v, h_one_minus_beta2_t);
 
-                float param_val = __half2float(d_param[i]);
+                __half param_val = d_param[i];
                 
                 #ifndef WEIGHT_DECAY
                 #define WEIGHT_DECAY 0.0f
                 #endif
                 
-                param_val -= lr * WEIGHT_DECAY * param_val;
-                param_val -= lr * m_hat / (sqrtf(v_hat) + epsilon);
+                if (WEIGHT_DECAY > 0.0f)
+                {
+                    __half wd = __float2half(WEIGHT_DECAY);
+                    param_val = __hsub(param_val, __hmul(__hmul(lr, wd), param_val));
+                }
                 
-                d_param[i] = __float2half(param_val);
+                __half denom = __hadd(hsqrt(v_hat), epsilon);
+                param_val = __hsub(param_val, __hdiv(__hmul(lr, m_hat), denom));
+                
+                d_param[i] = param_val;
                 d_grad[i] = __float2half(0.0f);
             }
 
             if (threadIdx.x == 0 && blockIdx.x == 0)
             {
                 *d_step = step_val;
+            }
+        }
+        """;
+
+    public static readonly string QuantizeAllWeights =
+        """
+
+        __device__ __forceinline__ __half quantize_to_fp4_val(__half h_val, __half scale)
+        {
+            __half val = __hmul(h_val, scale);
+            __half abs_val = __habs(val);
+            __half quant_val;
+            __half h_2_5 = __float2half(2.5f);
+            __half h_2_0 = __float2half(2.0f);
+            __half h_0_5 = __float2half(0.5f);
+            __half h_5_0 = __float2half(5.0f);
+            __half h_3_5 = __float2half(3.5f);
+            __half h_3_0 = __float2half(3.0f);
+            __half h_4_0 = __float2half(4.0f);
+            __half h_6_0 = __float2half(6.0f);
+
+            if (__hlt(abs_val, h_2_5))
+            {
+                quant_val = __hmul(hrint(__hmul(abs_val, h_2_0)), h_0_5);
+            }
+            else if (__hlt(abs_val, h_5_0))
+            {
+                quant_val = __hlt(abs_val, h_3_5) ? h_3_0 : h_4_0;
+            }
+            else
+            {
+                quant_val = h_6_0;
+            }
+            __half sign = __hlt(h_val, __float2half(0.0f)) ? __float2half(-1.0f) : __float2half(1.0f);
+            return __hdiv(__hmul(sign, quant_val), scale);
+        }
+
+        extern "C" __global__ void quantize_all_weights(
+            const __half* __restrict__ d_params,
+            __half* __restrict__ d_quant_params)
+        {
+            int tid = blockIdx.x * blockDim.x + threadIdx.x;
+            int stride = blockDim.x * gridDim.x;
+
+            for (int i = tid; i < 29066; i += stride)
+            {
+                __half h_val = d_params[i];
+                if (i < 200) // conv1 weights
+                {
+                    d_quant_params[i] = quantize_to_fp4_val(h_val, __float2half(8.0f));
+                }
+                else if (i < 208) // conv1 biases
+                {
+                    d_quant_params[i] = h_val;
+                }
+                else if (i < 3408) // conv2 weights
+                {
+                    d_quant_params[i] = quantize_to_fp4_val(h_val, __float2half(32.0f));
+                }
+                else if (i < 3424) // conv2 biases
+                {
+                    d_quant_params[i] = h_val;
+                }
+                else if (i < 28000) // fc1 weights
+                {
+                    d_quant_params[i] = quantize_to_fp4_val(h_val, __float2half(256.0f));
+                }
+                else if (i < 28096) // fc1 biases
+                {
+                    d_quant_params[i] = h_val;
+                }
+                else if (i < 29056) // fc2 weights
+                {
+                    d_quant_params[i] = quantize_to_fp4_val(h_val, __float2half(16.0f));
+                }
+                else // fc2 biases
+                {
+                    d_quant_params[i] = h_val;
+                }
             }
         }
         """;
@@ -1394,6 +1491,10 @@ public static class CudaKernelLibrary
         sb.Append(Conv2Backward);
         sb.Append(Conv1Backward);
         sb.Append(AdamUpdate);
+        if (config.Name == "FP4")
+        {
+            sb.Append(QuantizeAllWeights);
+        }
 
         return sb.ToString();
     }

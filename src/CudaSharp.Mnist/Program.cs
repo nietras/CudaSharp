@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
@@ -236,6 +236,11 @@ public unsafe partial class Program
             cuModuleGetFunction(out var f_conv1_bwd, module, "conv1_backward").Ok();
 
             cuModuleGetFunction(out var f_adam, module, "adam_update").Ok();
+            CUfunction f_quantize_all = default;
+            if (activeConfig.Name == "FP4")
+            {
+                cuModuleGetFunction(out f_quantize_all, module, "quantize_all_weights").Ok();
+            }
 
             CUfunction f_fc2_bwd_weights = default;
             if (activeConfig.IsV7Based)
@@ -334,6 +339,10 @@ public unsafe partial class Program
             AddSize(paramBytes);
             AddSize(paramBytes);
             AddSize(paramBytes);
+            if (activeConfig.Name == "FP4")
+            {
+                AddSize(paramBytes);
+            }
             AddSize(conv1OutSize * (nuint)elementSize);
             AddSize(conv1UnpooledSize * (nuint)elementSize);
             AddSize(conv2OutSize * (nuint)elementSize);
@@ -373,6 +382,11 @@ public unsafe partial class Program
             var d_allParamGrads = arena.Rent(paramBytes);
             var d_allParamM = arena.Rent(paramBytes);
             var d_allParamV = arena.Rent(paramBytes);
+            CUdeviceptr d_quantParams = default;
+            if (activeConfig.Name == "FP4")
+            {
+                d_quantParams = arena.Rent(paramBytes);
+            }
 
             cuMemsetD8(d_allParamGrads, 0, paramBytes).Ok();
             cuMemsetD8(d_allParamM, 0, paramBytes).Ok();
@@ -382,12 +396,14 @@ public unsafe partial class Program
             var conv2Param = activeConfig.GetParam("conv2");
             var fc2Param = activeConfig.GetParam("fc2");
 
-            CUdeviceptr d_conv1Filters = SliceDevicePtr(d_allParams, conv1Param.WeightOffset, elementSize);
-            CUdeviceptr d_conv1Biases = SliceDevicePtr(d_allParams, conv1Param.BiasOffset, elementSize);
-            CUdeviceptr d_conv2Filters = SliceDevicePtr(d_allParams, conv2Param.WeightOffset, elementSize);
-            CUdeviceptr d_conv2Biases = SliceDevicePtr(d_allParams, conv2Param.BiasOffset, elementSize);
-            CUdeviceptr d_fc2Weights = SliceDevicePtr(d_allParams, fc2Param.WeightOffset, elementSize);
-            CUdeviceptr d_fc2Biases = SliceDevicePtr(d_allParams, fc2Param.BiasOffset, elementSize);
+            var sliceParamsSrc = activeConfig.Name == "FP4" ? d_quantParams : d_allParams;
+
+            CUdeviceptr d_conv1Filters = SliceDevicePtr(sliceParamsSrc, conv1Param.WeightOffset, elementSize);
+            CUdeviceptr d_conv1Biases = SliceDevicePtr(sliceParamsSrc, conv1Param.BiasOffset, elementSize);
+            CUdeviceptr d_conv2Filters = SliceDevicePtr(sliceParamsSrc, conv2Param.WeightOffset, elementSize);
+            CUdeviceptr d_conv2Biases = SliceDevicePtr(sliceParamsSrc, conv2Param.BiasOffset, elementSize);
+            CUdeviceptr d_fc2Weights = SliceDevicePtr(sliceParamsSrc, fc2Param.WeightOffset, elementSize);
+            CUdeviceptr d_fc2Biases = SliceDevicePtr(sliceParamsSrc, fc2Param.BiasOffset, elementSize);
 
             CUdeviceptr d_conv1FiltersGrad = SliceDevicePtr(d_allParamGrads, conv1Param.WeightOffset, elementSize);
             CUdeviceptr d_conv1BiasesGrad = SliceDevicePtr(d_allParamGrads, conv1Param.BiasOffset, elementSize);
@@ -402,8 +418,8 @@ public unsafe partial class Program
             if (activeConfig.HasFC1)
             {
                 var fc1Param = activeConfig.GetParam("fc1");
-                d_fc1Weights = SliceDevicePtr(d_allParams, fc1Param.WeightOffset, elementSize);
-                d_fc1Biases = SliceDevicePtr(d_allParams, fc1Param.BiasOffset, elementSize);
+                d_fc1Weights = SliceDevicePtr(sliceParamsSrc, fc1Param.WeightOffset, elementSize);
+                d_fc1Biases = SliceDevicePtr(sliceParamsSrc, fc1Param.BiasOffset, elementSize);
                 d_fc1WeightsGrad = SliceDevicePtr(d_allParamGrads, fc1Param.WeightOffset, elementSize);
                 d_fc1BiasesGrad = SliceDevicePtr(d_allParamGrads, fc1Param.BiasOffset, elementSize);
             }
@@ -454,7 +470,32 @@ public unsafe partial class Program
             var fc2BlockSize = activeConfig.Name == "V5" ? 128u : 256u;
             var fc1Chunks = 8;
 
-            InitializeModelParameters(activeConfig, d_conv1Filters, d_conv1Biases, d_conv2Filters, d_conv2Biases, d_fc1Weights, d_fc1Biases, d_fc2Weights, d_fc2Biases, 42);
+            if (activeConfig.Name == "FP4")
+            {
+                CUdeviceptr d_conv1Filters_init = SliceDevicePtr(d_allParams, conv1Param.WeightOffset, elementSize);
+                CUdeviceptr d_conv1Biases_init = SliceDevicePtr(d_allParams, conv1Param.BiasOffset, elementSize);
+                CUdeviceptr d_conv2Filters_init = SliceDevicePtr(d_allParams, conv2Param.WeightOffset, elementSize);
+                CUdeviceptr d_conv2Biases_init = SliceDevicePtr(d_allParams, conv2Param.BiasOffset, elementSize);
+                CUdeviceptr d_fc2Weights_init = SliceDevicePtr(d_allParams, fc2Param.WeightOffset, elementSize);
+                CUdeviceptr d_fc2Biases_init = SliceDevicePtr(d_allParams, fc2Param.BiasOffset, elementSize);
+                CUdeviceptr d_fc1Weights_init = default, d_fc1Biases_init = default;
+                if (activeConfig.HasFC1)
+                {
+                    var fc1Param = activeConfig.GetParam("fc1");
+                    d_fc1Weights_init = SliceDevicePtr(d_allParams, fc1Param.WeightOffset, elementSize);
+                    d_fc1Biases_init = SliceDevicePtr(d_allParams, fc1Param.BiasOffset, elementSize);
+                }
+                InitializeModelParameters(activeConfig, d_conv1Filters_init, d_conv1Biases_init, d_conv2Filters_init, d_conv2Biases_init, d_fc1Weights_init, d_fc1Biases_init, d_fc2Weights_init, d_fc2Biases_init, 42);
+
+                // Run initial quantization
+                var quantizeParamsInit = new void*[] { &d_allParams, &d_quantParams };
+                cuLaunchKernel(f_quantize_all, (uint)((totalParamElements + 255) / 256), 1u, 1u, 256u, 1u, 1u, stream, quantizeParamsInit, null).Ok();
+                cuStreamSynchronize(stream).Ok();
+            }
+            else
+            {
+                InitializeModelParameters(activeConfig, d_conv1Filters, d_conv1Biases, d_conv2Filters, d_conv2Biases, d_fc1Weights, d_fc1Biases, d_fc2Weights, d_fc2Biases, 42);
+            }
 
             Console.WriteLine("[GRAPH] Capturing training loop into a single optimized CUDA Graph...");
 
@@ -695,6 +736,15 @@ public unsafe partial class Program
                 lastNode = AddKernelNode(epochGraph, currentDependencies,
                     f_adam, (uint)((totalParamElements + 255) / 256), 1u, 1u,
                     256u, 1u, 1u, adamParams);
+
+                if (activeConfig.Name == "FP4")
+                {
+                    currentDependencies[0] = lastNode;
+                    var quantizeAllParams = new void*[] { &d_allParams, &d_quantParams };
+                    lastNode = AddKernelNode(epochGraph, currentDependencies,
+                        f_quantize_all, (uint)((totalParamElements + 255) / 256), 1u, 1u,
+                        256u, 1u, 1u, quantizeAllParams);
+                }
             }
 
             Console.WriteLine("[GRAPH] Instantiating executable graph...");

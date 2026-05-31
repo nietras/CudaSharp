@@ -5,8 +5,6 @@ public static partial class Program
     public static string CudaSourceFP4 =>
         """
         #include <cuda_fp16.h>
-        #include <mma.h>
-        using namespace nvcuda;
 
         typedef unsigned int uint32_t;
 
@@ -26,15 +24,26 @@ public static partial class Program
         #define BATCHES_PER_EPOCH 400
         #endif
         #ifndef TOTAL_STEPS
-        #define TOTAL_STEPS 155
+        #define TOTAL_STEPS 60
         #endif
 
-        // EXPERT BIT MAGIC: Convert 1 bit directly to __half without any float operations.
-        // 0x3C00 is 1.0 in FP16.
-        __device__ __forceinline__ __half bit_to_half(uint32_t bit)
+        // NVFP4 (4-bit E2M1) quantization: 1 sign bit, 2 exponent bits, 1 mantissa bit
+        // Representable values: 0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0 (and negative equivalents)
+        __device__ __forceinline__ __half quantize_to_fp4(__half h_val)
         {
-            unsigned short h_val = bit * 0x3C00; 
-            return __ushort_as_half(h_val);
+            float val = __half2float(h_val);
+            float sign = (val < 0.0f) ? -1.0f : 1.0f;
+            float abs_val = fabsf(val);
+            float quant_val = 0.0f;
+            if (abs_val < 0.25f) quant_val = 0.0f;
+            else if (abs_val < 0.75f) quant_val = 0.5f;
+            else if (abs_val < 1.25f) quant_val = 1.0f;
+            else if (abs_val < 1.75f) quant_val = 1.5f;
+            else if (abs_val < 2.5f) quant_val = 2.0f;
+            else if (abs_val < 3.5f) quant_val = 3.0f;
+            else if (abs_val < 5.0f) quant_val = 4.0f;
+            else quant_val = 6.0f;
+            return __float2half(sign * quant_val);
         }
 
         extern "C" __global__ void clear_gradient(__half* __restrict__ d_grad, int num_elements)
@@ -79,109 +88,84 @@ public static partial class Program
             const int* __restrict__ d_step,
             int is_training)
         {
-            if (blockIdx.y > 0) return;
-            int tid = threadIdx.y * blockDim.x + threadIdx.x;
-            if (tid >= 128) return;
-
             const int batch_idx = blockIdx.x;
-            const int warp_id = tid / 32;
-            const int lane_id = tid % 32;
+            const int filter_idx = blockIdx.y;
+            const int out_x = threadIdx.x;
+            const int out_y = threadIdx.y;
 
-            __shared__ __half s_A[16][32];
-            __shared__ __half s_B[32][576];
-            __shared__ uint32_t s_image[28];
+            if (out_x >= 12 || out_y >= 12) return;
 
             int batchOffset = ((*d_step) % BATCHES_PER_EPOCH) * BATCH_SIZE;
 
-            for (int i = tid; i < 400; i += 128) {
-                int r = i / 25;
-                int c = i % 25;
-                s_A[r][c] = d_filters[i];
+            __shared__ __half s_filter[5][5];
+            int tid_flat = threadIdx.y * 12 + threadIdx.x;
+            if (tid_flat < 25)
+            {
+                s_filter[tid_flat / 5][tid_flat % 5] = quantize_to_fp4(d_filters[filter_idx * 25 + tid_flat]);
             }
-            for (int i = tid; i < 512; i += 128) {
-                int r = i / 32;
-                int c = i % 32;
-                if (c >= 25) s_A[r][c] = __float2half(0.0f);
+            
+            __shared__ uint32_t s_image[28];
+            if (tid_flat < 28)
+            {
+                s_image[tid_flat] = d_inputs[(batchOffset + batch_idx) * 28 + tid_flat];
             }
-            for (int i = tid; i < 28; i += 128) {
-                s_image[i] = d_inputs[(batchOffset + batch_idx) * 28 + i];
-            }
+            __syncthreads();
+
+            const int conv_x_base = out_x * 2;
+            const int conv_y_base = out_y * 2;
 
             int seed = batch_idx + *d_step;
             int dx = (is_training == 1) ? ((seed * 1103515245 + 12345) % 3 - 1) : 0;
             int dy = (is_training == 1) ? (((seed * 1103515245 + 12345) / 3) % 3 - 1) : 0;
 
-            __syncthreads();
+            __half max_val = __float2half(-1e9f);
 
-            for (int i = tid; i < 18432; i += 128) {
-                int k = i / 576;
-                int n = i % 576;
+            #pragma unroll
+            for (int py = 0; py < 2; py++)
+            {
+                #pragma unroll
+                for (int px = 0; px < 2; px++)
+                {
+                    const int cx = conv_x_base + px;
+                    const int cy = conv_y_base + py;
 
-                if (k >= 25) {
-                    s_B[k][n] = __float2half(0.0f);
-                } else {
-                    int fy = k / 5;
-                    int fx = k % 5;
-                    int out_y = n / 24;
-                    int out_x = n % 24;
-
-                    int in_y = out_y + fy + dy;
-                    int in_x = out_x + fx + dx;
-
-                    __half val = __float2half(0.0f);
-                    if (in_y >= 0 && in_y < 28 && in_x >= 0 && in_x < 28) {
-                        uint32_t pixel = (s_image[in_y] >> in_x) & 1u;
-                        val = __float2half((float)pixel);
-                    }
-                    s_B[k][n] = val;
-                }
-            }
-            __syncthreads();
-
-            wmma::fragment<wmma::matrix_a, 16, 16, 16, __half, wmma::row_major> a_frag_0;
-            wmma::fragment<wmma::matrix_a, 16, 16, 16, __half, wmma::row_major> a_frag_1;
-            wmma::load_matrix_sync(a_frag_0, &s_A[0][0], 32);
-            wmma::load_matrix_sync(a_frag_1, &s_A[0][16], 32);
-
-            __shared__ float s_C_float[16][576];
-
-            for (int t = warp_id; t < 36; t += 4) {
-                int n_offset = t * 16;
-                wmma::fragment<wmma::matrix_b, 16, 16, 16, __half, wmma::row_major> b_frag_0;
-                wmma::fragment<wmma::matrix_b, 16, 16, 16, __half, wmma::row_major> b_frag_1;
-                wmma::fragment<wmma::accumulator, 16, 16, 16, float> c_frag;
-            
-            wmma::fill_fragment(c_frag, 0.0f);
-
-            wmma::load_matrix_sync(b_frag_0, &s_B[0][n_offset], 576);
-            wmma::load_matrix_sync(b_frag_1, &s_B[16][n_offset], 576);
-
-            wmma::mma_sync(c_frag, a_frag_0, b_frag_0, c_frag);
-            wmma::mma_sync(c_frag, a_frag_1, b_frag_1, c_frag);
-
-            wmma::store_matrix_sync(&s_C_float[0][n_offset], c_frag, 576, wmma::mem_row_major);
-        }
-        __syncthreads();
-
-        for (int i = tid; i < 2304; i += 128) {
-            int c = i / 144;
-            int pool_spatial = i % 144;
-            int p_y = pool_spatial / 12;
-            int p_x = pool_spatial % 12;
-
-            __half max_v = __float2half(-1e9f);
-            for (int pdy = 0; pdy < 2; pdy++) {
-                for (int pdx = 0; pdx < 2; pdx++) {
-                    int n = (p_y * 2 + pdy) * 24 + (p_x * 2 + pdx);
-                    __half val = __float2half(s_C_float[c][n]) + d_biases[c];
-                    d_unpooled_vals[(batch_idx * 576 + n) * 16 + c] = val;
+                    __half sum = d_biases[filter_idx];
                     
-                    __half act = gelu(val);
-                    if (__hgt(act, max_v)) max_v = act;
+                    #pragma unroll
+                    for (int fy = 0; fy < 5; fy++)
+                    {
+                        int shift_y = cy + fy + dy;
+                        uint32_t row_bits = 0;
+                        if (shift_y >= 0 && shift_y < 28)
+                        {
+                            row_bits = s_image[shift_y];
+                        }
+                        #pragma unroll
+                        for (int fx = 0; fx < 5; fx++)
+                        {
+                            int img_x = cx + fx + dx;
+                            uint32_t pixel = 0;
+                            if (img_x >= 0 && img_x < 28)
+                            {
+                                pixel = (row_bits >> img_x) & 1u;
+                            }
+                            sum += __half((float)pixel) * s_filter[fy][fx];
+                        }
+                    }
+
+                    int unpooled_idx = (batch_idx * 2304 + cy * 24 + cx) * 16 + filter_idx;
+                    d_unpooled_vals[unpooled_idx] = sum;
+
+                    __half activated = gelu(sum);
+                    if (__hgt(activated, max_val))
+                    {
+                        max_val = activated;
+                    }
                 }
             }
-            d_outputs[batch_idx * 2304 + pool_spatial * 16 + c] = max_v;
-        }
+
+            const int out_idx = batch_idx * 2304 + (out_y * 12 + out_x) * 16 + filter_idx;
+            d_outputs[out_idx] = max_val;
         }
 
         extern "C" __global__ void conv2_forward(
@@ -191,83 +175,79 @@ public static partial class Program
             __half* __restrict__ d_outputs,
             __half* __restrict__ d_unpooled_vals)
         {
-            int tid = threadIdx.x;
-            if (tid >= 128) return;
-
             const int batch_idx = blockIdx.x;
-            const int warp_id = tid / 32;
-            const int lane_id = tid % 32;
+            const int tid = threadIdx.x;
 
-            __shared__ __half s_B[400][64];
-            __shared__ __half s_A[16][400];
+            __shared__ __half s_input[2304]; 
+            __shared__ __half s_filters[6400]; // 16 * 16 * 25 = 6400
 
-            for (int i = tid; i < 6400; i += 128) {
-                int r = i / 400;
-                int c = i % 400;
-                s_A[r][c] = d_filters[i];
+            for (int i = tid; i < 2304; i += 256)
+            {
+                s_input[i] = d_inputs[batch_idx * 2304 + i];
             }
 
-            for (int i = tid; i < 25600; i += 128) {
-                int k = i / 64;
-                int n = i % 64;
-
-                int in_c = k % 16;
-                int f_spatial = k / 16;
-                int fy = f_spatial / 5;
-                int fx = f_spatial % 5;
-
-                int out_y = n / 8;
-                int out_x = n % 8;
-
-                int in_y = out_y + fy;
-                int in_x = out_x + fx;
-
-                s_B[k][n] = d_inputs[batch_idx * 2304 + (in_y * 12 + in_x) * 16 + in_c];
+            for (int i = tid; i < 6400; i += 256)
+            {
+                s_filters[i] = quantize_to_fp4(d_filters[i]);
             }
-
             __syncthreads();
 
-            wmma::fragment<wmma::matrix_a, 16, 16, 16, __half, wmma::row_major> a_frag;
-            wmma::fragment<wmma::matrix_b, 16, 16, 16, __half, wmma::row_major> b_frag;
-            wmma::fragment<wmma::accumulator, 16, 16, 16, __half> c_frag;
-            wmma::fill_fragment(c_frag, __float2half(0.0f));
+            #pragma unroll
+            for (int out_idx = tid; out_idx < 256; out_idx += 256)
+            {
+                int filter_idx = out_idx / 16;
+                int spatial_idx = out_idx % 16;
+                int out_x = spatial_idx % 4;
+                int out_y = spatial_idx / 4;
 
-            int n_offset = warp_id * 16;
+                const int conv_x_base = out_x * 2;
+                const int conv_y_base = out_y * 2;
 
-            #pragma unroll 1
-            for (int k_offset = 0; k_offset < 400; k_offset += 16) {
-                wmma::load_matrix_sync(a_frag, &s_A[0][k_offset], 400);
-                wmma::load_matrix_sync(b_frag, &s_B[k_offset][n_offset], 64);
-                wmma::mma_sync(c_frag, a_frag, b_frag, c_frag);
-            }
+                __half max_val = __float2half(-1e9f);
 
-            __shared__ __half s_C[16][64];
-            wmma::store_matrix_sync(&s_C[0][n_offset], c_frag, 64, wmma::mem_row_major);
-            __syncthreads();
+                #pragma unroll
+                for (int py = 0; py < 2; py++)
+                {
+                    #pragma unroll
+                    for (int px = 0; px < 2; px++)
+                    {
+                        const int cx = conv_x_base + px;
+                        const int cy = conv_y_base + py;
 
-            if (tid < 256) {
-                int c = tid / 16;
-                int pool_spatial = tid % 16;
-                int p_y = pool_spatial / 4;
-                int p_x = pool_spatial % 4;
+                        __half sum = d_biases[filter_idx];
 
-                __half max_v = __float2half(-1e9f);
-                for (int dy = 0; dy < 2; dy++) {
-                    for (int dx = 0; dx < 2; dx++) {
-                        int n = (p_y * 2 + dy) * 8 + (p_x * 2 + dx);
-                        __half val = s_C[c][n] + d_biases[c];
-                        d_unpooled_vals[(batch_idx * 64 + n) * 16 + c] = val; 
-                        
-                        __half act = gelu(val);
-                        if (__hgt(act, max_v)) max_v = act;
+                        #pragma unroll
+                        for (int c = 0; c < 16; c++)
+                        {
+                            #pragma unroll
+                            for (int fy = 0; fy < 5; fy++)
+                            {
+                                #pragma unroll
+                                for (int fx = 0; fx < 5; fx++)
+                                {
+                                    int in_x = cx + fx;
+                                    int in_y = cy + fy;
+                                    sum += s_input[(in_y * 12 + in_x) * 16 + c] * s_filters[filter_idx * 400 + (fy * 5 + fx) * 16 + c];
+                                }
+                            }
+                        }
+
+                        int unpooled_idx = (batch_idx * 256 + cy * 8 + cx) * 16 + filter_idx;
+                        d_unpooled_vals[unpooled_idx] = sum;
+
+                        __half activated = gelu(sum);
+                        if (__hgt(activated, max_val))
+                        {
+                            max_val = activated;
+                        }
                     }
                 }
-                d_outputs[batch_idx * 256 + pool_spatial * 16 + c] = max_v;
+
+                const int out_idx_global = batch_idx * 256 + (out_y * 4 + out_x) * 16 + filter_idx;
+                d_outputs[out_idx_global] = max_val;
             }
         }
 
-        // TENSOR CORE WMMA FC1 Forward
-        // 256 -> 128
         extern "C" __global__ void fc1_forward(
             const __half* __restrict__ d_inputs,
             const __half* __restrict__ d_weights,
@@ -275,30 +255,21 @@ public static partial class Program
             __half* __restrict__ d_outputs,
             __half* __restrict__ d_unpooled_vals)
         {
-            const int batch_idx = blockIdx.x; // We use block for batch, so 1 block = 1 sample! Wait! 
-            // In CudaSharp config, fc1 gridX is BATCH_SIZE (128). blockX is 128.
-            // If blockIdx.x is batch_idx, then we are doing 1 sample per block.
-            // We shouldn't use WMMA if we only do 1 sample per block because M=1.
-            // Let's fallback to parallel vector dot product if we are locked to BatchSize blocks!
-            // Wait, I can just write the standard dot product but perfectly aligned.
+            const int batch_idx = blockIdx.x; 
             const int tid = threadIdx.x;
 
             __shared__ __half s_input[256];
             
-            // Cooperatively load the 256 inputs for this sample
-            if (tid < 256) {
-                s_input[tid] = d_inputs[batch_idx * 256 + tid];
-            }
+            s_input[tid] = d_inputs[batch_idx * 256 + tid];
             __syncthreads();
 
-            // Each thread computes 1 output feature
             if (tid < 128)
             {
                 __half sum = d_biases[tid];
                 #pragma unroll 4
                 for (int i = 0; i < 256; i++)
                 {
-                    sum += s_input[i] * d_weights[i * 128 + tid];
+                    sum += s_input[i] * quantize_to_fp4(d_weights[i * 128 + tid]);
                 }
                 d_unpooled_vals[batch_idx * 128 + tid] = sum;
                 d_outputs[batch_idx * 128 + tid] = gelu(sum);
@@ -327,7 +298,7 @@ public static partial class Program
                 #pragma unroll 4
                 for (int i = 0; i < 128; i++)
                 {
-                    sum += s_input[i] * d_weights[i * 10 + tid];
+                    sum += s_input[i] * quantize_to_fp4(d_weights[i * 10 + tid]);
                 }
                 d_outputs[batch_idx * 10 + tid] = sum;
             }
@@ -377,7 +348,7 @@ public static partial class Program
                 #pragma unroll
                 for (int c = 0; c < 10; c++)
                 {
-                    sum_input_grad += s_grad[c] * d_fc2_weights[tid * 10 + c];
+                    sum_input_grad += s_grad[c] * quantize_to_fp4(d_fc2_weights[tid * 10 + c]);
                 }
                 __half fc1_unpooled = d_fc1_unpooled[batch_idx * 128 + tid];
                 d_fc1_out_grad[batch_idx * 128 + tid] = d_gelu(fc1_unpooled, sum_input_grad);
@@ -507,7 +478,7 @@ public static partial class Program
             {
                 int r = i / 128;
                 int c = i % 128;
-                s_weights[warp_row_start + r][c] = d_fc1_weights[(warp_row_start + r) * 128 + c];
+                s_weights[warp_row_start + r][c] = quantize_to_fp4(d_fc1_weights[(warp_row_start + r) * 128 + c]);
             }
             __syncthreads();
 
@@ -727,7 +698,7 @@ public static partial class Program
                             if (x >= 0 && x < 8 && y >= 0 && y < 8)
                             {
                                 int f_idx = filter_idx * 400 + (fy * 5 + fx) * 16 + c;
-                                sum_grad += s_grad[y][x] * d_conv2_filters[f_idx];
+                                sum_grad += s_grad[y][x] * quantize_to_fp4(d_conv2_filters[f_idx]);
                             }
                         }
                     }
@@ -891,7 +862,7 @@ public static partial class Program
             int step_val = *d_step + 1;
             
             #ifndef MAX_LR
-            #define MAX_LR 0.014f
+            #define MAX_LR 0.024f
             #endif
             float max_lr = MAX_LR; 
             float beta1 = 0.7f;

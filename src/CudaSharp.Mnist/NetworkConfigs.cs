@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 
 namespace CudaSharp.Mnist;
@@ -367,21 +367,21 @@ public unsafe partial class Program
     {
         Name = "FP4",
         CudaSource = CudaSourceFP4,
-        UseCustomCudaSource = true,
+        UseCustomCudaSource = false,
         IsHalf = true,
         IsV7Based = true,
         BatchSize = 128,
-        Conv1FilterCount = 16,
+        Conv1FilterCount = 8,
         Conv1FilterSize = 5,
         Conv2FilterCount = 16,
         Conv2FilterSize = 5,
         Pool2OutSize = 4,
         HasFC1 = true,
-        FC1Outputs = 128,
+        FC1Outputs = 96,
         FC1Inputs = 256,
         BatchesPerEpoch = 400,
-        TotalSteps = 155,
-        MaxLR = 0.014f
+        TotalSteps = 30,
+        MaxLR = 0.085f
     };
 
     public static readonly NetworkConfig ConfigCELM = new()
