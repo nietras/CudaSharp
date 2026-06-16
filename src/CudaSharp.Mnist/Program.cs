@@ -1,4 +1,5 @@
-using System;
+﻿using System;
+using System.Buffers.Binary;
 using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
@@ -1412,13 +1413,13 @@ public unsafe partial class Program
         gzStream.CopyTo(ms);
         var bytes = ms.ToArray();
 
-        var magic = (bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3];
+        var magic = BinaryPrimitives.ReadUInt32BigEndian(bytes.AsSpan(0 * sizeof(uint), sizeof(uint)));
         if (magic != 0x00000803)
             throw new InvalidOperationException($"Invalid images magic number: {magic:X}");
 
-        var count = (bytes[4] << 24) | (bytes[5] << 16) | (bytes[6] << 8) | bytes[7];
-        var rows = (bytes[8] << 24) | (bytes[9] << 16) | (bytes[10] << 8) | bytes[11];
-        var cols = (bytes[12] << 24) | (bytes[13] << 16) | (bytes[14] << 8) | bytes[15];
+        var count = BinaryPrimitives.ReadUInt32BigEndian(bytes.AsSpan(1 * sizeof(uint), sizeof(uint)));
+        var rows = BinaryPrimitives.ReadUInt32BigEndian(bytes.AsSpan(2 * sizeof(uint), sizeof(uint)));
+        var cols = BinaryPrimitives.ReadUInt32BigEndian(bytes.AsSpan(3 * sizeof(uint), sizeof(uint)));
 
         if (rows != 28 || cols != 28)
             throw new InvalidOperationException($"Expected 28x28 images, but got {rows}x{cols}");
