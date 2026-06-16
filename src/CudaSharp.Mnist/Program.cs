@@ -1633,7 +1633,6 @@ public unsafe partial class Program
         // Search in common directories on J:\ and C:\
         var searchRoots = new[]
         {
-            @"J:\Program Files\NVIDIA GPU Computing Toolkit\CUDA",
             @"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA"
         };
         foreach (var root in searchRoots)
