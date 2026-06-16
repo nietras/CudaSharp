@@ -1,4 +1,4 @@
-namespace CudaSharp.Mnist;
+﻿namespace CudaSharp.Mnist;
 
 public static partial class Program
 {

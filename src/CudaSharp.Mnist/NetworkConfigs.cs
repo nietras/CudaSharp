@@ -18,7 +18,7 @@ public unsafe partial class Program
         Pool2OutSize = 5,
         HasFC1 = true,
         FC1Outputs = 256,
-        BatchesPerEpoch = 200,
+        BatchesPerEpoch = 400,
         TotalSteps = 400,
         MaxLR = 0.003f
     };
@@ -35,8 +35,8 @@ public unsafe partial class Program
         Conv2FilterSize = 5,
         Pool2OutSize = 4,
         HasFC1 = false,
-        BatchesPerEpoch = 300,
-        TotalSteps = 600,
+        BatchesPerEpoch = 400,
+        TotalSteps = 400,
         MaxLR = 0.06f
     };
 
@@ -53,8 +53,8 @@ public unsafe partial class Program
         Pool2OutSize = 4,
         HasFC1 = false,
         BatchSize = 128,
-        BatchesPerEpoch = 200,
-        TotalSteps = 200,
+        BatchesPerEpoch = 400,
+        TotalSteps = 400,
         MaxLR = 0.05f
     };
 
@@ -72,8 +72,8 @@ public unsafe partial class Program
         Pool2OutSize = 5,
         HasFC1 = true,
         FC1Outputs = 256,
-        BatchesPerEpoch = 200,
-        TotalSteps = 190,
+        BatchesPerEpoch = 400,
+        TotalSteps = 400,
         MaxLR = 0.003f
     };
 
@@ -91,8 +91,8 @@ public unsafe partial class Program
         Pool2OutSize = 1,
         HasFC1 = true,
         FC1Outputs = 256,
-        BatchesPerEpoch = 180,
-        TotalSteps = 180,
+        BatchesPerEpoch = 400,
+        TotalSteps = 400,
         MaxLR = 0.009f
     };
 
@@ -109,8 +109,8 @@ public unsafe partial class Program
         Conv2FilterSize = 5,
         Pool2OutSize = 4,
         HasFC1 = false,
-        BatchesPerEpoch = 240,
-        TotalSteps = 240,
+        BatchesPerEpoch = 400,
+        TotalSteps = 400,
         MaxLR = 0.007f
     };
 
@@ -129,7 +129,7 @@ public unsafe partial class Program
         Pool2OutSize = 5,
         HasFC1 = false,
         BatchesPerEpoch = 200,
-        TotalSteps = 300,
+        TotalSteps = 200,
         MaxLR = 0.006f
     };
 
@@ -158,7 +158,7 @@ public unsafe partial class Program
         FC1Outputs = 16,
         FC1Inputs = 144,
         BatchesPerEpoch = 200,
-        TotalSteps = 300,
+        TotalSteps = 200,
         MaxLR = 0.006f
     };
 
@@ -178,7 +178,7 @@ public unsafe partial class Program
         FC1Outputs = 120,
         FC1Inputs = 256,
         BatchesPerEpoch = 200,
-        TotalSteps = 300,
+        TotalSteps = 200,
         MaxLR = 0.006f
     };
 
@@ -198,7 +198,7 @@ public unsafe partial class Program
         FC1Outputs = 120,
         FC1Inputs = 256,
         BatchesPerEpoch = 200,
-        TotalSteps = 300,
+        TotalSteps = 200,
         MaxLR = 0.006f
     };
 
@@ -218,7 +218,7 @@ public unsafe partial class Program
         FC1Outputs = 120,
         FC1Inputs = 256,
         BatchesPerEpoch = 400,
-        TotalSteps = 155,
+        TotalSteps = 400,
         MaxLR = 0.014f
     };
 
@@ -238,7 +238,7 @@ public unsafe partial class Program
         FC1Outputs = 120,
         FC1Inputs = 256,
         BatchesPerEpoch = 400,
-        TotalSteps = 155,
+        TotalSteps = 400,
         MaxLR = 0.016f
     };
 
@@ -258,7 +258,7 @@ public unsafe partial class Program
         FC1Outputs = 120,
         FC1Inputs = 256,
         BatchesPerEpoch = 400,
-        TotalSteps = 100,
+        TotalSteps = 400,
         MaxLR = 0.010f
     };
 
@@ -278,7 +278,7 @@ public unsafe partial class Program
         FC1Outputs = 120,
         FC1Inputs = 256,
         BatchesPerEpoch = 400,
-        TotalSteps = 80,
+        TotalSteps = 400,
         MaxLR = 0.025f
     };
 
@@ -298,7 +298,7 @@ public unsafe partial class Program
         FC1Outputs = 120,
         FC1Inputs = 256,
         BatchesPerEpoch = 400,
-        TotalSteps = 200,
+        TotalSteps = 400,
         MaxLR = 0.005f,
         ActivationType = "SILU"
     };
@@ -310,17 +310,17 @@ public unsafe partial class Program
         IsHalf = true,
         IsV7Based = true,
         BatchSize = 128,
-        Conv1FilterCount = 8,
+        Conv1FilterCount = 16,
         Conv1FilterSize = 2,
         Conv2FilterCount = 16,
         Conv2FilterSize = 2,
         Pool2OutSize = 6,
         HasFC1 = true,
-        FC1Outputs = 120,
+        FC1Outputs = 128,
         FC1Inputs = 576,
         BatchesPerEpoch = 400,
-        TotalSteps = 155,
-        MaxLR = 0.014f
+        TotalSteps = 600,
+        MaxLR = 0.018f
     };
 
     public static readonly NetworkConfig ConfigV22 = new()
@@ -339,7 +339,7 @@ public unsafe partial class Program
         FC1Outputs = 120,
         FC1Inputs = 256,
         BatchesPerEpoch = 400,
-        TotalSteps = 155,
+        TotalSteps = 400,
         MaxLR = 0.014f
     };
 
@@ -347,6 +347,7 @@ public unsafe partial class Program
     {
         Name = "V23",
         CudaSource = CudaSourceV23,
+        UseCustomCudaSource = true,
         IsHalf = true,
         IsV7Based = true,
         BatchSize = 128,
@@ -359,8 +360,73 @@ public unsafe partial class Program
         FC1Outputs = 128,
         FC1Inputs = 256,
         BatchesPerEpoch = 400,
-        TotalSteps = 155,
+        TotalSteps = 400,
         MaxLR = 0.014f
+    };
+
+    /// <summary>V24: Wider Conv2 (32 filters), longer training for higher accuracy.</summary>
+    public static readonly NetworkConfig ConfigV24 = new()
+    {
+        Name = "V24",
+        CudaSource = CudaSourceV10,
+        IsHalf = true,
+        IsV7Based = true,
+        BatchSize = 128,
+        Conv1FilterCount = 6,
+        Conv1FilterSize = 5,
+        Conv2FilterCount = 32,
+        Conv2FilterSize = 5,
+        Pool2OutSize = 4,
+        HasFC1 = true,
+        FC1Outputs = 120,
+        FC1Inputs = 512,
+        BatchesPerEpoch = 400,
+        TotalSteps = 500,
+        MaxLR = 0.018f
+    };
+
+    /// <summary>V25: 16/32 filters with 3x3 Conv2, wider FC1 for strong accuracy.</summary>
+    public static readonly NetworkConfig ConfigV25 = new()
+    {
+        Name = "V25",
+        CudaSource = CudaSourceV10,
+        IsHalf = true,
+        IsV7Based = true,
+        BatchSize = 128,
+        Conv1FilterCount = 16,
+        Conv1FilterSize = 5,
+        Conv2FilterCount = 32,
+        Conv2FilterSize = 3,
+        Pool2OutSize = 5,
+        HasFC1 = true,
+        FC1Outputs = 256,
+        FC1Inputs = 800,
+        BatchesPerEpoch = 400,
+        TotalSteps = 500,
+        MaxLR = 0.016f
+    };
+
+    /// <summary>V30: SOTA LeNet-5 + AdamW weight decay + maximum steps for peak accuracy.</summary>
+    public static readonly NetworkConfig ConfigV30 = new()
+    {
+        Name = "V30",
+        CudaSource = CudaSourceV10,
+        IsHalf = true,
+        IsV7Based = true,
+        BatchSize = 128,
+        Conv1FilterCount = 6,
+        Conv1FilterSize = 5,
+        Conv2FilterCount = 16,
+        Conv2FilterSize = 5,
+        Pool2OutSize = 4,
+        HasFC1 = true,
+        FC1Outputs = 120,
+        FC1Inputs = 256,
+        BatchesPerEpoch = 400,
+        TotalSteps = 800,
+        MaxLR = 0.025f,
+        HasWeightDecay = true,
+        WeightDecayRate = 0.005f
     };
 
     public static readonly NetworkConfig ConfigFP4 = new()
@@ -371,17 +437,17 @@ public unsafe partial class Program
         IsHalf = true,
         IsV7Based = true,
         BatchSize = 128,
-        Conv1FilterCount = 8,
+        Conv1FilterCount = 16,
         Conv1FilterSize = 5,
         Conv2FilterCount = 16,
         Conv2FilterSize = 5,
         Pool2OutSize = 4,
         HasFC1 = true,
-        FC1Outputs = 96,
+        FC1Outputs = 128,
         FC1Inputs = 256,
         BatchesPerEpoch = 400,
-        TotalSteps = 30,
-        MaxLR = 0.085f
+        TotalSteps = 400,
+        MaxLR = 0.015f
     };
 
     public static readonly NetworkConfig ConfigCELM = new()
@@ -401,7 +467,7 @@ public unsafe partial class Program
         FC1Outputs = 4000,
         FC1Inputs = 256,
         BatchesPerEpoch = 400,
-        TotalSteps = 80,
+        TotalSteps = 400,
         MaxLR = 0.5f
     };
 
@@ -424,7 +490,10 @@ public unsafe partial class Program
         ConfigV20,
         ConfigV21,
         ConfigV22,
-        ConfigV23,
+        // ConfigV23 excluded: WMMA tensor-core FC1 requires incompatible block launch dims
+        ConfigV24,
+        ConfigV25,
+        ConfigV30,
         ConfigFP4,
         ConfigCELM
     ];

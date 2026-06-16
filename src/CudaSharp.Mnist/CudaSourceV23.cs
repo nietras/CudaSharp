@@ -240,34 +240,57 @@ public static partial class Program
             __half* __restrict__ d_outputs,
             __half* __restrict__ d_unpooled_vals)
         {
-            const int batch_idx = blockIdx.x; // We use block for batch, so 1 block = 1 sample! Wait! 
-            // In CudaSharp config, fc1 gridX is BATCH_SIZE (128). blockX is 128.
-            // If blockIdx.x is batch_idx, then we are doing 1 sample per block.
-            // We shouldn't use WMMA if we only do 1 sample per block because M=1.
-            // Let's fallback to parallel vector dot product if we are locked to BatchSize blocks!
-            // Wait, I can just write the standard dot product but perfectly aligned.
-            const int tid = threadIdx.x;
+            if (blockIdx.x > 0) return;
 
-            __shared__ __half s_input[256];
-            
-            // Cooperatively load the 256 inputs for this sample
-            s_input[tid] = d_inputs[batch_idx * 256 + tid];
-            s_input[tid + 128] = d_inputs[batch_idx * 256 + tid + 128];
-            __syncthreads();
+            const int warp_id = threadIdx.x / 32;
+            const int lane_id = threadIdx.x % 32;
 
-            // Each thread computes 1 output feature
-            if (tid < 128)
+            if (warp_id >= 8) return;
+
+            __shared__ __half s_tile[8][16][16];
+
+            #pragma unroll
+            for (int c = 0; c < 8; c++)
             {
-                __half sum = d_biases[tid];
-                #pragma unroll 4
-                for (int i = 0; i < 256; i++)
+                wmma::fragment<wmma::accumulator, 16, 16, 16, __half> acc_frag;
+                wmma::fill_fragment(acc_frag, __float2half(0.0f));
+
+                #pragma unroll
+                for (int k = 0; k < 16; k++)
                 {
-                    sum += s_input[i] * d_weights[i * 128 + tid];
+                    wmma::fragment<wmma::matrix_a, 16, 16, 16, __half, wmma::row_major> a_frag;
+                    wmma::fragment<wmma::matrix_b, 16, 16, 16, __half, wmma::row_major> b_frag;
+
+                    wmma::load_matrix_sync(a_frag, d_inputs + warp_id * 4096 + k * 16, 256);
+                    wmma::load_matrix_sync(b_frag, d_weights + k * 2048 + c * 16, 128);
+
+                    wmma::mma_sync(acc_frag, a_frag, b_frag, acc_frag);
                 }
-                d_unpooled_vals[batch_idx * 128 + tid] = sum;
-                d_outputs[batch_idx * 128 + tid] = gelu(sum);
+
+                wmma::store_matrix_sync(&s_tile[warp_id][0][0], acc_frag, 16, wmma::mem_row_major);
+                __syncwarp();
+
+                #pragma unroll
+                for (int i = 0; i < 8; i++)
+                {
+                    int idx = lane_id * 8 + i;
+                    int r_local = idx / 16;
+                    int c_local = idx % 16;
+
+                    __half val = s_tile[warp_id][r_local][c_local];
+                    __half bias = d_biases[c * 16 + c_local];
+                    __half sum = val + bias;
+
+                    int global_row = warp_id * 16 + r_local;
+                    int global_col = c * 16 + c_local;
+
+                    d_unpooled_vals[global_row * 128 + global_col] = sum;
+                    d_outputs[global_row * 128 + global_col] = gelu(sum);
+                }
+                __syncwarp();
             }
         }
+
 
         extern "C" __global__ void fc2_forward(
             const __half* __restrict__ d_inputs,
@@ -450,47 +473,64 @@ public static partial class Program
             __half* __restrict__ d_fc1_biases_grad,
             __half* __restrict__ d_conv2_out_grad)
         {
-            const int batch_idx = blockIdx.x;
-            const int tid = threadIdx.x; // 0..255
+            if (blockIdx.x > 0) return;
 
-            __shared__ __half s_grad[128];
-            __shared__ __half s_weights[256][128];
+            const int tid = threadIdx.x;
+            const int warp_id = tid / 32;
+            const int lane_id = tid % 32;
 
+            // Bias gradient accumulation (run by first 128 threads)
             if (tid < 128)
             {
-                s_grad[tid] = d_fc1_out_grad[batch_idx * 128 + tid];
-            }
-
-            int warp_id = tid / 32;
-            int lane_id = tid % 32;
-            int warp_row_start = warp_id * 32;
-            
-            int total_warp_elements = 32 * 128;
-            #pragma unroll
-            for (int i = lane_id; i < total_warp_elements; i += 32)
-            {
-                int r = i / 128;
-                int c = i % 128;
-                s_weights[warp_row_start + r][c] = d_fc1_weights[(warp_row_start + r) * 128 + c];
-            }
-            __syncthreads();
-
-            __half sum_grad = __float2half(0.0f);
-            #pragma unroll
-            for (int c = 0; c < 128; c++)
-            {
-                sum_grad += s_grad[c] * s_weights[tid][c];
-            }
-
-            d_conv2_out_grad[batch_idx * 256 + tid] = sum_grad;
-
-            if (tid < 128)
-            {
-                __half b_grad = s_grad[tid];
-                if (__half2float(b_grad) != 0.0f)
+                float sum = 0.0f;
+                #pragma unroll 8
+                for (int b = 0; b < 128; b++)
                 {
-                    atomicAdd(&d_fc1_biases_grad[tid], b_grad);
+                    sum += __half2float(d_fc1_out_grad[b * 128 + tid]);
                 }
+                d_fc1_biases_grad[tid] = __float2half(sum);
+            }
+
+            if (warp_id >= 8) return;
+
+            __shared__ __half s_tile[8][16][16];
+
+            #pragma unroll
+            for (int c = 0; c < 16; c++)
+            {
+                wmma::fragment<wmma::accumulator, 16, 16, 16, __half> acc_frag;
+                wmma::fill_fragment(acc_frag, __float2half(0.0f));
+
+                #pragma unroll
+                for (int k = 0; k < 8; k++)
+                {
+                    wmma::fragment<wmma::matrix_a, 16, 16, 16, __half, wmma::row_major> a_frag;
+                    wmma::fragment<wmma::matrix_b, 16, 16, 16, __half, wmma::row_major> b_frag;
+
+                    wmma::load_matrix_sync(a_frag, d_fc1_out_grad + warp_id * 2048 + k * 16, 128);
+                    wmma::load_matrix_sync(b_frag, d_fc1_weights + c * 2048 + k * 16, 128);
+
+                    wmma::mma_sync(acc_frag, a_frag, b_frag, acc_frag);
+                }
+
+                wmma::store_matrix_sync(&s_tile[warp_id][0][0], acc_frag, 16, wmma::mem_row_major);
+                __syncwarp();
+
+                #pragma unroll
+                for (int i = 0; i < 8; i++)
+                {
+                    int idx = lane_id * 8 + i;
+                    int r_local = idx / 16;
+                    int c_local = idx % 16;
+
+                    __half val = s_tile[warp_id][r_local][c_local];
+
+                    int global_row = warp_id * 16 + r_local;
+                    int global_col = c * 16 + c_local;
+
+                    d_conv2_out_grad[global_row * 256 + global_col] = val;
+                }
+                __syncwarp();
             }
         }
 
@@ -500,51 +540,50 @@ public static partial class Program
             const __half* __restrict__ d_fc1_inputs,
             __half* __restrict__ d_fc1_weights_grad)
         {
-            const int input_idx = blockIdx.x; // 0..255
-            const int tid = threadIdx.x;      // 0..63
+            if (blockIdx.x >= 64) return;
 
-            __shared__ float s_accum[64][128];
+            const int warp_id = threadIdx.x / 32;
+            const int lane_id = threadIdx.x % 32;
+
+            if (warp_id >= 2) return;
+
+            __shared__ __half s_tile[2][16][16];
+
+            const int tile_idx = blockIdx.x * 2 + warp_id;
+            const int r = tile_idx / 8;
+            const int c = tile_idx % 8;
+
+            wmma::fragment<wmma::accumulator, 16, 16, 16, __half> acc_frag;
+            wmma::fill_fragment(acc_frag, __float2half(0.0f));
 
             #pragma unroll
-            for (int c = 0; c < 128; c++)
+            for (int k = 0; k < 8; k++)
             {
-                s_accum[tid][c] = 0.0f;
+                wmma::fragment<wmma::matrix_a, 16, 16, 16, __half, wmma::row_major> a_frag;
+                wmma::fragment<wmma::matrix_b, 16, 16, 16, __half, wmma::row_major> b_frag;
+
+                wmma::load_matrix_sync(a_frag, d_fc1_inputs + k * 4096 + r * 16, 256);
+                wmma::load_matrix_sync(b_frag, d_fc1_out_grad + k * 2048 + c * 16, 128);
+
+                wmma::mma_sync(acc_frag, a_frag, b_frag, acc_frag);
             }
-            __syncthreads();
+
+            wmma::store_matrix_sync(&s_tile[warp_id][0][0], acc_frag, 16, wmma::mem_row_major);
+            __syncwarp();
 
             #pragma unroll
-            for (int i = 0; i < (BATCH_SIZE / 64); i++)
+            for (int i = 0; i < 8; i++)
             {
-                int b = i * 64 + tid;
-                float x_val = __half2float(d_fc1_inputs[b * 256 + input_idx]);
-                #pragma unroll
-                for (int c = 0; c < 128; c++)
-                {
-                    s_accum[tid][c] += x_val * __half2float(d_fc1_out_grad[b * 128 + c]);
-                }
-            }
-            __syncthreads();
+                int idx = lane_id * 8 + i;
+                int r_local = idx / 16;
+                int c_local = idx % 16;
 
-            for (int stride = 32; stride > 0; stride >>= 1)
-            {
-                if (tid < stride)
-                {
-                    #pragma unroll
-                    for (int c = 0; c < 128; c++)
-                    {
-                        s_accum[tid][c] += s_accum[tid + stride][c];
-                    }
-                }
-                __syncthreads();
-            }
+                __half val = s_tile[warp_id][r_local][c_local];
 
-            if (tid == 0)
-            {
-                #pragma unroll
-                for (int c = 0; c < 128; c++)
-                {
-                    d_fc1_weights_grad[input_idx * 128 + c] = __float2half(s_accum[0][c]);
-                }
+                int global_row = r * 16 + r_local;
+                int global_col = c * 16 + c_local;
+
+                d_fc1_weights_grad[global_row * 128 + global_col] = val;
             }
         }
 

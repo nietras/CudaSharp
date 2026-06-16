@@ -167,64 +167,138 @@ public unsafe partial class Program
         var cudaSourceStr = activeConfig.UseCustomCudaSource
             ? activeConfig.CudaSource
             : (activeConfig.IsHalf ? CudaKernelLibrary.BuildLeNetSource(activeConfig) : activeConfig.CudaSource);
-        nvrtcCreateProgram(out var program, cudaSourceStr, "mnist_kernels", 0, [], []).Ok();
         CUcontext context = default;
+        CUstream stream = default;
+        CUmodule module = default;
+        nvrtcProgram program = default;
         try
         {
-            var optionsList = new System.Collections.Generic.List<string>
+            cuDriverGetVersion(out var driverVersion).Ok();
+            nvrtcVersion(out var nvrtcMajor, out var nvrtcMinor).Ok();
+            var maxSupportedCudaMajor = Math.Min(nvrtcMajor, driverVersion / 1000);
+            Console.WriteLine($"[JIT] NVRTC Version: {nvrtcMajor}.{nvrtcMinor}, Driver Max CUDA Version: {driverVersion / 1000}.{(driverVersion % 1000) / 10}");
+
+            var archMajor = major;
+            var archMinor = minor;
+            if (maxSupportedCudaMajor < 13 && archMajor >= 12)
             {
-                $"--gpu-architecture=compute_{major}{minor}",
-                "--std=c++17",
-                "--use_fast_math",
-                $"-DBATCH_SIZE={activeConfig.BatchSize}",
-                $"-DBATCHES_PER_EPOCH={activeConfig.BatchesPerEpoch}",
-                $"-DTOTAL_STEPS={activeConfig.TotalSteps}",
-                $"-DMAX_LR={activeConfig.MaxLR}f",
-                $"-DFC1_OUTPUTS={activeConfig.FC1Outputs}",
-                $"-DCONV1_CHUNKS={conv1Chunks}",
-                $"-DCONV2_CHUNKS={conv2Chunks}",
-                $"-DFILTER1_SIZE={activeConfig.Conv1FilterSize}",
-                $"-DFILTER2_SIZE={activeConfig.Conv2FilterSize}"
-            };
-            var cudaPath = Environment.GetEnvironmentVariable("CUDA_PATH");
-            if (!string.IsNullOrEmpty(cudaPath))
+                archMajor = 9;
+                archMinor = 0;
+            }
+            if (maxSupportedCudaMajor < 12 && archMajor >= 9)
             {
-                optionsList.Add($"-I{Path.Combine(cudaPath, "include")}");
+                archMajor = 8;
+                archMinor = 6;
+            }
+            if (maxSupportedCudaMajor < 11 && archMajor >= 8)
+            {
+                archMajor = 7;
+                archMinor = 5;
             }
 
-            var options = optionsList.ToArray();
-            var optionBytes = new byte[options.Length][];
-            var optionPointers = stackalloc byte*[options.Length];
-            for (var i = 0; i < options.Length; i++)
+            byte[]? ptx = null;
+            byte** optionPointers = stackalloc byte*[32]; // Max 32 options, moved out of the loop to prevent stack overflow
+            while (true)
             {
-                optionBytes[i] = Encoding.UTF8.GetBytes($"{options[i]}\0");
-                fixed (byte* optPtr = optionBytes[i])
+                var optionsList = new System.Collections.Generic.List<string>
                 {
-                    optionPointers[i] = optPtr;
+                    $"--gpu-architecture=compute_{archMajor}{archMinor}",
+                    "--std=c++17",
+                    "--use_fast_math",
+                    $"-DBATCH_SIZE={activeConfig.BatchSize}",
+                    $"-DBATCHES_PER_EPOCH={activeConfig.BatchesPerEpoch}",
+                    $"-DTOTAL_STEPS={activeConfig.TotalSteps}",
+                    $"-DMAX_LR={activeConfig.MaxLR}f",
+                    $"-DFC1_OUTPUTS={activeConfig.FC1Outputs}",
+                    $"-DFC1_INPUTS={activeConfig.FC1Inputs}",
+                    $"-DCONV1_CHUNKS={conv1Chunks}",
+                    $"-DCONV2_CHUNKS={conv2Chunks}",
+                    $"-DFILTER1_SIZE={activeConfig.Conv1FilterSize}",
+                    $"-DFILTER2_SIZE={activeConfig.Conv2FilterSize}",
+                    $"-DPOOL1_SIZE={activeConfig.Pool1OutSize}",
+                    $"-DPOOL2_SIZE={activeConfig.Pool2OutSize}",
+                    $"-DWEIGHT_DECAY={(activeConfig.HasWeightDecay ? activeConfig.WeightDecayRate : 0.0f).ToString("0.0##########", System.Globalization.CultureInfo.InvariantCulture)}f"
+                };
+                var includePath = ResolveCudaIncludePath();
+                if (!string.IsNullOrEmpty(includePath))
+                {
+                    optionsList.Add($"-I{includePath}");
+                }
+
+                var options = optionsList.ToArray();
+                var optionBytes = new byte[options.Length][];
+                for (var i = 0; i < options.Length; i++)
+                {
+                    optionBytes[i] = Encoding.UTF8.GetBytes($"{options[i]}\0");
+                    fixed (byte* optPtr = optionBytes[i])
+                    {
+                        optionPointers[i] = optPtr;
+                    }
+                }
+
+                nvrtcCreateProgram(out program, cudaSourceStr, "mnist_kernels", 0, [], []).Ok();
+                var compileResult = nvrtcCompileProgram(program, options.Length, optionPointers);
+                if (compileResult.IsError())
+                {
+                    nvrtcGetProgramLogSize(program, out var logSize).Ok();
+                    var logBuffer = new byte[logSize];
+                    nvrtcGetProgramLog(program, logBuffer).Ok();
+                    var logStr = Encoding.UTF8.GetString(logBuffer);
+                    nvrtcDestroyProgram(ref program).Ok();
+                    throw new InvalidOperationException($"NVRTC Compilation failed:\n{logStr}");
+                }
+
+                nvrtcGetPTXSize(program, out var ptxSize).Ok();
+                ptx = new byte[ptxSize];
+                nvrtcGetPTX(program, ptx).Ok();
+                nvrtcDestroyProgram(ref program).Ok();
+                program = default;
+
+                if (context == default)
+                {
+                    Console.WriteLine("[DEVICE] Creating CUDA context and command stream...");
+                    cuCtxCreate(out context, CUctx_flags.CU_CTX_SCHED_SPIN, device).Ok();
+                    cuCtxSetCurrent(context).Ok();
+                    cuStreamCreate(out stream, 0).Ok();
+                }
+
+                var loadResult = cuModuleLoadData(out module, ptx);
+                if (loadResult == CUresult.CUDA_SUCCESS)
+                {
+                    Console.WriteLine($"[JIT] Successfully compiled and loaded module for compute_{archMajor}{archMinor}!");
+                    break;
+                }
+
+                Console.WriteLine($"[JIT] Warning: Failed to load module for compute_{archMajor}{archMinor} (result: {loadResult}). Retrying with a lower architecture target...");
+
+                if (archMajor >= 12)
+                {
+                    archMajor = 9;
+                    archMinor = 0;
+                }
+                else if (archMajor == 9)
+                {
+                    archMajor = 8;
+                    archMinor = 9;
+                }
+                else if (archMajor == 8 && archMinor == 9)
+                {
+                    archMajor = 8;
+                    archMinor = 6;
+                }
+                else if (archMajor == 8 && archMinor == 6)
+                {
+                    archMajor = 7;
+                    archMinor = 5;
+                }
+                else
+                {
+                    loadResult.Ok();
                 }
             }
 
-            var compileResult = nvrtcCompileProgram(program, options.Length, optionPointers);
-            if (compileResult.IsError())
-            {
-                nvrtcGetProgramLogSize(program, out var logSize).Ok();
-                var logBuffer = new byte[logSize];
-                nvrtcGetProgramLog(program, logBuffer).Ok();
-                throw new InvalidOperationException($"NVRTC Compilation failed:\n{Encoding.UTF8.GetString(logBuffer)}");
-            }
-
-            nvrtcGetPTXSize(program, out var ptxSize).Ok();
-            var ptx = new byte[ptxSize];
-            nvrtcGetPTX(program, ptx).Ok();
-
-            Console.WriteLine("[DEVICE] Creating CUDA context and command stream...");
-            cuCtxCreate(out context, CUctx_flags.CU_CTX_SCHED_SPIN, device).Ok();
-            cuCtxSetCurrent(context).Ok();
-            cuStreamCreate(out var stream, 0).Ok();
-            var isTrainingTrue = 0;
+            var isTrainingTrue = 1;
             var isTrainingFalse = 0;
-
-            cuModuleLoadData(out var module, ptx).Ok();
 
             cuModuleGetFunction(out var f_clear, module, "clear_gradient").Ok();
             cuModuleGetFunction(out var f_conv1, module, "conv1_forward").Ok();
@@ -489,7 +563,10 @@ public unsafe partial class Program
 
                 // Run initial quantization
                 var quantizeParamsInit = new void*[] { &d_allParams, &d_quantParams };
-                cuLaunchKernel(f_quantize_all, (uint)((totalParamElements + 255) / 256), 1u, 1u, 256u, 1u, 1u, stream, quantizeParamsInit, null).Ok();
+                fixed (void** pQuantizeParams = quantizeParamsInit)
+                {
+                    cuLaunchKernel(f_quantize_all, (uint)((totalParamElements + 255) / 256), 1u, 1u, 256u, 1u, 1u, 0u, stream, pQuantizeParams, null).Ok();
+                }
                 cuStreamSynchronize(stream).Ok();
             }
             else
@@ -1155,7 +1232,10 @@ public unsafe partial class Program
         }
         finally
         {
-            nvrtcDestroyProgram(ref program).Ok();
+            if (program.Value != IntPtr.Zero)
+            {
+                nvrtcDestroyProgram(ref program).Ok();
+            }
             if (context.Value != IntPtr.Zero)
             {
                 cuCtxDestroy(context).Ok();
@@ -1425,8 +1505,16 @@ public unsafe partial class Program
         sb.AppendLine($"| **Element Precision** | {(config.IsHalf ? "FP16 (Half Precision)" : "FP32 (Single Precision)")} | Low-precision bandwidth optimization |");
         sb.AppendLine($"| **Activation Type** | `{config.ActivationType}` | GELU preventing dead neurons vs ReLU |");
         sb.AppendLine($"| **Input Map** | 28x28 1-Bit CPU Packed Register | Packed 32 pixels/register for Layer 1 efficiency |");
-        sb.AppendLine($"| **Conv1 (Layer 1)** | {config.Conv1FilterSize}x{config.Conv1FilterSize} Conv ({config.Conv1FilterCount} channels), Pool (2x2) | Spatial feature extraction |");
-        sb.AppendLine($"| **Conv2 (Layer 2)** | {config.Conv2FilterSize}x{config.Conv2FilterSize} Conv ({config.Conv2FilterCount} channels), Pool (2x2) | Deep spatial channel representation |");
+        if (config.Name == "V5")
+        {
+            sb.AppendLine($"| **Conv1 (Layer 1)** | Bypassed (Pure MLP Mode) | Direct input-to-dense projection |");
+            sb.AppendLine($"| **Conv2 (Layer 2)** | Bypassed (Pure MLP Mode) | Direct input-to-dense projection |");
+        }
+        else
+        {
+            sb.AppendLine($"| **Conv1 (Layer 1)** | {config.Conv1FilterSize}x{config.Conv1FilterSize} Conv ({config.Conv1FilterCount} channels), Pool (2x2) | Spatial feature extraction |");
+            sb.AppendLine($"| **Conv2 (Layer 2)** | {config.Conv2FilterSize}x{config.Conv2FilterSize} Conv ({config.Conv2FilterCount} channels), Pool (2x2) | Deep spatial channel representation |");
+        }
         if (config.HasFC1)
         {
             sb.AppendLine($"| **FC1 (Layer 3)** | {config.FC1Inputs} -> {config.FC1Outputs} dense hidden projection | Hidden feature scaling |");
@@ -1527,5 +1615,45 @@ public unsafe partial class Program
         var reportPath = Path.Combine(reportsDir, fileName);
         File.WriteAllText(reportPath, sb.ToString());
         Console.WriteLine($"[REPORT] Programmatic markdown report written to reports/{fileName} successfully!");
+    }
+
+    static string? ResolveCudaIncludePath()
+    {
+        var cudaPath = Environment.GetEnvironmentVariable("CUDA_PATH");
+        if (!string.IsNullOrEmpty(cudaPath))
+        {
+            var includePath = Path.Combine(cudaPath, "include");
+            if (File.Exists(Path.Combine(includePath, "cuda_fp16.h")))
+            {
+                return includePath;
+            }
+        }
+
+        // Search in common directories on J:\ and C:\
+        var searchRoots = new[]
+        {
+            @"J:\Program Files\NVIDIA GPU Computing Toolkit\CUDA",
+            @"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA"
+        };
+        foreach (var root in searchRoots)
+        {
+            if (Directory.Exists(root))
+            {
+                var subdirs = Directory.GetDirectories(root);
+                // Sort subdirs to get the latest version if multiple exist
+                Array.Sort(subdirs, StringComparer.OrdinalIgnoreCase);
+                for (var i = subdirs.Length - 1; i >= 0; i--)
+                {
+                    var includePath = Path.Combine(subdirs[i], "include");
+                    if (File.Exists(Path.Combine(includePath, "cuda_fp16.h")))
+                    {
+                        Console.WriteLine($"[JIT] Located CUDA include folder: {includePath}");
+                        return includePath;
+                    }
+                }
+            }
+        }
+
+        return null;
     }
 }

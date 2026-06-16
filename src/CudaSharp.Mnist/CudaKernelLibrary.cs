@@ -765,38 +765,24 @@ public static class CudaKernelLibrary
             const int tid = threadIdx.x;
 
             __shared__ __half s_grad[FC1_OUTPUTS];
-            __shared__ __half s_weights[FC1_INPUTS][FC1_OUTPUTS];
 
             if (tid < FC1_OUTPUTS)
             {
                 s_grad[tid] = d_fc1_out_grad[
                     batch_idx * FC1_OUTPUTS + tid];
             }
-
-            int warp_id = tid / 32;
-            int lane_id = tid % 32;
-            int warp_row_start = warp_id * 32;
-
-            int total_warp_elements = 32 * FC1_OUTPUTS;
-            #pragma unroll
-            for (int i = lane_id; i < total_warp_elements; i += 32)
-            {
-                int r = i / FC1_OUTPUTS;
-                int c = i % FC1_OUTPUTS;
-                s_weights[warp_row_start + r][c] =
-                    d_fc1_weights[(warp_row_start + r)
-                    * FC1_OUTPUTS + c];
-            }
             __syncthreads();
 
-            __half sum_grad = __float2half(0.0f);
-            #pragma unroll
-            for (int c = 0; c < FC1_OUTPUTS; c++)
+            if (tid < FC1_INPUTS)
             {
-                sum_grad += s_grad[c] * s_weights[tid][c];
+                __half sum_grad = __float2half(0.0f);
+                #pragma unroll 8
+                for (int c = 0; c < FC1_OUTPUTS; c++)
+                {
+                    sum_grad = __hfma(s_grad[c], d_fc1_weights[tid * FC1_OUTPUTS + c], sum_grad);
+                }
+                d_conv2_out_grad[batch_idx * FC1_INPUTS + tid] = sum_grad;
             }
-
-            d_conv2_out_grad[batch_idx * FC1_INPUTS + tid] = sum_grad;
 
             if (tid < FC1_OUTPUTS)
             {
@@ -1027,17 +1013,30 @@ public static class CudaKernelLibrary
                     s_filter_grad[i] += w_grad;
                 }
 
+                // Parallel bias gradient reduction across 64 threads
+                __shared__ float s_bias_reduce[64];
+                if (tid < 64)
+                {
+                    int rx = tid % conv2_out_w;
+                    int ry = tid / conv2_out_w;
+                    s_bias_reduce[tid] = (rx < conv2_out_w && ry < conv2_out_w) 
+                        ? __half2float(s_grad[ry][rx]) 
+                        : 0.0f;
+                }
+                __syncthreads();
+
+                for (int stride = 32; stride > 0; stride >>= 1)
+                {
+                    if (tid < stride)
+                    {
+                        s_bias_reduce[tid] += s_bias_reduce[tid + stride];
+                    }
+                    __syncthreads();
+                }
+
                 if (tid == 0)
                 {
-                    __half b_grad = zero;
-                    for (int y = 0; y < conv2_out_w; y++)
-                    {
-                        for (int x = 0; x < conv2_out_w; x++)
-                        {
-                            b_grad += s_grad[y][x];
-                        }
-                    }
-                    s_bias_grad += b_grad;
+                    s_bias_grad += __float2half(s_bias_reduce[0]);
                 }
 
                 for (int i = tid; i < conv1_out_per_sample; i += 128)
@@ -1119,6 +1118,7 @@ public static class CudaKernelLibrary
             __shared__ __half s_bias_grad;
             __shared__ __half s_grad[POOL1_SIZE * 2][POOL1_SIZE * 2];
             __shared__ uint32_t s_image[28];
+            __shared__ __half s_reduce[256];
 
             __half zero = __float2half(0.0f);
 
@@ -1138,8 +1138,11 @@ public static class CudaKernelLibrary
             const int start_b = chunk_idx * CONV1_BATCH_PER_CHUNK;
             const int end_b = start_b + CONV1_BATCH_PER_CHUNK;
 
-            int fx = tid % FILTER1_SIZE;
-            int fy = tid / FILTER1_SIZE;
+            // Mapping for weight gradient parallel calculation
+            int f = tid / 8;
+            int s = tid % 8;
+            int fy = f / FILTER1_SIZE;
+            int fx = f % FILTER1_SIZE;
 
             for (int b = start_b; b < end_b; b++)
             {
@@ -1149,8 +1152,7 @@ public static class CudaKernelLibrary
                         d_inputs[(batchOffset + b) * 28 + tid];
                 }
 
-                for (int i = tid; i < conv1_out_w * conv1_out_w;
-                    i += 256)
+                for (int i = tid; i < conv1_out_w * conv1_out_w; i += 256)
                 {
                     int gy = i / conv1_out_w;
                     int gx = i % conv1_out_w;
@@ -1183,11 +1185,13 @@ public static class CudaKernelLibrary
                 int dy = (is_training == 1)
                     ? (((seed * 1103515245 + 12345) / 3) % 3 - 1) : 0;
 
-                if (tid < filter_size_sq)
+                __half w_grad = zero;
+                if (f < 25)
                 {
-                    __half w_grad = zero;
+                    int y_start = s * 3;
+                    int y_end = y_start + 3;
                     #pragma unroll
-                    for (int y = 0; y < conv1_out_w; y++)
+                    for (int y = y_start; y < y_end; y++)
                     {
                         int shift_y = y + fy + dy;
                         uint32_t row_bits = 0;
@@ -1210,20 +1214,42 @@ public static class CudaKernelLibrary
                             }
                         }
                     }
-                    s_filter_grad[tid] += w_grad;
+                }
+                s_reduce[tid] = w_grad;
+                __syncthreads();
+
+                if (tid < 25)
+                {
+                    __half final_w_grad = zero;
+                    #pragma unroll
+                    for (int j = 0; j < 8; j++)
+                    {
+                        final_w_grad = __hadd(final_w_grad, s_reduce[tid * 8 + j]);
+                    }
+                    s_filter_grad[tid] += final_w_grad;
+                }
+
+                // Parallel bias gradient calculation
+                __half my_bias = zero;
+                for (int i = tid; i < conv1_out_w * conv1_out_w; i += 256)
+                {
+                    my_bias = __hadd(my_bias, s_grad[i / conv1_out_w][i % conv1_out_w]);
+                }
+                s_reduce[tid] = my_bias;
+                __syncthreads();
+
+                for (int stride = 128; stride > 0; stride >>= 1)
+                {
+                    if (tid < stride)
+                    {
+                        s_reduce[tid] = __hadd(s_reduce[tid], s_reduce[tid + stride]);
+                    }
+                    __syncthreads();
                 }
 
                 if (tid == 0)
                 {
-                    __half b_grad = zero;
-                    for (int y = 0; y < conv1_out_w; y++)
-                    {
-                        for (int x = 0; x < conv1_out_w; x++)
-                        {
-                            b_grad += s_grad[y][x];
-                        }
-                    }
-                    s_bias_grad += b_grad;
+                    s_bias_grad = __hadd(s_bias_grad, s_reduce[0]);
                 }
                 __syncthreads();
             }

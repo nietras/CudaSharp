@@ -470,7 +470,7 @@ public static partial class Program
             const int tid = threadIdx.x; // 0..255
 
             __shared__ __half s_grad[120];
-            __shared__ __half s_weights[256][120];
+            __shared__ __half s_weights_chunk[32][120];
 
             // Load s_grad
             if (tid < 120)
@@ -478,26 +478,35 @@ public static partial class Program
                 s_grad[tid] = d_fc1_out_grad[batch_idx * 120 + tid];
             }
 
-            int warp_id = tid / 32;
-            int lane_id = tid % 32;
-            int warp_row_start = warp_id * 32;
-            
-            // Cooperatively load 32x120 weights for this warp in a fully coalesced manner
-            int total_warp_elements = 32 * 120;
-            #pragma unroll
-            for (int i = lane_id; i < total_warp_elements; i += 32)
-            {
-                int r = i / 120;
-                int c = i % 120;
-                s_weights[warp_row_start + r][c] = d_fc1_weights[(warp_row_start + r) * 120 + c];
-            }
-            __syncthreads();
-
             __half sum_grad = __float2half(0.0f);
+
+            // Loop over 8 chunks of 32 rows (8 * 32 = 256 rows total)
             #pragma unroll
-            for (int c = 0; c < 120; c++)
+            for (int chunk = 0; chunk < 8; chunk++)
             {
-                sum_grad += s_grad[c] * s_weights[tid][c];
+                int row_offset = chunk * 32;
+                
+                // Cooperatively load 32 rows x 120 cols weights chunk (3840 elements)
+                #pragma unroll
+                for (int i = tid; i < 32 * 120; i += 256)
+                {
+                    int r = i / 120;
+                    int c = i % 120;
+                    s_weights_chunk[r][c] = d_fc1_weights[(row_offset + r) * 120 + c];
+                }
+                __syncthreads();
+
+                // Each thread computes dot product for its row if it falls inside this chunk
+                int my_row_in_chunk = tid - row_offset;
+                if (my_row_in_chunk >= 0 && my_row_in_chunk < 32)
+                {
+                    #pragma unroll
+                    for (int c = 0; c < 120; c++)
+                    {
+                        sum_grad += s_grad[c] * s_weights_chunk[my_row_in_chunk][c];
+                    }
+                }
+                __syncthreads();
             }
 
             d_conv2_out_grad[batch_idx * 256 + tid] = sum_grad;
