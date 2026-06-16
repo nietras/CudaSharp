@@ -1458,11 +1458,11 @@ public unsafe partial class Program
         gzStream.CopyTo(ms);
         var bytes = ms.ToArray();
 
-        var magic = (bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3];
+        var magic = BinaryPrimitives.ReadUInt32BigEndian(bytes.AsSpan(0 * sizeof(uint), sizeof(uint)));
         if (magic != 0x00000801)
-            throw new InvalidOperationException($"Invalid labels magic number: {magic:X}");
+            throw new InvalidOperationException($"Invalid images magic number: {magic:X}");
 
-        var count = (bytes[4] << 24) | (bytes[5] << 16) | (bytes[6] << 8) | bytes[7];
+        var count = BinaryPrimitives.ReadUInt32BigEndian(bytes.AsSpan(1 * sizeof(uint), sizeof(uint)));
 
         var labelCountToLoad = maxCount;
         var labels = new int[labelCountToLoad];
