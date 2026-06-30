@@ -130,7 +130,7 @@ public static class MnistDataset
         }
 
         var sourceLengths = source.Lengths;
-        var targetLengths = new nint[sourceLengths.Length];
+        Span<nint> targetLengths = stackalloc nint[sourceLengths.Length];
         targetLengths[0] = count;
         for (var i = 1; i < sourceLengths.Length; i++)
         {
