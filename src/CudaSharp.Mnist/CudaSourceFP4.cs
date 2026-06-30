@@ -306,7 +306,7 @@ public static partial class Program
 
         extern "C" __global__ void fc2_backward(
             const __half* __restrict__ d_fc2_outputs,
-            const int* __restrict__ d_labels,
+            const unsigned char* __restrict__ d_labels,
             const __half* __restrict__ d_fc1_outputs,
             const __half* __restrict__ d_fc2_weights,
             __half* __restrict__ d_fc2_weights_grad,
@@ -366,7 +366,7 @@ public static partial class Program
 
         extern "C" __global__ void fc2_backward_weights(
             const __half* __restrict__ d_fc2_outputs,
-            const int* __restrict__ d_labels,
+            const unsigned char* __restrict__ d_labels,
             const __half* __restrict__ d_fc1_outputs,
             __half* __restrict__ d_fc2_weights_grad,
             const int* __restrict__ d_step)

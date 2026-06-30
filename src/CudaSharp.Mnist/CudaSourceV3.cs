@@ -237,7 +237,7 @@ public static partial class Program
 
         extern "C" __global__ void fc2_backward(
             const __half* __restrict__ d_fc2_outputs,
-            const int* __restrict__ d_labels,
+            const unsigned char* __restrict__ d_labels,
             const __half* __restrict__ d_fc2_inputs,
             const __half* __restrict__ d_fc2_weights,
             __half* __restrict__ d_fc2_weights_grad,

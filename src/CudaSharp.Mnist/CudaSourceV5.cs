@@ -133,7 +133,7 @@ public static partial class Program
         // FC2 Backward Pass (FC1_OUTPUTS -> 10, Linear)
         extern "C" __global__ void fc2_backward(
             const float* __restrict__ d_fc2_outputs,  // [BatchSize x 10]
-            const int* __restrict__ d_labels,        // [TotalImages]
+            const unsigned char* __restrict__ d_labels,        // [TotalImages]
             const float* __restrict__ d_fc1_outputs,   // [BatchSize x FC1_OUTPUTS]
             const float* __restrict__ d_fc2_weights,   // [FC1_OUTPUTS x 10]
             float* __restrict__ d_fc2_weights_grad,    // [FC1_OUTPUTS x 10]

@@ -4,6 +4,8 @@ using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using System.Net.Http;
+using System.Numerics.Tensors;
+using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 
 namespace CudaSharp.Mnist;
@@ -44,73 +46,105 @@ public static class MnistDataset
     }
 
 
-    public static (uint[] images, int count) ParseImagesGz(string filePath, int maxCount)
+    public static Tensor<byte> ParseImagesGz(string filePath)
     {
         using var fileStream = File.OpenRead(filePath);
         using var gzStream = new GZipStream(fileStream, CompressionMode.Decompress);
-        using var ms = new MemoryStream();
-        gzStream.CopyTo(ms);
-        var bytes = ms.ToArray();
+        Span<byte> header = stackalloc byte[4 * sizeof(uint)];
+        gzStream.ReadExactly(header);
 
-        var magic = BinaryPrimitives.ReadUInt32BigEndian(bytes.AsSpan(0 * sizeof(uint), sizeof(uint)));
+        var magic = BinaryPrimitives.ReadUInt32BigEndian(header.Slice(0 * sizeof(uint), sizeof(uint)));
         if (magic != 0x00000803)
             throw new InvalidOperationException($"Invalid images magic number: {magic:X}");
 
-        var count = BinaryPrimitives.ReadUInt32BigEndian(bytes.AsSpan(1 * sizeof(uint), sizeof(uint)));
-        var rows = BinaryPrimitives.ReadUInt32BigEndian(bytes.AsSpan(2 * sizeof(uint), sizeof(uint)));
-        var cols = BinaryPrimitives.ReadUInt32BigEndian(bytes.AsSpan(3 * sizeof(uint), sizeof(uint)));
+        var count = checked((int)BinaryPrimitives.ReadUInt32BigEndian(header.Slice(1 * sizeof(uint), sizeof(uint))));
+        var rows = checked((int)BinaryPrimitives.ReadUInt32BigEndian(header.Slice(2 * sizeof(uint), sizeof(uint))));
+        var cols = checked((int)BinaryPrimitives.ReadUInt32BigEndian(header.Slice(3 * sizeof(uint), sizeof(uint))));
 
         if (rows != 28 || cols != 28)
             throw new InvalidOperationException($"Expected 28x28 images, but got {rows}x{cols}");
 
-        var imageCountToLoad = maxCount;
-        var packedImages = new uint[imageCountToLoad * 28];
+        var images = Tensor.CreateFromShapeUninitialized<byte>([(nint)count, (nint)rows, (nint)cols]);
+        var imageBytes = MemoryMarshal.CreateSpan(ref images.GetPinnableReference(), checked((int)images.FlattenedLength));
+        gzStream.ReadExactly(imageBytes);
+        return images;
+    }
 
-        for (var i = 0; i < imageCountToLoad; i++)
+    public static Tensor<uint> PackImages(Tensor<byte> images)
+    {
+        var count = checked((int)images.Lengths[0]);
+        var rows = checked((int)images.Lengths[1]);
+        var cols = checked((int)images.Lengths[2]);
+        var packedImages = Tensor.CreateFromShapeUninitialized<uint>([(nint)count, (nint)rows]);
+
+        for (var i = 0; i < count; i++)
         {
-            var sourceImageIdx = i % count;
-            var sourcePixelOffset = 16 + sourceImageIdx * 28 * 28;
-
-            for (var r = 0; r < 28; r++)
+            for (var r = 0; r < rows; r++)
             {
                 uint rowBits = 0;
-                for (var c = 0; c < 28; c++)
+                for (var c = 0; c < cols; c++)
                 {
-                    var pixelVal = bytes[sourcePixelOffset++];
-                    if (pixelVal > 127)
+                    if (images[i, r, c] > 127)
                     {
                         rowBits |= (1u << c);
                     }
                 }
-                packedImages[i * 28 + r] = rowBits;
+                packedImages[i, r] = rowBits;
             }
         }
 
-        return (packedImages, imageCountToLoad);
+        return packedImages;
     }
 
-    public static int[] ParseLabelsGz(string filePath, int maxCount)
+    public static Tensor<byte> ParseLabelsGz(string filePath)
     {
         using var fileStream = File.OpenRead(filePath);
         using var gzStream = new GZipStream(fileStream, CompressionMode.Decompress);
-        using var ms = new MemoryStream();
-        gzStream.CopyTo(ms);
-        var bytes = ms.ToArray();
+        Span<byte> header = stackalloc byte[2 * sizeof(uint)];
+        gzStream.ReadExactly(header);
 
-        var magic = BinaryPrimitives.ReadUInt32BigEndian(bytes.AsSpan(0 * sizeof(uint), sizeof(uint)));
+        var magic = BinaryPrimitives.ReadUInt32BigEndian(header.Slice(0 * sizeof(uint), sizeof(uint)));
         if (magic != 0x00000801)
             throw new InvalidOperationException($"Invalid images magic number: {magic:X}");
 
-        var count = BinaryPrimitives.ReadUInt32BigEndian(bytes.AsSpan(1 * sizeof(uint), sizeof(uint)));
+        var count = checked((nint)BinaryPrimitives.ReadUInt32BigEndian(header.Slice(1 * sizeof(uint), sizeof(uint))));
 
-        var labelCountToLoad = maxCount;
-        var labels = new int[labelCountToLoad];
+        var labels = Tensor.CreateFromShapeUninitialized<byte>([(nint)count]);
+        var labelsSpan = MemoryMarshal.CreateSpan(ref labels.GetPinnableReference(), checked((int)labels.FlattenedLength));
+        gzStream.ReadExactly(labelsSpan);
+        return labels;
+    }
 
-        for (var i = 0; i < labelCountToLoad; i++)
+    public static Tensor<T> RepeatToCount<T>(Tensor<T> source, int count)
+    {
+        var sourceCount = checked((int)source.Lengths[0]);
+        if (count <= sourceCount)
         {
-            labels[i] = bytes[8 + (i % count)];
+            return source;
         }
 
-        return labels;
+        var sourceLengths = source.Lengths;
+        var targetLengths = new nint[sourceLengths.Length];
+        targetLengths[0] = count;
+        for (var i = 1; i < sourceLengths.Length; i++)
+        {
+            targetLengths[i] = sourceLengths[i];
+        }
+
+        var target = Tensor.CreateFromShapeUninitialized<T>(targetLengths);
+        var sourceSpan = MemoryMarshal.CreateSpan(ref source.GetPinnableReference(), checked((int)source.FlattenedLength));
+        var targetSpan = MemoryMarshal.CreateSpan(ref target.GetPinnableReference(), checked((int)target.FlattenedLength));
+        sourceSpan.CopyTo(targetSpan);
+
+        var sampleSize = checked(sourceSpan.Length / sourceCount);
+        for (var i = sourceCount; i < count;)
+        {
+            var samplesToCopy = Math.Min(sourceCount, count - i);
+            var elementsToCopy = checked(samplesToCopy * sampleSize);
+            sourceSpan[..elementsToCopy].CopyTo(targetSpan.Slice(checked(i * sampleSize), elementsToCopy));
+            i += samplesToCopy;
+        }
+
+        return target;
     }
 }

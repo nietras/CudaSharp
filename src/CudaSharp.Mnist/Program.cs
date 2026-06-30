@@ -16,8 +16,6 @@ public partial class Program
     const int ClassCount = 10;
     const int ImageRows = 28;
     const int ImageCols = 28;
-    const int TrainImagesCount = 51200; // 400 batches of size 128
-    const int TestImagesCount = 10240;   // Padded to multiple of BatchSize (128 * 80 = 10240)
 
     public static async Task Main(string[] args)
     {
@@ -125,6 +123,8 @@ public partial class Program
         throw new ArgumentException($"Unknown version: {version}");
     }
 
+    static int DivideRoundUp(int value, int divisor) => (value + divisor - 1) / divisor;
+
     unsafe static (NetworkConfig Config, double MeanAccuracy, double MeanTime) RunConfig(string dataDir, NetworkConfig activeConfig, bool profile)
     {
         BatchSize = activeConfig.BatchSize;
@@ -147,10 +147,31 @@ public partial class Program
         var testLabelsPath = Path.Combine(dataDir, "t10k-labels-idx1-ubyte.gz");
 
         Console.WriteLine("[DATA] Parsing Gzip compressed idx dataset files in-memory...");
-        var (h_trainImages, trainImagesLoaded) = ParseImagesGz(trainImagesPath, TrainImagesCount);
-        var h_trainLabels = ParseLabelsGz(trainLabelsPath, TrainImagesCount);
-        var (h_testImages, testImagesLoaded) = ParseImagesGz(testImagesPath, TestImagesCount);
-        var h_testLabels = ParseLabelsGz(testLabelsPath, TestImagesCount);
+        var h_trainImageBytes = ParseImagesGz(trainImagesPath);
+        var h_trainLabelsRaw = ParseLabelsGz(trainLabelsPath);
+        var h_testImageBytes = ParseImagesGz(testImagesPath);
+        var h_testLabelsRaw = ParseLabelsGz(testLabelsPath);
+
+        var trainImagesLoaded = checked((int)h_trainImageBytes.Lengths[0]);
+        var trainLabelsLoaded = checked((int)h_trainLabelsRaw.Lengths[0]);
+        var testImagesLoaded = checked((int)h_testImageBytes.Lengths[0]);
+        var testLabelsLoaded = checked((int)h_testLabelsRaw.Lengths[0]);
+
+        if (trainImagesLoaded != trainLabelsLoaded)
+            throw new InvalidOperationException($"Train image/label count mismatch: {trainImagesLoaded} != {trainLabelsLoaded}");
+
+        if (testImagesLoaded != testLabelsLoaded)
+            throw new InvalidOperationException($"Test image/label count mismatch: {testImagesLoaded} != {testLabelsLoaded}");
+
+        var trainBatchesPerEpoch = DivideRoundUp(trainImagesLoaded, BatchSize);
+        var testStepCount = DivideRoundUp(testImagesLoaded, BatchSize);
+        var paddedTrainImageCount = trainBatchesPerEpoch * BatchSize;
+        var paddedTestImageCount = testStepCount * BatchSize;
+
+        var h_trainImages = PackImages(RepeatToCount(h_trainImageBytes, paddedTrainImageCount));
+        var h_trainLabels = RepeatToCount(h_trainLabelsRaw, paddedTrainImageCount);
+        var h_testImages = PackImages(RepeatToCount(h_testImageBytes, paddedTestImageCount));
+        var h_testLabels = RepeatToCount(h_testLabelsRaw, paddedTestImageCount);
 
         Console.WriteLine($"[DATA] Loaded {trainImagesLoaded} train images and {testImagesLoaded} test images successfully!");
 
@@ -200,7 +221,7 @@ public partial class Program
                     "--std=c++17",
                     "--use_fast_math",
                     $"-DBATCH_SIZE={activeConfig.BatchSize}",
-                    $"-DBATCHES_PER_EPOCH={activeConfig.BatchesPerEpoch}",
+                    $"-DBATCHES_PER_EPOCH={trainBatchesPerEpoch}",
                     $"-DTOTAL_STEPS={activeConfig.TotalSteps}",
                     $"-DMAX_LR={activeConfig.MaxLR}f",
                     $"-DFC1_OUTPUTS={activeConfig.FC1Outputs}",
@@ -335,10 +356,10 @@ public partial class Program
             var elementSize = activeConfig.IsHalf ? sizeof(ushort) : sizeof(float);
             var paramBytes = (nuint)(totalParamElements * elementSize);
 
-            var trainImagesSize = (nuint)(h_trainImages.Length * sizeof(uint));
-            var trainLabelsSize = (nuint)(h_trainLabels.Length * sizeof(int));
-            var testImagesSize = (nuint)(h_testImages.Length * sizeof(uint));
-            var testLabelsSize = (nuint)(h_testLabels.Length * sizeof(int));
+            var trainImagesSize = (nuint)((nint)h_trainImages.FlattenedLength * sizeof(uint));
+            var trainLabelsSize = (nuint)((nint)h_trainLabels.FlattenedLength * sizeof(byte));
+            var testImagesSize = (nuint)((nint)h_testImages.FlattenedLength * sizeof(uint));
+            var testLabelsSize = (nuint)((nint)h_testLabels.FlattenedLength * sizeof(byte));
 
             var conv1OutSize = (nuint)(BatchSize * activeConfig.Conv1OutPerSample);
             var conv1UnpooledSize = (nuint)(BatchSize * activeConfig.Conv1UnpooledPerSample);
@@ -436,9 +457,9 @@ public partial class Program
             var d_testLabels = arena.Rent(testLabelsSize);
 
             fixed (uint* pTrainImages = h_trainImages)
-            fixed (int* pTrainLabels = h_trainLabels)
+            fixed (byte* pTrainLabels = h_trainLabels)
             fixed (uint* pTestImages = h_testImages)
-            fixed (int* pTestLabels = h_testLabels)
+            fixed (byte* pTestLabels = h_testLabels)
             {
                 cuMemcpyHtoD(d_trainImages, (IntPtr)pTrainImages, trainImagesSize).Ok();
                 cuMemcpyHtoD(d_trainLabels, (IntPtr)pTrainLabels, trainLabelsSize).Ok();
@@ -573,7 +594,6 @@ public partial class Program
             cuGraphCreate(out var epochGraph, 0).Ok();
 
             var trainStepCount = activeConfig.TotalSteps;
-            var testStepCount = TestImagesCount / BatchSize;
 
             var localClearGradElements = conv1OutGradSize;
             var localTotalParamsCount = totalParamElements;
@@ -1150,7 +1170,8 @@ public partial class Program
                             d_fc2Out, (nuint)(h_fcOut.Length * sizeof(float))).Ok();
                     }
 
-                    for (var b = 0; b < BatchSize; b++)
+                    var batchSampleCount = Math.Min(BatchSize, testImagesLoaded - batchOffset);
+                    for (var b = 0; b < batchSampleCount; b++)
                     {
                         var maxVal = -1e9f;
                         var predLabel = -1;
@@ -1168,7 +1189,7 @@ public partial class Program
                     }
                 }
 
-                var accuracy = (double)correctPredictions / (testStepCount * BatchSize) * 100.0;
+                var accuracy = (double)correctPredictions / testImagesLoaded * 100.0;
                 if (isWarmup)
                 {
                     Console.WriteLine($"[WARMUP RESULTS] Accuracy: {accuracy:F2}%, GPU Time: {trainingTime:F3} ms");
@@ -1216,6 +1237,7 @@ public partial class Program
                 measuredTimes.ToArray(),
                 meanAcc,
                 meanTime,
+                trainBatchesPerEpoch,
                 profileTimes);
 
             arena.Dispose();
@@ -1395,6 +1417,7 @@ public partial class Program
         double[] measuredTimes,
         double meanAcc,
         double meanTime,
+        int batchesPerEpoch,
         System.Collections.Generic.Dictionary<string, System.Collections.Generic.List<float>>? profileTimes = null)
     {
         var sb = new StringBuilder();
@@ -1455,7 +1478,7 @@ public partial class Program
         sb.AppendLine();
         sb.AppendLine($"* **Batch Size**: {config.BatchSize}");
         sb.AppendLine($"* **Total Training Steps**: {config.TotalSteps}");
-        sb.AppendLine($"* **Batches per Epoch**: {config.BatchesPerEpoch}");
+        sb.AppendLine($"* **Batches per Epoch**: {batchesPerEpoch}");
         sb.AppendLine();
         sb.AppendLine("## 6. Performance Results");
         sb.AppendLine();

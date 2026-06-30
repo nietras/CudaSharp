@@ -277,7 +277,7 @@ public static partial class Program
         // FC2 Layer Backward Pass
         extern "C" __global__ void fc2_backward(
             const float* __restrict__ d_fc2_outputs,  // [BatchSize x 10]
-            const int* __restrict__ d_labels,        // [TotalImages]
+            const unsigned char* __restrict__ d_labels,        // [TotalImages]
             const float* __restrict__ d_fc1_outputs,   // [BatchSize x 256]
             const float* __restrict__ d_fc2_weights,   // [256 x 10]
             float* __restrict__ d_fc2_weights_grad,    // [256 x 10]

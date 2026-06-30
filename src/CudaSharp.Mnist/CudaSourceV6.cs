@@ -47,7 +47,7 @@ public static partial class Program
             const int* d_step, int is_training) {}
 
         extern "C" __global__ void fused_backward(
-            const __half* d_fc2_out, const int* d_labels, const __half* d_conv2_out,
+            const __half* d_fc2_out, const unsigned char* d_labels, const __half* d_conv2_out,
             const __half* d_fc2_weights, __half* d_fc2_weights_grad, __half* d_fc2_biases_grad,
             const __half* d_conv2_unpooled, const __half* d_conv1_out, const __half* d_conv2_filters,
             __half* d_conv2_filters_grad, __half* d_conv2_biases_grad, const __half* d_conv1_unpooled,
@@ -258,7 +258,7 @@ public static partial class Program
         // FC2 Backward Pass
         extern "C" __global__ void fc2_backward(
             const __half* __restrict__ d_fc2_outputs,
-            const int* __restrict__ d_labels,
+            const unsigned char* __restrict__ d_labels,
             const __half* __restrict__ d_fc2_inputs,
             const __half* __restrict__ d_fc2_weights,
             __half* __restrict__ d_fc2_weights_grad,

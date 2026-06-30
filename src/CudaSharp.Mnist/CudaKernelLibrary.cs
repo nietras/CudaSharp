@@ -1,4 +1,4 @@
-namespace CudaSharp.Mnist;
+﻿namespace CudaSharp.Mnist;
 
 public static class CudaKernelLibrary
 {
@@ -131,7 +131,7 @@ public static class CudaKernelLibrary
             const int* d_step, int is_training) {}
 
         extern "C" __global__ void fused_backward(
-            const __half* d_fc2_out, const int* d_labels,
+            const __half* d_fc2_out, const unsigned char* d_labels,
             const __half* d_conv2_out, const __half* d_fc2_weights,
             __half* d_fc2_weights_grad, __half* d_fc2_biases_grad,
             const __half* d_conv2_unpooled, const __half* d_conv1_out,
@@ -571,7 +571,7 @@ public static class CudaKernelLibrary
 
         extern "C" __global__ void fc2_backward(
             const __half* __restrict__ d_fc2_outputs,
-            const int* __restrict__ d_labels,
+            const unsigned char* __restrict__ d_labels,
             const __half* __restrict__ d_fc1_outputs,
             const __half* __restrict__ d_fc2_weights,
             __half* __restrict__ d_fc2_weights_grad,
@@ -666,7 +666,7 @@ public static class CudaKernelLibrary
 
         extern "C" __global__ void fc2_backward_weights(
             const __half* __restrict__ d_fc2_outputs,
-            const int* __restrict__ d_labels,
+            const unsigned char* __restrict__ d_labels,
             const __half* __restrict__ d_fc1_outputs,
             __half* __restrict__ d_fc2_weights_grad,
             const int* __restrict__ d_step)

@@ -9,7 +9,7 @@
   </PropertyGroup>
 
   <PropertyGroup>
-    <IlcInstructionSet Condition="$(RuntimeIdentifier) == 'win-x64'" >native</IlcInstructionSet>
+    <IlcInstructionSet Condition="$(RuntimeIdentifier) == 'win-x64'">native</IlcInstructionSet>
     <IlcInvariantGlobalization>true</IlcInvariantGlobalization>
     <IlcDisableReflection>true</IlcDisableReflection>
     <IlcGenerateMstatFile>true</IlcGenerateMstatFile>
@@ -22,6 +22,10 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <IsPackable>false</IsPackable>
   </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.Numerics.Tensors" Version="10.0.9" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\CudaSharp\CudaSharp.csproj" />
