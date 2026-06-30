@@ -141,10 +141,10 @@ public partial class Program
         Console.WriteLine($"[DEVICE] Loaded active GPU: {deviceName} (sm_{major}{minor})");
 
 
-        var trainImagesPath = Path.Combine(dataDir, "train-images-idx3-ubyte.gz");
-        var trainLabelsPath = Path.Combine(dataDir, "train-labels-idx1-ubyte.gz");
-        var testImagesPath = Path.Combine(dataDir, "t10k-images-idx3-ubyte.gz");
-        var testLabelsPath = Path.Combine(dataDir, "t10k-labels-idx1-ubyte.gz");
+        var trainImagesPath = Path.Combine(dataDir, TrainImagesFileName);
+        var trainLabelsPath = Path.Combine(dataDir, TrainLabelsFileName);
+        var testImagesPath = Path.Combine(dataDir, TestImagesFileName);
+        var testLabelsPath = Path.Combine(dataDir, TestLabelsFileName);
 
         Console.WriteLine("[DATA] Parsing Gzip compressed idx dataset files in-memory...");
         var h_trainImageBytes = ParseImagesGz(trainImagesPath);

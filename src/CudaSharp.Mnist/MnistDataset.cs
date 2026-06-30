@@ -13,10 +13,10 @@ namespace CudaSharp.Mnist;
 public static class MnistDataset
 {
     const string UrlBase = "https://storage.googleapis.com/cvdf-datasets/mnist/";
-    const string TrainImagesFileName = "train-images-idx3-ubyte.gz";
-    const string TrainLabelsFileName = "train-labels-idx1-ubyte.gz";
-    const string TestImagesFileName = "train-images-idx3-ubyte.gz";
-    const string TestLabelsFileName = "train-labels-idx1-ubyte.gz";
+    public const string TrainImagesFileName = "train-images-idx3-ubyte.gz";
+    public const string TrainLabelsFileName = "train-labels-idx1-ubyte.gz";
+    public const string TestImagesFileName = "t10k-images-idx3-ubyte.gz";
+    public const string TestLabelsFileName = "t10k-labels-idx1-ubyte.gz";
 
     static readonly IReadOnlyList<string> FileNames =
         [TrainImagesFileName, TrainLabelsFileName, TestImagesFileName, TestLabelsFileName];
@@ -44,7 +44,6 @@ public static class MnistDataset
         await response.Content.CopyToAsync(fileStream);
         Console.WriteLine($"[DOWNLOAD] Download complete. Saved to: {filePath}");
     }
-
 
     public static Tensor<byte> ParseImagesGz(string filePath)
     {
