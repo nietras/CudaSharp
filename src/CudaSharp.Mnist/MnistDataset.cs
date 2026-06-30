@@ -64,36 +64,10 @@ public static class MnistDataset
         if (rows != 28 || cols != 28)
             throw new InvalidOperationException($"Expected 28x28 images, but got {rows}x{cols}");
 
-        var images = Tensor.CreateFromShapeUninitialized<byte>([(nint)count, (nint)rows, (nint)cols]);
+        var images = Tensor.CreateFromShapeUninitialized<byte>([count, rows, cols]);
         var imageBytes = MemoryMarshal.CreateSpan(ref images.GetPinnableReference(), checked((int)images.FlattenedLength));
         gzStream.ReadExactly(imageBytes);
         return images;
-    }
-
-    public static Tensor<uint> PackImages(Tensor<byte> images)
-    {
-        var count = checked((int)images.Lengths[0]);
-        var rows = checked((int)images.Lengths[1]);
-        var cols = checked((int)images.Lengths[2]);
-        var packedImages = Tensor.CreateFromShapeUninitialized<uint>([(nint)count, (nint)rows]);
-
-        for (var i = 0; i < count; i++)
-        {
-            for (var r = 0; r < rows; r++)
-            {
-                uint rowBits = 0;
-                for (var c = 0; c < cols; c++)
-                {
-                    if (images[i, r, c] > 127)
-                    {
-                        rowBits |= (1u << c);
-                    }
-                }
-                packedImages[i, r] = rowBits;
-            }
-        }
-
-        return packedImages;
     }
 
     public static Tensor<byte> ParseLabelsGz(string filePath)
@@ -109,10 +83,42 @@ public static class MnistDataset
 
         var count = checked((nint)BinaryPrimitives.ReadUInt32BigEndian(header.Slice(1 * sizeof(uint), sizeof(uint))));
 
-        var labels = Tensor.CreateFromShapeUninitialized<byte>([(nint)count]);
+        var labels = Tensor.CreateFromShapeUninitialized<byte>([count]);
         var labelsSpan = MemoryMarshal.CreateSpan(ref labels.GetPinnableReference(), checked((int)labels.FlattenedLength));
         gzStream.ReadExactly(labelsSpan);
         return labels;
+    }
+
+    public static Tensor<uint> PackImages(ReadOnlyTensorSpan<byte> images)
+    {
+        var count = checked((int)images.Lengths[0]);
+        var rows = checked((int)images.Lengths[1]);
+        var cols = checked((int)images.Lengths[2]);
+        var packedImages = Tensor.CreateFromShapeUninitialized<uint>([count, rows]);
+        var imageSamples = images.GetDimensionSpan(0);
+        var packedSamples = packedImages.AsTensorSpan().GetDimensionSpan(0);
+
+        for (var i = 0; i < count; i++)
+        {
+            var imageRows = imageSamples[i].GetDimensionSpan(0);
+            var packedRows = packedSamples[i].GetSpan([0], rows);
+
+            for (var r = 0; r < rows; r++)
+            {
+                var pixels = imageRows[r].GetSpan([0], cols);
+                uint rowBits = 0;
+                for (var c = 0; c < cols; c++)
+                {
+                    if (pixels[c] > 127)
+                    {
+                        rowBits |= (1u << c);
+                    }
+                }
+                packedRows[r] = rowBits;
+            }
+        }
+
+        return packedImages;
     }
 
     public static Tensor<T> RepeatToCount<T>(Tensor<T> source, int count)

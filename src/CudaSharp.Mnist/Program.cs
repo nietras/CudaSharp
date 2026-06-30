@@ -157,6 +157,8 @@ public partial class Program
         var testImagesLoaded = checked((int)h_testImageBytes.Lengths[0]);
         var testLabelsLoaded = checked((int)h_testLabelsRaw.Lengths[0]);
 
+        Console.WriteLine("[DATA] Packing dataset in-memory...");
+
         if (trainImagesLoaded != trainLabelsLoaded)
             throw new InvalidOperationException($"Train image/label count mismatch: {trainImagesLoaded} != {trainLabelsLoaded}");
 
