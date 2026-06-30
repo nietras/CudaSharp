@@ -1,17 +1,16 @@
 ﻿using System;
-using System.Buffers.Binary;
 using System.Diagnostics;
 using System.IO;
-using System.IO.Compression;
-using System.Net.Http;
 using System.Runtime.CompilerServices;
 using System.Text;
+using System.Threading.Tasks;
+using static CudaSharp.Mnist.MnistDataset;
 using static CudaSharp.nvcuda;
 using static CudaSharp.nvrtc;
 
 namespace CudaSharp.Mnist;
 
-public unsafe partial class Program
+public partial class Program
 {
     static int BatchSize = 128;
     const int ClassCount = 10;
@@ -20,11 +19,15 @@ public unsafe partial class Program
     const int TrainImagesCount = 51200; // 400 batches of size 128
     const int TestImagesCount = 10240;   // Padded to multiple of BatchSize (128 * 80 = 10240)
 
-    public static void Main(string[] args)
+    public static async Task Main(string[] args)
     {
         Console.WriteLine("CudaSharp Ultra-Fast MNIST CNN Training Simulator");
 
-        var version = "ALL";
+        var dataDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "mnist_data");
+        if (!Directory.Exists(dataDir)) { Directory.CreateDirectory(dataDir); }
+        await EnsureDatasetFiles(dataDir);
+
+        var version = "V1";
         var profile = false;
         for (var i = 0; i < args.Length; i++)
         {
@@ -46,7 +49,7 @@ public unsafe partial class Program
             {
                 Console.WriteLine();
                 Console.WriteLine($"[COMPARE] Running {config.Name}...");
-                comparisonResults.Add(RunConfig(config, profile));
+                comparisonResults.Add(RunConfig(dataDir, config, profile));
             }
 
             Console.WriteLine();
@@ -59,7 +62,7 @@ public unsafe partial class Program
         }
 
         var activeConfig = ResolveNetworkConfig(version);
-        RunConfig(activeConfig, profile);
+        RunConfig(dataDir, activeConfig, profile);
     }
 
     static NetworkConfig ResolveNetworkConfig(string version)
@@ -122,7 +125,7 @@ public unsafe partial class Program
         throw new ArgumentException($"Unknown version: {version}");
     }
 
-    static (NetworkConfig Config, double MeanAccuracy, double MeanTime) RunConfig(NetworkConfig activeConfig, bool profile)
+    unsafe static (NetworkConfig Config, double MeanAccuracy, double MeanTime) RunConfig(string dataDir, NetworkConfig activeConfig, bool profile)
     {
         BatchSize = activeConfig.BatchSize;
         double meanAcc = 0.0;
@@ -137,21 +140,11 @@ public unsafe partial class Program
 
         Console.WriteLine($"[DEVICE] Loaded active GPU: {deviceName} (sm_{major}{minor})");
 
-        var dataDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "mnist_data");
-        if (!Directory.Exists(dataDir))
-        {
-            Directory.CreateDirectory(dataDir);
-        }
 
         var trainImagesPath = Path.Combine(dataDir, "train-images-idx3-ubyte.gz");
         var trainLabelsPath = Path.Combine(dataDir, "train-labels-idx1-ubyte.gz");
         var testImagesPath = Path.Combine(dataDir, "t10k-images-idx3-ubyte.gz");
         var testLabelsPath = Path.Combine(dataDir, "t10k-labels-idx1-ubyte.gz");
-
-        EnsureDatasetFile(trainImagesPath, "https://storage.googleapis.com/cvdf-datasets/mnist/train-images-idx3-ubyte.gz");
-        EnsureDatasetFile(trainLabelsPath, "https://storage.googleapis.com/cvdf-datasets/mnist/train-labels-idx1-ubyte.gz");
-        EnsureDatasetFile(testImagesPath, "https://storage.googleapis.com/cvdf-datasets/mnist/t10k-images-idx3-ubyte.gz");
-        EnsureDatasetFile(testLabelsPath, "https://storage.googleapis.com/cvdf-datasets/mnist/t10k-labels-idx1-ubyte.gz");
 
         Console.WriteLine("[DATA] Parsing Gzip compressed idx dataset files in-memory...");
         var (h_trainImages, trainImagesLoaded) = ParseImagesGz(trainImagesPath, TrainImagesCount);
@@ -1246,7 +1239,7 @@ public unsafe partial class Program
         return (activeConfig, meanAcc, meanTime);
     }
 
-    static CUgraphNode AddKernelNode(
+    unsafe static CUgraphNode AddKernelNode(
         CUgraph graph,
         ReadOnlySpan<CUgraphNode> dependencies,
         CUfunction function,
@@ -1280,7 +1273,7 @@ public unsafe partial class Program
         return new CUdeviceptr((IntPtr)(ptr.Value.ToInt64() + offsetElements * elementSize));
     }
 
-    static void InitializeParameters(CUdeviceptr d_weights, CUdeviceptr d_biases, int outFeatures, int inFeatures, int seed, bool isHalf)
+    unsafe static void InitializeParameters(CUdeviceptr d_weights, CUdeviceptr d_biases, int outFeatures, int inFeatures, int seed, bool isHalf)
     {
         var rand = new Random(seed);
         var stdDev = Math.Sqrt(2.0 / inFeatures);
@@ -1327,7 +1320,7 @@ public unsafe partial class Program
         }
     }
 
-    static void InitializeModelParameters(
+    unsafe static void InitializeModelParameters(
         NetworkConfig activeConfig,
         CUdeviceptr d_conv1Filters, CUdeviceptr d_conv1Biases,
         CUdeviceptr d_conv2Filters, CUdeviceptr d_conv2Biases,
@@ -1391,89 +1384,6 @@ public unsafe partial class Program
         }
     }
 
-    static void EnsureDatasetFile(string filePath, string url)
-    {
-        if (File.Exists(filePath)) return;
-
-        Console.WriteLine($"[DOWNLOAD] MNIST dataset file missing. Fetching from: {url}");
-        using var client = new HttpClient();
-        var response = client.GetAsync(url).GetAwaiter().GetResult();
-        response.EnsureSuccessStatusCode();
-
-        using var fs = File.Create(filePath);
-        response.Content.CopyToAsync(fs).GetAwaiter().GetResult();
-        Console.WriteLine($"[DOWNLOAD] Download complete. Saved to: {filePath}");
-    }
-
-    static (uint[] images, int count) ParseImagesGz(string filePath, int maxCount)
-    {
-        using var fileStream = File.OpenRead(filePath);
-        using var gzStream = new GZipStream(fileStream, CompressionMode.Decompress);
-        using var ms = new MemoryStream();
-        gzStream.CopyTo(ms);
-        var bytes = ms.ToArray();
-
-        var magic = BinaryPrimitives.ReadUInt32BigEndian(bytes.AsSpan(0 * sizeof(uint), sizeof(uint)));
-        if (magic != 0x00000803)
-            throw new InvalidOperationException($"Invalid images magic number: {magic:X}");
-
-        var count = BinaryPrimitives.ReadUInt32BigEndian(bytes.AsSpan(1 * sizeof(uint), sizeof(uint)));
-        var rows = BinaryPrimitives.ReadUInt32BigEndian(bytes.AsSpan(2 * sizeof(uint), sizeof(uint)));
-        var cols = BinaryPrimitives.ReadUInt32BigEndian(bytes.AsSpan(3 * sizeof(uint), sizeof(uint)));
-
-        if (rows != 28 || cols != 28)
-            throw new InvalidOperationException($"Expected 28x28 images, but got {rows}x{cols}");
-
-        var imageCountToLoad = maxCount;
-        var packedImages = new uint[imageCountToLoad * 28];
-
-        for (var i = 0; i < imageCountToLoad; i++)
-        {
-            var sourceImageIdx = i % count;
-            var sourcePixelOffset = 16 + sourceImageIdx * 28 * 28;
-
-            for (var r = 0; r < 28; r++)
-            {
-                uint rowBits = 0;
-                for (var c = 0; c < 28; c++)
-                {
-                    var pixelVal = bytes[sourcePixelOffset++];
-                    if (pixelVal > 127)
-                    {
-                        rowBits |= (1u << c);
-                    }
-                }
-                packedImages[i * 28 + r] = rowBits;
-            }
-        }
-
-        return (packedImages, imageCountToLoad);
-    }
-
-    static int[] ParseLabelsGz(string filePath, int maxCount)
-    {
-        using var fileStream = File.OpenRead(filePath);
-        using var gzStream = new GZipStream(fileStream, CompressionMode.Decompress);
-        using var ms = new MemoryStream();
-        gzStream.CopyTo(ms);
-        var bytes = ms.ToArray();
-
-        var magic = BinaryPrimitives.ReadUInt32BigEndian(bytes.AsSpan(0 * sizeof(uint), sizeof(uint)));
-        if (magic != 0x00000801)
-            throw new InvalidOperationException($"Invalid images magic number: {magic:X}");
-
-        var count = BinaryPrimitives.ReadUInt32BigEndian(bytes.AsSpan(1 * sizeof(uint), sizeof(uint)));
-
-        var labelCountToLoad = maxCount;
-        var labels = new int[labelCountToLoad];
-
-        for (var i = 0; i < labelCountToLoad; i++)
-        {
-            labels[i] = bytes[8 + (i % count)];
-        }
-
-        return labels;
-    }
 
     static void WriteMarkdownReport(
         NetworkConfig config,
