@@ -32,4 +32,11 @@
     <ProjectReference Include="..\CudaSharp\CudaSharp.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="NtvLibs.cuda13.nvrtc-builtins64_133.runtime.json" Version="13.3.0" />
+    <PackageReference Include="NtvLibs.cuda13.nvrtc-builtins64_133.runtime.win-x64" Version="13.3.0" />
+    <PackageReference Include="NtvLibs.cuda13.nvrtc64_130_0.runtime.json" Version="13.3.0" />
+    <PackageReference Include="NtvLibs.cuda13.nvrtc64_130_0.runtime.win-x64" Version="13.3.0" />
+  </ItemGroup>
+
 </Project>

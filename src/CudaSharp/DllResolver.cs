@@ -30,6 +30,10 @@ public static class DllResolver
 
     static IntPtr OnDllImport(string libraryName, Assembly assembly, DllImportSearchPath? searchPath)
     {
+        var nativePathsData = AppContext.GetData("NATIVE_DLL_SEARCH_DIRECTORIES") as string ?? string.Empty;
+        // Paths are separated by ';' on Windows and ':' on Unix/Linux/macOS
+        var nativeDirectories = nativePathsData.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries);
+
         if (libraryName == "nvcuda")
         {
             var cudaPath = Environment.GetEnvironmentVariable("CUDA_PATH");
@@ -72,10 +76,10 @@ public static class DllResolver
         else if (libraryName == "nvrtc")
         {
             int maxCudaVersion = GetDriverVersion(assembly, searchPath);
-            var cudaPath = Environment.GetEnvironmentVariable("CUDA_PATH");
-            if (!string.IsNullOrEmpty(cudaPath))
+            var cudaPath = Environment.GetEnvironmentVariable("CUDA_PATH") ?? string.Empty;
             {
-                foreach (var binPath in GetCudaNvrtcSearchPaths(cudaPath))
+                var directories = GetCudaNvrtcSearchPaths(cudaPath).Concat(nativeDirectories).ToArray();
+                foreach (var binPath in directories)
                 {
                     if (!Directory.Exists(binPath))
                     {
@@ -104,11 +108,11 @@ public static class DllResolver
 
                         if (NativeLibrary.TryLoad(dll, out var handle))
                         {
-                            if (IsNvrtcCompatible(handle, maxCudaVersion))
+                            //if (IsNvrtcCompatible(handle, maxCudaVersion))
                             {
                                 return handle;
                             }
-                            NativeLibrary.Free(handle);
+                            //NativeLibrary.Free(handle);
                         }
                     }
                 }
