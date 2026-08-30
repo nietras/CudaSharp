@@ -130,13 +130,13 @@ Benchmarks.
 
 ##### TestBench Benchmark Results
 
-###### AMD.Ryzen.9.9950X - TestBench Benchmark Results (CudaSharp 0.0.5.0, System 10.0.826.23019)
+###### AMD.Ryzen.9.9950X - TestBench Benchmark Results (CudaSharp 0.0.5.0, System 10.0.926.27113)
 
 | Method                      | Scope | Count | Mean               | Ratio         | Allocated | Alloc Ratio |
 |---------------------------- |------ |------ |-------------------:|--------------:|----------:|------------:|
-| CudaSharp_cuInit            | Test  | 25000 |         27.0299 ns |         1.000 |         - |          NA |
-| CudaSharp_CuInit_EnsureInit | Test  | 25000 |          0.0047 ns |         0.000 |         - |          NA |
-| CudaSharp_CtxCreateDestroy  | Test  | 25000 | 51,875,839.5833 ns | 1,919,210.319 |         - |          NA |
+| CudaSharp_cuInit            | Test  | 25000 |         27.8944 ns |         1.000 |         - |          NA |
+| CudaSharp_CuInit_EnsureInit | Test  | 25000 |          0.0216 ns |         0.001 |         - |          NA |
+| CudaSharp_CtxCreateDestroy  | Test  | 25000 | 57,439,150.0000 ns | 2,059,164.388 |         - |          NA |
 
 
 ## Example Catalogue
