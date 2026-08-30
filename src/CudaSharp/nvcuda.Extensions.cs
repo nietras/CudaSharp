@@ -31,6 +31,7 @@ public static partial class nvcuda
             CUresult.CUDA_ERROR_NOT_FOUND => nameof(CUresult.CUDA_ERROR_NOT_FOUND),
             CUresult.CUDA_ERROR_LAUNCH_OUT_OF_RESOURCES => nameof(CUresult.CUDA_ERROR_LAUNCH_OUT_OF_RESOURCES),
             CUresult.CUDA_ERROR_INVALID_IMAGE => nameof(CUresult.CUDA_ERROR_INVALID_IMAGE),
+            CUresult.CUDA_ERROR_INVALID_PTX => nameof(CUresult.CUDA_ERROR_INVALID_PTX),
             CUresult.CUDA_ERROR_LAUNCH_FAILED => nameof(CUresult.CUDA_ERROR_LAUNCH_FAILED),
             CUresult.CUDA_ERROR_LAUNCH_INCOMPATIBLE_TEXTURING => nameof(CUresult.CUDA_ERROR_LAUNCH_INCOMPATIBLE_TEXTURING),
             CUresult.CUDA_ERROR_LAUNCH_TIMEOUT => nameof(CUresult.CUDA_ERROR_LAUNCH_TIMEOUT),
