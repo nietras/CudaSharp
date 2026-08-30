@@ -24,43 +24,215 @@ public static partial class nvcuda
     public readonly record struct CUexternalMemory(IntPtr Value);
     public readonly record struct CUexternalSemaphore(IntPtr Value);
 
-    /// <summary>
-    /// CUDA result codes
-    /// </summary>
+    /// <summary>CUDA driver API error codes.</summary>
     public enum CUresult
     {
+        /// <summary>The API call returned with no errors.</summary>
         CUDA_SUCCESS = 0,
+        /// <summary>One or more parameters passed to the API call is not within an acceptable range of values.</summary>
         CUDA_ERROR_INVALID_VALUE = 1,
+        /// <summary>The API call was unable to allocate enough memory or other resources to perform the requested operation.</summary>
         CUDA_ERROR_OUT_OF_MEMORY = 2,
+        /// <summary>The CUDA driver has not been initialized with cuInit() or initialization has failed.</summary>
         CUDA_ERROR_NOT_INITIALIZED = 3,
+        /// <summary>The CUDA driver is in the process of shutting down.</summary>
         CUDA_ERROR_DEINITIALIZED = 4,
+        /// <summary>The profiler is not initialized for this run.</summary>
+        CUDA_ERROR_PROFILER_DISABLED = 5,
+        /// <summary>Deprecated. It is no longer an error to attempt to enable or disable profiling without initialization.</summary>
+        CUDA_ERROR_PROFILER_NOT_INITIALIZED = 6,
+        /// <summary>Deprecated. It is no longer an error to call cuProfilerStart() when profiling is already enabled.</summary>
+        CUDA_ERROR_PROFILER_ALREADY_STARTED = 7,
+        /// <summary>Deprecated. It is no longer an error to call cuProfilerStop() when profiling is already disabled.</summary>
+        CUDA_ERROR_PROFILER_ALREADY_STOPPED = 8,
+        /// <summary>The CUDA driver that the application has loaded is a stub library.</summary>
+        CUDA_ERROR_STUB_LIBRARY = 34,
+        /// <summary>The API call requires a newer CUDA driver than the one currently installed.</summary>
+        CUDA_ERROR_CALL_REQUIRES_NEWER_DRIVER = 36,
+        /// <summary>The requested CUDA device is unavailable at the current time.</summary>
+        CUDA_ERROR_DEVICE_UNAVAILABLE = 46,
+        /// <summary>No CUDA-capable devices were detected by the installed CUDA driver.</summary>
         CUDA_ERROR_NO_DEVICE = 100,
+        /// <summary>The supplied device ordinal does not correspond to a valid CUDA device or the requested action is invalid for the specified device.</summary>
         CUDA_ERROR_INVALID_DEVICE = 101,
-        CUDA_ERROR_INVALID_CONTEXT = 201,
-        CUDA_ERROR_MAP_FAILED = 205,
-        CUDA_ERROR_UNMAP_FAILED = 206,
-        CUDA_ERROR_NOT_FOUND = 300,
-        CUDA_ERROR_LAUNCH_OUT_OF_RESOURCES = 701,
+        /// <summary>The Grid license is not applied.</summary>
+        CUDA_ERROR_DEVICE_NOT_LICENSED = 102,
+        /// <summary>The device kernel image or CUDA module is invalid.</summary>
         CUDA_ERROR_INVALID_IMAGE = 200,
-        CUDA_ERROR_INVALID_PTX = 222,
-        CUDA_ERROR_LAUNCH_FAILED = 702,
-        CUDA_ERROR_LAUNCH_INCOMPATIBLE_TEXTURING = 703,
-        CUDA_ERROR_LAUNCH_TIMEOUT = 704,
-        CUDA_ERROR_LAUNCH_PARAM_COUNT_MISMATCH = 705,
-        CUDA_ERROR_LAUNCH_PARAM_INVALID = 706,
-        CUDA_ERROR_LAUNCH_PARAM_NOT_ADDRESSABLE = 707,
-        CUDA_ERROR_LAUNCH_PARAM_UNKNOWN = 708,
-        CUDA_ERROR_INVALID_DEVICE_FUNCTION = 709,
-        CUDA_ERROR_NOT_READY = 600,
-        CUDA_ERROR_MODULE_NOT_FOUND = 304,
+        /// <summary>There is no context bound to the current thread, or the supplied context handle is not valid.</summary>
+        CUDA_ERROR_INVALID_CONTEXT = 201,
+        /// <summary>Deprecated. The context supplied as a parameter was already the active context.</summary>
+        CUDA_ERROR_CONTEXT_ALREADY_CURRENT = 202,
+        /// <summary>A map or register operation has failed.</summary>
+        CUDA_ERROR_MAP_FAILED = 205,
+        /// <summary>An unmap or unregister operation has failed.</summary>
+        CUDA_ERROR_UNMAP_FAILED = 206,
+        /// <summary>The specified array is currently mapped and cannot be destroyed.</summary>
+        CUDA_ERROR_ARRAY_IS_MAPPED = 207,
+        /// <summary>The resource is already mapped.</summary>
+        CUDA_ERROR_ALREADY_MAPPED = 208,
+        /// <summary>No kernel image is available that is suitable for the device.</summary>
+        CUDA_ERROR_NO_BINARY_FOR_GPU = 209,
+        /// <summary>The resource has already been acquired.</summary>
+        CUDA_ERROR_ALREADY_ACQUIRED = 210,
+        /// <summary>The resource is not mapped.</summary>
+        CUDA_ERROR_NOT_MAPPED = 211,
+        /// <summary>The mapped resource is not available for access as an array.</summary>
+        CUDA_ERROR_NOT_MAPPED_AS_ARRAY = 212,
+        /// <summary>The mapped resource is not available for access as a pointer.</summary>
+        CUDA_ERROR_NOT_MAPPED_AS_POINTER = 213,
+        /// <summary>An uncorrectable ECC error was detected during execution.</summary>
+        CUDA_ERROR_ECC_UNCORRECTABLE = 214,
+        /// <summary>The CUlimit passed to the API call is not supported by the active device.</summary>
+        CUDA_ERROR_UNSUPPORTED_LIMIT = 215,
+        /// <summary>The CUcontext can only be bound to a single CPU thread at a time but is already bound to a CPU thread.</summary>
+        CUDA_ERROR_CONTEXT_ALREADY_IN_USE = 216,
+        /// <summary>Peer access is not supported across the given devices.</summary>
+        CUDA_ERROR_PEER_ACCESS_UNSUPPORTED = 217,
+        /// <summary>PTX JIT compilation failed.</summary>
+        CUDA_ERROR_INVALID_PTX = 218,
+        /// <summary>An error occurred with the OpenGL or DirectX context.</summary>
+        CUDA_ERROR_INVALID_GRAPHICS_CONTEXT = 219,
+        /// <summary>An uncorrectable NVLink error was detected during execution.</summary>
+        CUDA_ERROR_NVLINK_UNCORRECTABLE = 220,
+        /// <summary>The PTX JIT compiler library was not found.</summary>
+        CUDA_ERROR_JIT_COMPILER_NOT_FOUND = 221,
+        /// <summary>The provided PTX was compiled with an unsupported toolchain.</summary>
+        CUDA_ERROR_UNSUPPORTED_PTX_VERSION = 222,
+        /// <summary>PTX JIT compilation was disabled.</summary>
+        CUDA_ERROR_JIT_COMPILATION_DISABLED = 223,
+        /// <summary>The CUexecAffinityType passed to the API call is not supported by the active device.</summary>
+        CUDA_ERROR_UNSUPPORTED_EXEC_AFFINITY = 224,
+        /// <summary>The code to be compiled by the PTX JIT contains an unsupported call to cudaDeviceSynchronize.</summary>
+        CUDA_ERROR_UNSUPPORTED_DEVSIDE_SYNC = 225,
+        /// <summary>An exception occurred on the device and is now contained by the GPU error containment capability.</summary>
+        CUDA_ERROR_CONTAINED = 226,
+        /// <summary>The device kernel source is invalid, including device-code compilation or linker errors.</summary>
+        CUDA_ERROR_INVALID_SOURCE = 300,
+        /// <summary>The specified file was not found.</summary>
         CUDA_ERROR_FILE_NOT_FOUND = 301,
-        CUDA_ERROR_INVALID_DEVICE_POINTER = 400,
-        CUDA_ERROR_INVALID_PITCH_VALUE = 210,
-        CUDA_ERROR_INVALID_CUDAARRAY = 211,
-        CUDA_ERROR_INVALID_TEXTURE = 212,
-        CUDA_ERROR_INVALID_GRAPHICS_CONTEXT = 213,
-        CUDA_ERROR_INVALID_SOURCE = 302,
-        CUDA_ERROR_INVALID_ADDRESS = 401,
+        /// <summary>A link to a shared object failed to resolve.</summary>
+        CUDA_ERROR_SHARED_OBJECT_SYMBOL_NOT_FOUND = 302,
+        /// <summary>Initialization of a shared object failed.</summary>
+        CUDA_ERROR_SHARED_OBJECT_INIT_FAILED = 303,
+        /// <summary>An operating-system call failed.</summary>
+        CUDA_ERROR_OPERATING_SYSTEM = 304,
+        /// <summary>A resource handle passed to the API call was not valid.</summary>
+        CUDA_ERROR_INVALID_HANDLE = 400,
+        /// <summary>A resource required by the API call is not in a valid state to perform the requested operation.</summary>
+        CUDA_ERROR_ILLEGAL_STATE = 401,
+        /// <summary>An attempt was made to introspect an object in a way that would discard semantically important information.</summary>
+        CUDA_ERROR_LOSSY_QUERY = 402,
+        /// <summary>A named symbol was not found.</summary>
+        CUDA_ERROR_NOT_FOUND = 500,
+        /// <summary>Previously issued asynchronous operations have not completed yet.</summary>
+        CUDA_ERROR_NOT_READY = 600,
+        /// <summary>While executing a kernel, the device encountered a load or store instruction on an invalid memory address.</summary>
+        CUDA_ERROR_ILLEGAL_ADDRESS = 700,
+        /// <summary>The launch did not occur because it did not have appropriate resources.</summary>
+        CUDA_ERROR_LAUNCH_OUT_OF_RESOURCES = 701,
+        /// <summary>The device kernel took too long to execute.</summary>
+        CUDA_ERROR_LAUNCH_TIMEOUT = 702,
+        /// <summary>The kernel launch uses an incompatible texturing mode.</summary>
+        CUDA_ERROR_LAUNCH_INCOMPATIBLE_TEXTURING = 703,
+        /// <summary>cuCtxEnablePeerAccess() is trying to re-enable peer access to a context where it is already enabled.</summary>
+        CUDA_ERROR_PEER_ACCESS_ALREADY_ENABLED = 704,
+        /// <summary>cuCtxDisablePeerAccess() is trying to disable peer access which has not been enabled.</summary>
+        CUDA_ERROR_PEER_ACCESS_NOT_ENABLED = 705,
+        /// <summary>The primary context for the specified device has already been initialized.</summary>
+        CUDA_ERROR_PRIMARY_CONTEXT_ACTIVE = 708,
+        /// <summary>The context current to the calling thread has been destroyed or is an uninitialized primary context.</summary>
+        CUDA_ERROR_CONTEXT_IS_DESTROYED = 709,
+        /// <summary>A device-side assert was triggered during kernel execution.</summary>
+        CUDA_ERROR_ASSERT = 710,
+        /// <summary>The hardware resources required to enable peer access have been exhausted.</summary>
+        CUDA_ERROR_TOO_MANY_PEERS = 711,
+        /// <summary>The memory range passed to cuMemHostRegister() has already been registered.</summary>
+        CUDA_ERROR_HOST_MEMORY_ALREADY_REGISTERED = 712,
+        /// <summary>The pointer passed to cuMemHostUnregister() does not correspond to a registered memory region.</summary>
+        CUDA_ERROR_HOST_MEMORY_NOT_REGISTERED = 713,
+        /// <summary>While executing a kernel, the device encountered a stack error.</summary>
+        CUDA_ERROR_HARDWARE_STACK_ERROR = 714,
+        /// <summary>While executing a kernel, the device encountered an illegal instruction.</summary>
+        CUDA_ERROR_ILLEGAL_INSTRUCTION = 715,
+        /// <summary>While executing a kernel, the device encountered a load or store instruction on an unaligned memory address.</summary>
+        CUDA_ERROR_MISALIGNED_ADDRESS = 716,
+        /// <summary>While executing a kernel, the device encountered an instruction operating on an invalid address space.</summary>
+        CUDA_ERROR_INVALID_ADDRESS_SPACE = 717,
+        /// <summary>The device program counter wrapped its address space.</summary>
+        CUDA_ERROR_INVALID_PC = 718,
+        /// <summary>An exception occurred on the device while executing a kernel.</summary>
+        CUDA_ERROR_LAUNCH_FAILED = 719,
+        /// <summary>The number of blocks launched per grid for a cooperative kernel exceeds the permitted maximum.</summary>
+        CUDA_ERROR_COOPERATIVE_LAUNCH_TOO_LARGE = 720,
+        /// <summary>An exception occurred on the device while exiting a kernel using tensor memory because tensor memory was not completely deallocated.</summary>
+        CUDA_ERROR_TENSOR_MEMORY_LEAK = 721,
+        /// <summary>The attempted operation is not permitted.</summary>
+        CUDA_ERROR_NOT_PERMITTED = 800,
+        /// <summary>The attempted operation is not supported on the current system or device.</summary>
+        CUDA_ERROR_NOT_SUPPORTED = 801,
+        /// <summary>The system is not yet ready to start any CUDA work.</summary>
+        CUDA_ERROR_SYSTEM_NOT_READY = 802,
+        /// <summary>There is a mismatch between the display-driver and CUDA-driver versions.</summary>
+        CUDA_ERROR_SYSTEM_DRIVER_MISMATCH = 803,
+        /// <summary>The visible hardware does not support the configured forward-compatibility mode.</summary>
+        CUDA_ERROR_COMPAT_NOT_SUPPORTED_ON_DEVICE = 804,
+        /// <summary>The MPS client failed to connect to the MPS control daemon or MPS server.</summary>
+        CUDA_ERROR_MPS_CONNECTION_FAILED = 805,
+        /// <summary>The remote procedural call between the MPS server and MPS client failed.</summary>
+        CUDA_ERROR_MPS_RPC_FAILURE = 806,
+        /// <summary>The MPS server is not ready to accept new MPS client requests.</summary>
+        CUDA_ERROR_MPS_SERVER_NOT_READY = 807,
+        /// <summary>The hardware resources required to create an MPS client have been exhausted.</summary>
+        CUDA_ERROR_MPS_MAX_CLIENTS_REACHED = 808,
+        /// <summary>The hardware resources required to support device connections have been exhausted.</summary>
+        CUDA_ERROR_MPS_MAX_CONNECTIONS_REACHED = 809,
+        /// <summary>The MPS client has been terminated by the server.</summary>
+        CUDA_ERROR_MPS_CLIENT_TERMINATED = 810,
+        /// <summary>The module uses CUDA Dynamic Parallelism, but the current configuration does not support it.</summary>
+        CUDA_ERROR_CDP_NOT_SUPPORTED = 811,
+        /// <summary>The module contains an unsupported interaction between different versions of CUDA Dynamic Parallelism.</summary>
+        CUDA_ERROR_CDP_VERSION_MISMATCH = 812,
+        /// <summary>The operation is not permitted when the stream is capturing.</summary>
+        CUDA_ERROR_STREAM_CAPTURE_UNSUPPORTED = 900,
+        /// <summary>The current capture sequence on the stream was invalidated due to a previous error.</summary>
+        CUDA_ERROR_STREAM_CAPTURE_INVALIDATED = 901,
+        /// <summary>The operation would have resulted in a merge of two independent capture sequences.</summary>
+        CUDA_ERROR_STREAM_CAPTURE_MERGE = 902,
+        /// <summary>The capture was not initiated in this stream.</summary>
+        CUDA_ERROR_STREAM_CAPTURE_UNMATCHED = 903,
+        /// <summary>The capture sequence contains a fork that was not joined to the primary stream.</summary>
+        CUDA_ERROR_STREAM_CAPTURE_UNJOINED = 904,
+        /// <summary>A dependency would have been created across the capture sequence boundary.</summary>
+        CUDA_ERROR_STREAM_CAPTURE_ISOLATION = 905,
+        /// <summary>A disallowed implicit dependency on a current capture sequence from cudaStreamLegacy was detected.</summary>
+        CUDA_ERROR_STREAM_CAPTURE_IMPLICIT = 906,
+        /// <summary>The operation is not permitted on an event last recorded in a capturing stream.</summary>
+        CUDA_ERROR_CAPTURED_EVENT = 907,
+        /// <summary>A stream capture sequence not initiated with relaxed capture mode was passed to cuStreamEndCapture in a different thread.</summary>
+        CUDA_ERROR_STREAM_CAPTURE_WRONG_THREAD = 908,
+        /// <summary>The timeout specified for the wait operation has elapsed.</summary>
+        CUDA_ERROR_TIMEOUT = 909,
+        /// <summary>The graph update was not performed because it violated constraints specific to instantiated graph update.</summary>
+        CUDA_ERROR_GRAPH_EXEC_UPDATE_FAILURE = 910,
+        /// <summary>An error occurred in a device outside of the GPU.</summary>
+        CUDA_ERROR_EXTERNAL_DEVICE = 911,
+        /// <summary>A kernel launch failed due to cluster misconfiguration.</summary>
+        CUDA_ERROR_INVALID_CLUSTER_SIZE = 912,
+        /// <summary>A function handle is not loaded when calling an API that requires a loaded function.</summary>
+        CUDA_ERROR_FUNCTION_NOT_LOADED = 913,
+        /// <summary>One or more resources passed to the operation are not valid resource types.</summary>
+        CUDA_ERROR_INVALID_RESOURCE_TYPE = 914,
+        /// <summary>One or more resources are insufficient or non-applicable for the operation.</summary>
+        CUDA_ERROR_INVALID_RESOURCE_CONFIGURATION = 915,
+        /// <summary>An error occurred during the key rotation sequence.</summary>
+        CUDA_ERROR_KEY_ROTATION = 916,
+        /// <summary>The requested operation is not permitted because the stream is in a detached state.</summary>
+        CUDA_ERROR_STREAM_DETACHED = 917,
+        /// <summary>Graph recapture failed and had to be terminated.</summary>
+        CUDA_ERROR_GRAPH_RECAPTURE_FAILURE = 918,
+        /// <summary>An unknown internal error has occurred.</summary>
+        CUDA_ERROR_UNKNOWN = 999,
     }
 
     public enum CUevent_flags
