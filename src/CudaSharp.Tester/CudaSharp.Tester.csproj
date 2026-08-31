@@ -14,7 +14,7 @@
          https://github.com/dotnet/runtimelab/issues/1269 ([NativeAOT] Best way to track down app size bloat?) 
          https://github.com/dotnet/runtime/blob/main/src/coreclr/nativeaot/docs/optimizing.md (IlcInstructionSet, IlcMaxVectorTBitWidth)
      -->
-    <IlcInstructionSet Condition="$(RuntimeIdentifier) == 'win-x64'" >native</IlcInstructionSet>
+    <IlcInstructionSet Condition="$(RuntimeIdentifier) == 'win-x64'">native</IlcInstructionSet>
     <IlcInvariantGlobalization>true</IlcInvariantGlobalization>
     <IlcDisableReflection>true</IlcDisableReflection>
     <IlcGenerateMstatFile>true</IlcGenerateMstatFile>
@@ -37,6 +37,8 @@
     <PackageReference Include="NtvLibs.cuda13.nvrtc-builtins64_133.runtime.win-x64" Version="13.3.0" />
     <PackageReference Include="NtvLibs.cuda13.nvrtc64_130_0.runtime.json" Version="13.3.0" />
     <PackageReference Include="NtvLibs.cuda13.nvrtc64_130_0.runtime.win-x64" Version="13.3.0" />
+    <PackageReference Include="NtvLibs.cuda13.nvJitLink_130_0.runtime.json" Version="13.3.0" />
+    <PackageReference Include="NtvLibs.cuda13.nvJitLink_130_0.runtime.win-x64" Version="13.3.0" />
   </ItemGroup>
 
 </Project>

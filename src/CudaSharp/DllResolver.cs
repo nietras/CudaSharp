@@ -211,18 +211,36 @@ public static class DllResolver
         }
         else if (libraryName == "nvJitLink")
         {
+            foreach (var nativeDirectory in nativeDirectories)
+            {
+                if (!Directory.Exists(nativeDirectory))
+                {
+                    continue;
+                }
+
+                var dll = Directory.GetFiles(nativeDirectory, "nvJitLink*.dll", SearchOption.AllDirectories)
+                                   .OrderByDescending(Path.GetFileName)
+                                   .FirstOrDefault();
+                if (dll != null && NativeLibrary.TryLoad(dll, out var handle))
+                {
+                    return handle;
+                }
+            }
+
             var cudaPath = Environment.GetEnvironmentVariable("CUDA_PATH");
             if (!string.IsNullOrEmpty(cudaPath))
             {
-                var binPath = Path.Combine(cudaPath, "bin", "x64");
-                if (Directory.Exists(binPath))
+                foreach (var binPath in GetCudaNvrtcSearchPaths(cudaPath))
                 {
-                    var dll = Directory.GetFiles(binPath, "nvJitLink_*.dll")
-                                       .OrderByDescending(f => f)
-                                       .FirstOrDefault();
-                    if (dll != null && NativeLibrary.TryLoad(dll, out var handle))
+                    if (Directory.Exists(binPath))
                     {
-                        return handle;
+                        var dll = Directory.GetFiles(binPath, "nvJitLink*.dll")
+                                           .OrderByDescending(f => f)
+                                           .FirstOrDefault();
+                        if (dll != null && NativeLibrary.TryLoad(dll, out var handle))
+                        {
+                            return handle;
+                        }
                     }
                 }
             }
@@ -239,18 +257,20 @@ public static class DllResolver
                                             .ToList();
                     foreach (var version in versions)
                     {
-                        var binPath = Path.Combine(defaultPath, version!, "bin", "x64");
-                        if (!Directory.Exists(binPath))
+                        foreach (var binPath in GetCudaNvrtcSearchPaths(Path.Combine(defaultPath, version!)))
                         {
-                            continue;
-                        }
+                            if (!Directory.Exists(binPath))
+                            {
+                                continue;
+                            }
 
-                        var dll = Directory.GetFiles(binPath, "nvJitLink_*.dll")
-                                           .OrderByDescending(f => f)
-                                           .FirstOrDefault();
-                        if (dll != null && NativeLibrary.TryLoad(dll, out var handle))
-                        {
-                            return handle;
+                            var dll = Directory.GetFiles(binPath, "nvJitLink*.dll")
+                                               .OrderByDescending(f => f)
+                                               .FirstOrDefault();
+                            if (dll != null && NativeLibrary.TryLoad(dll, out var handle))
+                            {
+                                return handle;
+                            }
                         }
                     }
                 }
@@ -261,7 +281,7 @@ public static class DllResolver
             var nugetPath = Path.Combine(userProfile, ".nuget", "packages");
             if (Directory.Exists(nugetPath))
             {
-                var dll = Directory.GetFiles(nugetPath, "nvJitLink_*.dll", SearchOption.AllDirectories)
+                var dll = Directory.GetFiles(nugetPath, "nvJitLink*.dll", SearchOption.AllDirectories)
                                    .OrderByDescending(Path.GetFileName)
                                    .FirstOrDefault();
                 if (dll != null && NativeLibrary.TryLoad(dll, out var handle))

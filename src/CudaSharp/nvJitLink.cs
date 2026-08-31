@@ -97,6 +97,54 @@ public static partial class nvJitLink
         Span<byte> cubin);
 
     /// <summary>
+    /// Gets the size of the linked LTO-IR container.
+    /// </summary>
+    /// <param name="handle">Linker handle.</param>
+    /// <param name="size">Returned LTO-IR container size in bytes.</param>
+    /// <remarks>Linked LTO-IR is available only when linking with the <c>-lto</c> option.</remarks>
+    /// <seealso href="https://docs.nvidia.com/cuda/nvjitlink/index.html#linking"/>
+    [LibraryImport(LibName)]
+    public static partial nvJitLinkResult nvJitLinkGetLinkedLTOIRSize(
+        nvJitLinkHandle handle,
+        out nuint size);
+
+    /// <summary>
+    /// Gets the linked LTO-IR container.
+    /// </summary>
+    /// <param name="handle">Linker handle.</param>
+    /// <param name="ltoir">Destination LTO-IR container buffer.</param>
+    /// <remarks>Linked LTO-IR is available only when linking with the <c>-lto</c> option.</remarks>
+    /// <seealso href="https://docs.nvidia.com/cuda/nvjitlink/index.html#linking"/>
+    [LibraryImport(LibName)]
+    public static partial nvJitLinkResult nvJitLinkGetLinkedLTOIR(
+        nvJitLinkHandle handle,
+        Span<byte> ltoir);
+
+    /// <summary>
+    /// Gets the size of the linked PTX.
+    /// </summary>
+    /// <param name="handle">Linker handle.</param>
+    /// <param name="size">Returned PTX size in bytes, including the null terminator.</param>
+    /// <remarks>Linked PTX is available only when linking with the <c>-lto</c> option.</remarks>
+    /// <seealso href="https://docs.nvidia.com/cuda/nvjitlink/index.html#linking"/>
+    [LibraryImport(LibName)]
+    public static partial nvJitLinkResult nvJitLinkGetLinkedPtxSize(
+        nvJitLinkHandle handle,
+        out nuint size);
+
+    /// <summary>
+    /// Gets the linked PTX.
+    /// </summary>
+    /// <param name="handle">Linker handle.</param>
+    /// <param name="ptx">Destination PTX buffer.</param>
+    /// <remarks>Linked PTX is available only when linking with the <c>-lto</c> option.</remarks>
+    /// <seealso href="https://docs.nvidia.com/cuda/nvjitlink/index.html#linking"/>
+    [LibraryImport(LibName)]
+    public static partial nvJitLinkResult nvJitLinkGetLinkedPtx(
+        nvJitLinkHandle handle,
+        Span<byte> ptx);
+
+    /// <summary>
     /// Gets the size of the error log.
     /// </summary>
     /// <param name="handle">Linker handle.</param>
@@ -114,9 +162,9 @@ public static partial class nvJitLink
     /// <param name="log">Destination error log buffer.</param>
     /// <seealso href="https://docs.nvidia.com/cuda/nvjitlink/index.html#linking"/>
     [LibraryImport(LibName)]
-    public static unsafe partial nvJitLinkResult nvJitLinkGetErrorLog(
+    public static partial nvJitLinkResult nvJitLinkGetErrorLog(
         nvJitLinkHandle handle,
-        byte* log);
+        Span<byte> log);
 
     /// <summary>
     /// Gets the size of the info log.
@@ -136,9 +184,9 @@ public static partial class nvJitLink
     /// <param name="log">Destination info log buffer.</param>
     /// <seealso href="https://docs.nvidia.com/cuda/nvjitlink/index.html#linking"/>
     [LibraryImport(LibName)]
-    public static unsafe partial nvJitLinkResult nvJitLinkGetInfoLog(
+    public static partial nvJitLinkResult nvJitLinkGetInfoLog(
         nvJitLinkHandle handle,
-        byte* log);
+        Span<byte> log);
 
     /// <summary>
     /// Gets the nvJitLink version.

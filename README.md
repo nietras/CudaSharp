@@ -190,6 +190,7 @@ namespace CudaSharp
     }
     public static class nvJitLink
     {
+        public static CudaSharp.nvJitLink.nvJitLinkResult nvJitLinkAddData(CudaSharp.nvJitLink.nvJitLinkHandle handle, CudaSharp.nvJitLink.nvJitLinkInputType inputType, System.ReadOnlySpan<byte> data, string? name) { }
         [System.Runtime.CompilerServices.SkipLocalsInit]
         [System.Runtime.InteropServices.LibraryImport("nvJitLink", StringMarshalling=System.Runtime.InteropServices.StringMarshalling.Utf8)]
         public static unsafe CudaSharp.nvJitLink.nvJitLinkResult nvJitLinkAddData(CudaSharp.nvJitLink.nvJitLinkHandle handle, CudaSharp.nvJitLink.nvJitLinkInputType inputType, void* data, nuint size, string? name) { }
@@ -205,24 +206,41 @@ namespace CudaSharp
         [System.Runtime.CompilerServices.SkipLocalsInit]
         [System.Runtime.InteropServices.LibraryImport("nvJitLink")]
         public static CudaSharp.nvJitLink.nvJitLinkResult nvJitLinkDestroy(ref CudaSharp.nvJitLink.nvJitLinkHandle handle) { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
         [System.Runtime.InteropServices.LibraryImport("nvJitLink")]
-        public static unsafe CudaSharp.nvJitLink.nvJitLinkResult nvJitLinkGetErrorLog(CudaSharp.nvJitLink.nvJitLinkHandle handle, byte* log) { }
+        public static CudaSharp.nvJitLink.nvJitLinkResult nvJitLinkGetErrorLog(CudaSharp.nvJitLink.nvJitLinkHandle handle, System.Span<byte> log) { }
         [System.Runtime.CompilerServices.SkipLocalsInit]
         [System.Runtime.InteropServices.LibraryImport("nvJitLink")]
         public static CudaSharp.nvJitLink.nvJitLinkResult nvJitLinkGetErrorLogSize(CudaSharp.nvJitLink.nvJitLinkHandle handle, out System.UIntPtr size) { }
         public static string nvJitLinkGetErrorLogString(CudaSharp.nvJitLink.nvJitLinkHandle handle) { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
         [System.Runtime.InteropServices.LibraryImport("nvJitLink")]
-        public static unsafe CudaSharp.nvJitLink.nvJitLinkResult nvJitLinkGetInfoLog(CudaSharp.nvJitLink.nvJitLinkHandle handle, byte* log) { }
+        public static CudaSharp.nvJitLink.nvJitLinkResult nvJitLinkGetInfoLog(CudaSharp.nvJitLink.nvJitLinkHandle handle, System.Span<byte> log) { }
         [System.Runtime.CompilerServices.SkipLocalsInit]
         [System.Runtime.InteropServices.LibraryImport("nvJitLink")]
         public static CudaSharp.nvJitLink.nvJitLinkResult nvJitLinkGetInfoLogSize(CudaSharp.nvJitLink.nvJitLinkHandle handle, out System.UIntPtr size) { }
         public static string nvJitLinkGetInfoLogString(CudaSharp.nvJitLink.nvJitLinkHandle handle) { }
+        public static byte[] nvJitLinkGetLinkedCubin(CudaSharp.nvJitLink.nvJitLinkHandle handle) { }
         [System.Runtime.CompilerServices.SkipLocalsInit]
         [System.Runtime.InteropServices.LibraryImport("nvJitLink")]
         public static CudaSharp.nvJitLink.nvJitLinkResult nvJitLinkGetLinkedCubin(CudaSharp.nvJitLink.nvJitLinkHandle handle, System.Span<byte> cubin) { }
         [System.Runtime.CompilerServices.SkipLocalsInit]
         [System.Runtime.InteropServices.LibraryImport("nvJitLink")]
         public static CudaSharp.nvJitLink.nvJitLinkResult nvJitLinkGetLinkedCubinSize(CudaSharp.nvJitLink.nvJitLinkHandle handle, out System.UIntPtr size) { }
+        public static byte[] nvJitLinkGetLinkedLTOIR(CudaSharp.nvJitLink.nvJitLinkHandle handle) { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
+        [System.Runtime.InteropServices.LibraryImport("nvJitLink")]
+        public static CudaSharp.nvJitLink.nvJitLinkResult nvJitLinkGetLinkedLTOIR(CudaSharp.nvJitLink.nvJitLinkHandle handle, System.Span<byte> ltoir) { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
+        [System.Runtime.InteropServices.LibraryImport("nvJitLink")]
+        public static CudaSharp.nvJitLink.nvJitLinkResult nvJitLinkGetLinkedLTOIRSize(CudaSharp.nvJitLink.nvJitLinkHandle handle, out System.UIntPtr size) { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
+        [System.Runtime.InteropServices.LibraryImport("nvJitLink")]
+        public static CudaSharp.nvJitLink.nvJitLinkResult nvJitLinkGetLinkedPtx(CudaSharp.nvJitLink.nvJitLinkHandle handle, System.Span<byte> ptx) { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
+        [System.Runtime.InteropServices.LibraryImport("nvJitLink")]
+        public static CudaSharp.nvJitLink.nvJitLinkResult nvJitLinkGetLinkedPtxSize(CudaSharp.nvJitLink.nvJitLinkHandle handle, out System.UIntPtr size) { }
+        public static string nvJitLinkGetLinkedPtxString(CudaSharp.nvJitLink.nvJitLinkHandle handle) { }
         [System.Runtime.CompilerServices.SkipLocalsInit]
         [System.Runtime.InteropServices.LibraryImport("nvJitLink")]
         public static CudaSharp.nvJitLink.nvJitLinkResult nvJitLinkVersion(out uint major, out uint minor) { }

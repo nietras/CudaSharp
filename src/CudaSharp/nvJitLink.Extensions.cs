@@ -1,5 +1,4 @@
-﻿using System.Buffers;
-using System.Text;
+﻿using System.Text;
 
 namespace CudaSharp;
 
@@ -36,66 +35,62 @@ public static partial class nvJitLink
         }
     }
 
-    public static unsafe string nvJitLinkGetErrorLogString(nvJitLinkHandle handle)
+    public static unsafe nvJitLinkResult nvJitLinkAddData(
+        nvJitLinkHandle handle,
+        nvJitLinkInputType inputType,
+        ReadOnlySpan<byte> data,
+        string? name)
     {
-        nvJitLinkGetErrorLogSize(handle, out var logSize).Ok();
-        if (logSize == 0) { return string.Empty; }
-
-        byte[]? pooledArray = null;
-        Span<byte> bufferSpan = logSize <= 4096
-            ? stackalloc byte[(int)logSize]
-            : (pooledArray = ArrayPool<byte>.Shared.Rent((int)logSize));
-
-        try
+        fixed (byte* dataPointer = data)
         {
-            fixed (byte* pBuffer = bufferSpan)
-            {
-                nvJitLinkGetErrorLog(handle, pBuffer).Ok();
-            }
-            var span = bufferSpan[..(int)logSize];
-            var nullIndex = span.IndexOf((byte)0);
-            if (nullIndex >= 0)
-            {
-                span = span[..nullIndex];
-            }
-            return Encoding.UTF8.GetString(span);
-        }
-        finally
-        {
-            if (pooledArray != null)
-            {
-                ArrayPool<byte>.Shared.Return(pooledArray);
-            }
+            return nvJitLinkAddData(handle, inputType, dataPointer, (nuint)data.Length, name);
         }
     }
 
-    public static unsafe string nvJitLinkGetInfoLogString(nvJitLinkHandle handle)
+    public static byte[] nvJitLinkGetLinkedCubin(nvJitLinkHandle handle) =>
+        AllocateOutput(handle, nvJitLinkGetLinkedCubinSize, nvJitLinkGetLinkedCubin);
+
+    public static byte[] nvJitLinkGetLinkedLTOIR(nvJitLinkHandle handle) =>
+        AllocateOutput(handle, nvJitLinkGetLinkedLTOIRSize, nvJitLinkGetLinkedLTOIR);
+
+    public static string nvJitLinkGetLinkedPtxString(nvJitLinkHandle handle) =>
+        GetUtf8Output(handle, nvJitLinkGetLinkedPtxSize, nvJitLinkGetLinkedPtx);
+
+    public static string nvJitLinkGetErrorLogString(nvJitLinkHandle handle) =>
+        GetUtf8Output(handle, nvJitLinkGetErrorLogSize, nvJitLinkGetErrorLog);
+
+    public static string nvJitLinkGetInfoLogString(nvJitLinkHandle handle) =>
+        GetUtf8Output(handle, nvJitLinkGetInfoLogSize, nvJitLinkGetInfoLog);
+
+    static byte[] AllocateOutput(
+        nvJitLinkHandle handle,
+        GetOutputSize getSize,
+        GetOutput getOutput)
     {
-        nvJitLinkGetInfoLogSize(handle, out var logSize).Ok();
-        if (logSize == 0) { return string.Empty; }
-
-        byte[]? pooledArray = null;
-        Span<byte> bufferSpan = logSize <= 4096
-            ? stackalloc byte[(int)logSize]
-            : (pooledArray = ArrayPool<byte>.Shared.Rent((int)logSize));
-
-        try
-        {
-            fixed (byte* pBuffer = bufferSpan)
-            {
-                nvJitLinkGetInfoLog(handle, pBuffer).Ok();
-                var span = MemoryMarshal.CreateReadOnlySpanFromNullTerminated(pBuffer);
-                return Encoding.UTF8.GetString(span);
-            }
-        }
-        finally
-        {
-            if (pooledArray != null)
-            {
-                ArrayPool<byte>.Shared.Return(pooledArray);
-            }
-        }
+        getSize(handle, out var size).Ok();
+        var output = new byte[checked((int)size)];
+        getOutput(handle, output).Ok();
+        return output;
     }
+
+    static string GetUtf8Output(
+        nvJitLinkHandle handle,
+        GetOutputSize getSize,
+        GetOutput getOutput)
+    {
+        var output = AllocateOutput(handle, getSize, getOutput);
+        var length = output.AsSpan().IndexOf((byte)0);
+        if (length < 0)
+        {
+            length = output.Length;
+        }
+
+        return Encoding.UTF8.GetString(output.AsSpan(0, length));
+    }
+
+    delegate nvJitLinkResult GetOutputSize(nvJitLinkHandle handle, out nuint size);
+
+    delegate nvJitLinkResult GetOutput(nvJitLinkHandle handle, Span<byte> output);
 
     extension(nvJitLinkResult result)
     {
