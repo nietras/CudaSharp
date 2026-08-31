@@ -1733,12 +1733,17 @@ namespace CudaSharp
         [System.Runtime.CompilerServices.SkipLocalsInit]
         [System.Runtime.InteropServices.LibraryImport("nvrtc", StringMarshalling=System.Runtime.InteropServices.StringMarshalling.Utf8)]
         public static CudaSharp.nvrtc.nvrtcResult nvrtcCompileProgram(CudaSharp.nvrtc.nvrtcProgram prog, int numOptions, in System.ReadOnlySpan<string> options) { }
+        public static CudaSharp.nvrtc.nvrtcResult nvrtcCompileProgram(CudaSharp.nvrtc.nvrtcProgram program, int numOptions, string[] options) { }
         [System.Runtime.CompilerServices.SkipLocalsInit]
         [System.Runtime.InteropServices.LibraryImport("nvrtc", StringMarshalling=System.Runtime.InteropServices.StringMarshalling.Utf8)]
         public static CudaSharp.nvrtc.nvrtcResult nvrtcCreateProgram(out CudaSharp.nvrtc.nvrtcProgram prog, string src, string name, int numHeaders, in System.ReadOnlySpan<string> headers, in System.ReadOnlySpan<string> includeNames) { }
         [System.Runtime.CompilerServices.SkipLocalsInit]
         [System.Runtime.InteropServices.LibraryImport("nvrtc")]
         public static CudaSharp.nvrtc.nvrtcResult nvrtcDestroyProgram(ref CudaSharp.nvrtc.nvrtcProgram prog) { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
+        [System.Runtime.InteropServices.LibraryImport("nvrtc")]
+        public static CudaSharp.nvrtc.nvrtcResult nvrtcGetBundledHeadersInfo(out CudaSharp.nvrtc.nvrtcBundledHeadersInfo info, out System.IntPtr errorLog) { }
+        public static byte[] nvrtcGetCUBIN(CudaSharp.nvrtc.nvrtcProgram program) { }
         [System.Runtime.CompilerServices.SkipLocalsInit]
         [System.Runtime.InteropServices.LibraryImport("nvrtc")]
         public static CudaSharp.nvrtc.nvrtcResult nvrtcGetCUBIN(CudaSharp.nvrtc.nvrtcProgram prog, System.Span<byte> cubin) { }
@@ -1748,6 +1753,7 @@ namespace CudaSharp
         [System.Runtime.InteropServices.LibraryImport("nvrtc")]
         public static nint nvrtcGetErrorString(CudaSharp.nvrtc.nvrtcResult result) { }
         public static System.ReadOnlySpan<byte> nvrtcGetErrorStringSpan(CudaSharp.nvrtc.nvrtcResult result) { }
+        public static byte[] nvrtcGetLTOIR(CudaSharp.nvrtc.nvrtcProgram program) { }
         [System.Runtime.CompilerServices.SkipLocalsInit]
         [System.Runtime.InteropServices.LibraryImport("nvrtc")]
         public static CudaSharp.nvrtc.nvrtcResult nvrtcGetLTOIR(CudaSharp.nvrtc.nvrtcProgram prog, System.Span<byte> ltoIR) { }
@@ -1757,15 +1763,26 @@ namespace CudaSharp
         [System.Runtime.CompilerServices.SkipLocalsInit]
         [System.Runtime.InteropServices.LibraryImport("nvrtc", StringMarshalling=System.Runtime.InteropServices.StringMarshalling.Utf8)]
         public static CudaSharp.nvrtc.nvrtcResult nvrtcGetLoweredName(CudaSharp.nvrtc.nvrtcProgram prog, string name_expression, out System.IntPtr lowered_name) { }
+        public static string nvrtcGetLoweredNameString(CudaSharp.nvrtc.nvrtcProgram program, string nameExpression) { }
         [System.Runtime.CompilerServices.SkipLocalsInit]
         [System.Runtime.InteropServices.LibraryImport("nvrtc")]
         public static CudaSharp.nvrtc.nvrtcResult nvrtcGetNumSupportedArchs(out int numArchs) { }
+        public static byte[] nvrtcGetOptiXIR(CudaSharp.nvrtc.nvrtcProgram program) { }
         [System.Runtime.CompilerServices.SkipLocalsInit]
         [System.Runtime.InteropServices.LibraryImport("nvrtc")]
         public static CudaSharp.nvrtc.nvrtcResult nvrtcGetOptiXIR(CudaSharp.nvrtc.nvrtcProgram prog, System.Span<byte> optixIR) { }
         [System.Runtime.CompilerServices.SkipLocalsInit]
         [System.Runtime.InteropServices.LibraryImport("nvrtc")]
         public static CudaSharp.nvrtc.nvrtcResult nvrtcGetOptiXIRSize(CudaSharp.nvrtc.nvrtcProgram prog, out System.UIntPtr optixIRSizeRet) { }
+        [System.Runtime.InteropServices.LibraryImport("nvrtc")]
+        public static CudaSharp.nvrtc.nvrtcResult nvrtcGetPCHCreateStatus(CudaSharp.nvrtc.nvrtcProgram prog) { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
+        [System.Runtime.InteropServices.LibraryImport("nvrtc")]
+        public static CudaSharp.nvrtc.nvrtcResult nvrtcGetPCHHeapSize(out System.UIntPtr size) { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
+        [System.Runtime.InteropServices.LibraryImport("nvrtc")]
+        public static CudaSharp.nvrtc.nvrtcResult nvrtcGetPCHHeapSizeRequired(CudaSharp.nvrtc.nvrtcProgram prog, out System.UIntPtr size) { }
+        public static byte[] nvrtcGetPTX(CudaSharp.nvrtc.nvrtcProgram program) { }
         [System.Runtime.CompilerServices.SkipLocalsInit]
         [System.Runtime.InteropServices.LibraryImport("nvrtc")]
         public static CudaSharp.nvrtc.nvrtcResult nvrtcGetPTX(CudaSharp.nvrtc.nvrtcProgram prog, System.Span<byte> ptx) { }
@@ -1776,14 +1793,50 @@ namespace CudaSharp
         [System.Runtime.InteropServices.LibraryImport("nvrtc")]
         public static CudaSharp.nvrtc.nvrtcResult nvrtcGetProgramLog(CudaSharp.nvrtc.nvrtcProgram prog, System.Span<byte> log) { }
         [System.Runtime.CompilerServices.SkipLocalsInit]
-        [System.Runtime.InteropServices.LibraryImport("nvrtc", StringMarshalling=System.Runtime.InteropServices.StringMarshalling.Utf8)]
+        [System.Runtime.InteropServices.LibraryImport("nvrtc")]
         public static CudaSharp.nvrtc.nvrtcResult nvrtcGetProgramLogSize(CudaSharp.nvrtc.nvrtcProgram prog, out System.UIntPtr logSizeRet) { }
+        public static string nvrtcGetProgramLogString(CudaSharp.nvrtc.nvrtcProgram program) { }
+        public static int[] nvrtcGetSupportedArchs() { }
         [System.Runtime.CompilerServices.SkipLocalsInit]
         [System.Runtime.InteropServices.LibraryImport("nvrtc")]
         public static CudaSharp.nvrtc.nvrtcResult nvrtcGetSupportedArchs(System.Span<int> supportedArchs) { }
+        public static byte[] nvrtcGetTileIR(CudaSharp.nvrtc.nvrtcProgram program) { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
+        [System.Runtime.InteropServices.LibraryImport("nvrtc")]
+        public static CudaSharp.nvrtc.nvrtcResult nvrtcGetTileIR(CudaSharp.nvrtc.nvrtcProgram prog, System.Span<byte> tileIR) { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
+        [System.Runtime.InteropServices.LibraryImport("nvrtc")]
+        public static CudaSharp.nvrtc.nvrtcResult nvrtcGetTileIRSize(CudaSharp.nvrtc.nvrtcProgram prog, out System.UIntPtr tileIRSizeRet) { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
+        [System.Runtime.InteropServices.LibraryImport("nvrtc", StringMarshalling=System.Runtime.InteropServices.StringMarshalling.Utf8)]
+        public static CudaSharp.nvrtc.nvrtcResult nvrtcInstallBundledHeaders(string installPath, CudaSharp.nvrtc.nvrtcInstallHeadersFlags flags, out System.IntPtr errorLog) { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
+        [System.Runtime.InteropServices.LibraryImport("nvrtc", StringMarshalling=System.Runtime.InteropServices.StringMarshalling.Utf8)]
+        public static CudaSharp.nvrtc.nvrtcResult nvrtcRemoveBundledHeaders(string installPath, out System.IntPtr errorLog) { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
+        [System.Runtime.InteropServices.LibraryImport("nvrtc")]
+        public static CudaSharp.nvrtc.nvrtcResult nvrtcSetFlowCallback(CudaSharp.nvrtc.nvrtcProgram prog, CudaSharp.nvrtc.nvrtcFlowCallback callback, nint userData) { }
+        [System.Runtime.InteropServices.LibraryImport("nvrtc")]
+        public static CudaSharp.nvrtc.nvrtcResult nvrtcSetPCHHeapSize(nuint size) { }
         [System.Runtime.CompilerServices.SkipLocalsInit]
         [System.Runtime.InteropServices.LibraryImport("nvrtc")]
         public static CudaSharp.nvrtc.nvrtcResult nvrtcVersion(out int major, out int minor) { }
+        public struct nvrtcBundledHeadersInfo
+        {
+            public int available;
+            public System.UIntPtr compressedSize;
+            public int cudaVersionMajor;
+            public int cudaVersionMinor;
+            public uint numFiles;
+            public System.UIntPtr uncompressedSize;
+        }
+        [System.Flags]
+        public enum nvrtcInstallHeadersFlags : uint
+        {
+            NVRTC_INSTALL_HEADERS_SKIP_IF_EXISTS = 0u,
+            NVRTC_INSTALL_HEADERS_FORCE_OVERWRITE = 1u,
+            NVRTC_INSTALL_HEADERS_NO_WAIT = 2u,
+        }
         public readonly struct nvrtcProgram : System.IEquatable<CudaSharp.nvrtc.nvrtcProgram>
         {
             public nvrtcProgram(nint Value) { }
@@ -1804,7 +1857,15 @@ namespace CudaSharp
             NVRTC_ERROR_NAME_EXPRESSION_NOT_VALID = 10,
             NVRTC_ERROR_INTERNAL_ERROR = 11,
             NVRTC_ERROR_TIME_FILE_WRITE_FAILED = 12,
+            NVRTC_ERROR_NO_PCH_CREATE_ATTEMPTED = 13,
+            NVRTC_ERROR_PCH_CREATE_HEAP_EXHAUSTED = 14,
+            NVRTC_ERROR_PCH_CREATE = 15,
+            NVRTC_ERROR_CANCELLED = 16,
+            NVRTC_ERROR_TIME_TRACE_FILE_WRITE_FAILED = 17,
+            NVRTC_ERROR_BUSY = 18,
         }
+        [System.Runtime.InteropServices.UnmanagedFunctionPointer(System.Runtime.InteropServices.CallingConvention.Cdecl)]
+        public delegate int nvrtcFlowCallback(nint payload, nint userData);
         extension(CudaSharp.nvrtc.nvrtcResult result)
         {
         }
