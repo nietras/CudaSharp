@@ -21,7 +21,7 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
     <PackageReference Include="PublicApiGenerator" Version="11.5.4" />
-    <PackageReference Include="MSTest" Version="4.2.3" />
+    <PackageReference Include="MSTest" Version="4.3.3" />
 
     <PackageReference Include="NtvLibs.cuda13.nvrtc-builtins64_133.runtime.json" Version="13.3.0" />
     <PackageReference Include="NtvLibs.cuda13.nvrtc-builtins64_133.runtime.win-x64" Version="13.3.0" />
