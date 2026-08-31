@@ -554,6 +554,21 @@ public static partial class nvcuda
     [LibraryImport(LibName, StringMarshalling = StringMarshalling.Utf8)]
     public static partial CUresult cuModuleGetFunction(out CUfunction hfunc, CUmodule hmod, string name);
 
+    /// <summary>Returns the number of functions in a CUDA module.</summary>
+    /// <seealso href="https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__MODULE.html" />
+    [LibraryImport(LibName)]
+    public static partial CUresult cuModuleGetFunctionCount(out uint count, CUmodule module);
+
+    /// <summary>Enumerates functions in a CUDA module.</summary>
+    /// <seealso href="https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__MODULE.html" />
+    [LibraryImport(LibName)]
+    public static partial CUresult cuModuleEnumerateFunctions(Span<CUfunction> functions, uint count, CUmodule module);
+
+    /// <summary>Returns the name of a CUDA function.</summary>
+    /// <seealso href="https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__FUNCTION.html" />
+    [LibraryImport(LibName)]
+    public static partial CUresult cuFuncGetName(out IntPtr name, CUfunction function);
+
     /// <summary>Returns a global variable from a module.</summary>
     /// <param name="dptr">Returned device pointer.</param>
     /// <param name="bytes">Returned variable size in bytes.</param>
@@ -959,6 +974,11 @@ public static partial class nvcuda
     [LibraryImport(LibName)]
     public static partial CUresult cuMemcpyHtoD(CUdeviceptr dstDevice, IntPtr srcHost, nuint bytesize);
 
+    /// <summary>Copies memory from host to device using the version 2 ABI.</summary>
+    /// <seealso href="https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__MEM.html" />
+    [LibraryImport(LibName)]
+    public static partial CUresult cuMemcpyHtoD_v2(CUdeviceptr dstDevice, IntPtr srcHost, nuint bytesize);
+
     /// <summary>Copies memory from device to host.</summary>
     [LibraryImport(LibName)]
     public static partial CUresult cuMemcpyDtoH(IntPtr dstHost, CUdeviceptr srcDevice, nuint bytesize);
@@ -1101,6 +1121,9 @@ public static partial class nvcuda
     /// <summary>Sets eight-bit elements in device memory.</summary>
     [LibraryImport(LibName)]
     public static partial CUresult cuMemsetD8(CUdeviceptr dstDevice, byte uc, nuint N);
+
+    [LibraryImport(LibName, EntryPoint = "cuMemsetD8_v2")]
+    public static partial CUresult cuMemsetD8_v2(CUdeviceptr dstDevice, byte uc, nuint N);
 
     /// <summary>Sets sixteen-bit elements in device memory.</summary>
     [LibraryImport(LibName)]

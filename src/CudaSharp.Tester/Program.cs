@@ -1,15 +1,69 @@
-﻿// Type 'Program' can be sealed because it has no subtypes in its containing assembly and is not externally visible
-#pragma warning disable CA1852
-using System;
-using System.Diagnostics;
-using CudaSharp;
-using static System.Console;
-[assembly: System.Runtime.InteropServices.ComVisible(false)]
+﻿using System;
+using System.IO;
+using CudaSharp.Tester;
 
-OutputEncoding = System.Text.Encoding.UTF8;
-Action<string> log = t => { WriteLine(t); Trace.WriteLine(t); };
+var device = 0;
+var elements = 1 << 20;
+var output = Path.Combine(AppContext.BaseDirectory, "tilegym-results");
+string? filter = null;
+var list = false;
+for (var i = 0; i < args.Length; i++)
+{
+    if (args[i] == "--device" && i + 1 < args.Length)
+    {
+        device = int.Parse(args[++i]);
+    }
+    else if (args[i] == "--elements" && i + 1 < args.Length)
+    {
+        elements = int.Parse(args[++i]);
+    }
+    else if (args[i] == "--output" && i + 1 < args.Length)
+    {
+        output = args[++i];
+    }
+    else if (args[i] == "--filter" && i + 1 < args.Length)
+    {
+        filter = args[++i];
+    }
+    else if (args[i] == "--list")
+    {
+        list = true;
+    }
+}
 
-log(nameof(nvcuda));
+if (list)
+{
+    foreach (var scenario in TileGymCatalog.Scenarios)
+    {
+        Console.WriteLine(scenario.Family);
+    }
 
-// Above example code is for demonstration purposes only.
-// Short names and repeated constants are only for demonstration.
+    return;
+}
+
+using var runtime = new TileGymRuntime(device);
+var report = new TileGymReport();
+Console.WriteLine($"CUDA Tile C++ SM {runtime.Architecture}");
+var scenarios = TileGymCatalog.Select(filter);
+var selected = false;
+foreach (var scenario in scenarios)
+{
+    selected = true;
+    if (scenario.Family == "activation")
+    {
+        TileGymActivationScenarios.RunAll(runtime, report, elements);
+    }
+    else
+    {
+        scenario.Run(runtime, report);
+    }
+}
+
+if (!selected)
+{
+    throw new ArgumentException($"No TileGym scenario family matches '{filter}'.", nameof(filter));
+}
+
+report.Write(output);
+Console.WriteLine(report.ToMarkdown());
+Console.WriteLine($"Reports: {output}");

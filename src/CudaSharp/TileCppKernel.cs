@@ -1,6 +1,7 @@
 ﻿using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Threading;
 using static CudaSharp.nvcuda;
 
@@ -14,13 +15,14 @@ namespace CudaSharp.Tile;
 /// <seealso href="https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#launching-kernels" />
 public sealed class TileCppKernel : IDisposable
 {
-    readonly Dictionary<string, byte[]> _cubins = new(StringComparer.Ordinal);
+    readonly Dictionary<string, TileCppCompilation> _compilations = new(StringComparer.Ordinal);
     readonly Dictionary<LoadedKey, LoadedKernel> _loadedKernels = [];
     readonly Lock _lock = new();
     readonly TileCppCompiler _compiler;
     readonly string _source;
     readonly string _sourceName;
     readonly string _kernelName;
+    readonly string? _nameExpression;
     readonly IReadOnlyList<TileCppHeader>? _headers;
     readonly IReadOnlyList<string>? _additionalOptions;
     bool _disposed;
@@ -32,9 +34,11 @@ public sealed class TileCppKernel : IDisposable
     /// <param name="kernelName">Unmangled kernel entry-point name.</param>
     /// <param name="headers">Optional virtual headers.</param>
     /// <param name="additionalOptions">Optional additional NVRTC command-line options.</param>
+    /// <param name="nameExpression">Optional NVRTC name expression for a templated kernel specialization.</param>
     /// <seealso href="https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#writing-tile-kernels" />
     public TileCppKernel(TileCppCompiler compiler, string source, string sourceName, string kernelName,
-        IReadOnlyList<TileCppHeader>? headers = null, IReadOnlyList<string>? additionalOptions = null)
+        IReadOnlyList<TileCppHeader>? headers = null, IReadOnlyList<string>? additionalOptions = null,
+        string? nameExpression = null)
     {
         ArgumentNullException.ThrowIfNull(compiler);
         ArgumentNullException.ThrowIfNull(source);
@@ -44,6 +48,7 @@ public sealed class TileCppKernel : IDisposable
         _source = source;
         _sourceName = sourceName;
         _kernelName = kernelName;
+        _nameExpression = nameExpression;
         _headers = headers;
         _additionalOptions = additionalOptions;
     }
@@ -68,18 +73,26 @@ public sealed class TileCppKernel : IDisposable
             if (_loadedKernels.TryGetValue(loadedKey, out var loaded))
                 return loaded.Function;
 
-            if (!_cubins.TryGetValue(configKey, out var cubin))
+            if (!_compilations.TryGetValue(configKey, out var compilation))
             {
-                cubin = _compiler.Compile(_source, _sourceName, config, _headers, _additionalOptions);
-                if (cubin.Length == 0)
-                    throw new InvalidOperationException("The TileIR assembler returned an empty CUBIN image.");
-                _cubins.Add(configKey, cubin);
+                compilation = _nameExpression is null
+                    ? new TileCppCompilation(
+                        _compiler.Compile(_source, _sourceName, config, _headers, _additionalOptions), _kernelName)
+                    : _compiler.CompileKernel(
+                        _source, _sourceName, _nameExpression, config, _headers, _additionalOptions);
+                if (compilation.TileIr.Length == 0)
+                    throw new InvalidOperationException("NVRTC returned empty CUDA TileIR.");
+                _compilations.Add(configKey, compilation);
             }
 
-            cuModuleLoadData(out var module, cubin).Ok();
+            cuModuleLoadData(out var module, compilation.TileIr).Ok();
             try
             {
-                cuModuleGetFunction(out var function, module, _kernelName).Ok();
+                var lookup = cuModuleGetFunction(out var function, module, compilation.EntryPoint);
+                if (lookup == CUresult.CUDA_ERROR_NOT_FOUND)
+                    function = FindFunction(module, _kernelName);
+                else
+                    lookup.Ok();
                 _loadedKernels.Add(loadedKey, new LoadedKernel(module, function));
                 return function;
             }
@@ -89,6 +102,25 @@ public sealed class TileCppKernel : IDisposable
                 throw;
             }
         }
+    }
+
+    static CUfunction FindFunction(CUmodule module, string expectedName)
+    {
+        cuModuleGetFunctionCount(out var count, module).Ok();
+        var functions = new CUfunction[count];
+        cuModuleEnumerateFunctions(functions, count, module).Ok();
+        var names = new List<string>(functions.Length);
+        foreach (var function in functions)
+        {
+            cuFuncGetName(out var namePointer, function).Ok();
+            var name = Marshal.PtrToStringUTF8(namePointer);
+            if (name is not null)
+                names.Add(name);
+            if (name?.Contains(expectedName, StringComparison.Ordinal) is true)
+                return function;
+        }
+        throw new InvalidOperationException(
+            $"CUDA Tile C++ kernel '{expectedName}' was not found in the driver-loaded TileIR module. Functions: {string.Join(", ", names)}");
     }
 
     /// <summary>Launches a CUDA Tile C++ kernel using pointers to argument storage.</summary>
@@ -169,19 +201,22 @@ public sealed class TileCppKernel : IDisposable
 
             foreach (var entry in _loadedKernels)
             {
-                cuCtxPushCurrent(entry.Key.Context).Ok();
+                cuCtxGetCurrent(out var previousContext).Ok();
+                if (previousContext != entry.Key.Context)
+                    cuCtxSetCurrent(entry.Key.Context).Ok();
                 try
                 {
                     cuModuleUnload(entry.Value.Module).Ok();
                 }
                 finally
                 {
-                    cuCtxPopCurrent(out _).Ok();
+                    if (previousContext != entry.Key.Context)
+                        cuCtxSetCurrent(previousContext).Ok();
                 }
             }
 
             _loadedKernels.Clear();
-            _cubins.Clear();
+            _compilations.Clear();
             _disposed = true;
         }
     }

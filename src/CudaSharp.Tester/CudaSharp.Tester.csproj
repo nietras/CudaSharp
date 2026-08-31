@@ -30,6 +30,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\CudaSharp\CudaSharp.csproj" />
+    <Content Include="..\..\src-tilecpp\tilegym\**\*" Link="src-tilecpp\tilegym\%(RecursiveDir)%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

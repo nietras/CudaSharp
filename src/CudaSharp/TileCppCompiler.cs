@@ -7,57 +7,6 @@ using static CudaSharp.nvrtc;
 
 namespace CudaSharp.Tile;
 
-/// <summary>Converts CUDA TileIR bytecode into a loadable CUBIN image.</summary>
-/// <remarks>
-/// NVIDIA's CUDA Tile compiler uses the <c>tileiras</c> component for this stage. Implementations can bind a
-/// NuGet-distributed compiler component without requiring a CUDA Toolkit installation.
-/// </remarks>
-/// <seealso href="https://docs.nvidia.com/cuda/cutile-python/debugging.html" />
-public interface ITileIrAssembler
-{
-    /// <summary>Compiles TileIR bytecode for a target architecture.</summary>
-    /// <param name="tileIr">TileIR bytecode emitted by NVRTC.</param>
-    /// <param name="options">Target and compiler-hint options.</param>
-    /// <returns>A loadable CUBIN image.</returns>
-    /// <seealso href="https://docs.nvidia.com/cuda/cutile-python/compilation.html" />
-    byte[] Assemble(ReadOnlySpan<byte> tileIr, TileCppAssemblerOptions options);
-}
-
-/// <summary>Specifies options for compiling CUDA TileIR to CUBIN.</summary>
-/// <seealso href="https://docs.nvidia.com/cuda/cutile-python/execution.html#cuda.tile.kernel" />
-public sealed record TileCppAssemblerOptions
-{
-    /// <summary>Creates TileIR assembler options from a kernel configuration.</summary>
-    /// <param name="architecture">Target SM architecture encoded as major times ten plus minor.</param>
-    /// <param name="config">Kernel configuration containing Tile compiler hints.</param>
-    /// <seealso href="https://docs.nvidia.com/cuda/cutile-python/execution.html#cuda.tile.kernel" />
-    public TileCppAssemblerOptions(int architecture, TileCppConfig config)
-    {
-        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(architecture);
-        ArgumentNullException.ThrowIfNull(config);
-        Architecture = architecture;
-        NumCtas = config.NumCtas;
-        Occupancy = config.Occupancy;
-        OptimizationLevel = config.OptimizationLevel;
-        NumWorkerWarps = config.NumWorkerWarps;
-    }
-
-    /// <summary>Gets the target SM architecture encoded as major times ten plus minor.</summary>
-    public int Architecture { get; }
-
-    /// <summary>Gets the number of CTAs in a cluster, or <see langword="null" /> for automatic selection.</summary>
-    public int? NumCtas { get; }
-
-    /// <summary>Gets the expected active CTAs per SM, or <see langword="null" /> for automatic selection.</summary>
-    public int? Occupancy { get; }
-
-    /// <summary>Gets the Tile compiler optimization level.</summary>
-    public int OptimizationLevel { get; }
-
-    /// <summary>Gets the CUDA core worker warp count, or <see langword="null" /> for automatic selection.</summary>
-    public int? NumWorkerWarps { get; }
-}
-
 /// <summary>Contains a CUDA Tile C++ virtual header supplied to NVRTC.</summary>
 /// <seealso href="https://docs.nvidia.com/cuda/nvrtc/index.html#group__compilation" />
 public sealed record TileCppHeader
@@ -81,7 +30,11 @@ public sealed record TileCppHeader
     public string Source { get; }
 }
 
-/// <summary>Compiles CUDA Tile C++ source with NVRTC and a caller-provided TileIR assembler.</summary>
+/// <summary>Contains NVRTC-compiled CUDA TileIR and its lowered kernel entry point.</summary>
+/// <seealso href="https://docs.nvidia.com/cuda/nvrtc/index.html#group__compilation" />
+public sealed record TileCppCompilation(byte[] TileIr, string EntryPoint);
+
+/// <summary>Compiles CUDA Tile C++ source directly to TileIR or CUBIN with NVRTC.</summary>
 /// <remarks>
 /// NVRTC and its bundled CUDA headers can be distributed as application dependencies. This type does not inspect or
 /// require a machine-wide CUDA Toolkit installation.
@@ -89,26 +42,22 @@ public sealed record TileCppHeader
 /// <seealso href="https://docs.nvidia.com/cuda/nvrtc/index.html" />
 public sealed class TileCppCompiler
 {
-    readonly ITileIrAssembler _assembler;
     readonly string? _bundledHeadersPath;
 
     /// <summary>Creates a CUDA Tile C++ compiler for a target GPU architecture.</summary>
-    /// <param name="assembler">TileIR-to-CUBIN compiler backend supplied by the application.</param>
     /// <param name="architecture">Target SM architecture encoded as major times ten plus minor.</param>
     /// <param name="installBundledHeaders">
     /// Whether to install and use the CUDA headers embedded in the NVRTC redistributable.
     /// </param>
     /// <param name="bundledHeadersPath">Optional extraction directory for NVRTC's bundled CUDA headers.</param>
     /// <seealso href="https://docs.nvidia.com/cuda/nvrtc/index.html" />
-    public TileCppCompiler(ITileIrAssembler assembler, int architecture,
+    public TileCppCompiler(int architecture,
         bool installBundledHeaders = true, string? bundledHeadersPath = null)
     {
-        ArgumentNullException.ThrowIfNull(assembler);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(architecture);
         if (!installBundledHeaders && bundledHeadersPath is not null)
             throw new ArgumentException("A bundled-header path requires bundled-header installation.", nameof(bundledHeadersPath));
 
-        _assembler = assembler;
         Architecture = architecture;
         _bundledHeadersPath = installBundledHeaders
             ? bundledHeadersPath ?? GetDefaultBundledHeadersPath()
@@ -141,6 +90,11 @@ public sealed class TileCppCompiler
     /// <seealso href="https://docs.nvidia.com/cuda/nvrtc/index.html" />
     public byte[] CompileToTileIr(string source, string sourceName, TileCppConfig config,
         IReadOnlyList<TileCppHeader>? headers = null, IReadOnlyList<string>? additionalOptions = null)
+        => CompileOutput(source, sourceName, config, headers, additionalOptions, static program => nvrtcGetTileIR(program));
+
+    byte[] CompileOutput(string source, string sourceName, TileCppConfig config,
+        IReadOnlyList<TileCppHeader>? headers, IReadOnlyList<string>? additionalOptions,
+        Func<nvrtcProgram, byte[]> getOutput)
     {
         ArgumentNullException.ThrowIfNull(source);
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceName);
@@ -160,7 +114,7 @@ public sealed class TileCppCompiler
                     $"NVRTC CUDA Tile C++ compilation failed with {result.ToStringFast()}:\n{log}");
             }
 
-            return nvrtcGetTileIR(program);
+            return getOutput(program);
         }
         finally
         {
@@ -168,19 +122,54 @@ public sealed class TileCppCompiler
         }
     }
 
-    /// <summary>Compiles CUDA Tile C++ source to a loadable CUBIN image.</summary>
+    /// <summary>Compiles CUDA Tile C++ source to TileIR that the CUDA driver can JIT load.</summary>
     /// <param name="source">CUDA Tile C++ source.</param>
     /// <param name="sourceName">Diagnostic source name.</param>
     /// <param name="config">Compile-time kernel parameters and compiler hints.</param>
     /// <param name="headers">Optional virtual headers.</param>
     /// <param name="additionalOptions">Optional additional NVRTC command-line options.</param>
-    /// <returns>A CUBIN image for <see cref="nvcuda.cuModuleLoadData" />.</returns>
+    /// <returns>TileIR bytecode for <see cref="nvcuda.cuModuleLoadData" />.</returns>
     /// <seealso href="https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__MODULE.html" />
     public byte[] Compile(string source, string sourceName, TileCppConfig config,
         IReadOnlyList<TileCppHeader>? headers = null, IReadOnlyList<string>? additionalOptions = null)
+        => CompileToTileIr(source, sourceName, config, headers, additionalOptions);
+
+    /// <summary>Compiles a templated CUDA Tile C++ kernel and returns its lowered TileIR entry point.</summary>
+    /// <param name="source">CUDA Tile C++ source including any required explicit template instantiation.</param>
+    /// <param name="sourceName">Diagnostic source name.</param>
+    /// <param name="nameExpression">NVRTC name expression such as <c>&amp;kernel&lt;float, 64&gt;</c>.</param>
+    /// <param name="config">Compile-time kernel parameters and compiler hints.</param>
+    /// <param name="headers">Optional virtual headers.</param>
+    /// <param name="additionalOptions">Optional additional NVRTC command-line options.</param>
+    /// <returns>The TileIR bytecode and lowered kernel entry point.</returns>
+    /// <seealso href="https://docs.nvidia.com/cuda/nvrtc/index.html#group__compilation" />
+    public TileCppCompilation CompileKernel(string source, string sourceName, string nameExpression,
+        TileCppConfig config, IReadOnlyList<TileCppHeader>? headers = null,
+        IReadOnlyList<string>? additionalOptions = null)
     {
-        var tileIr = CompileToTileIr(source, sourceName, config, headers, additionalOptions);
-        return _assembler.Assemble(tileIr, new TileCppAssemblerOptions(Architecture, config));
+        ArgumentException.ThrowIfNullOrWhiteSpace(nameExpression);
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourceName);
+        ArgumentNullException.ThrowIfNull(config);
+
+        var headerSources = headers is null ? [] : headers.Select(static header => header.Source).ToArray();
+        var headerNames = headers is null ? [] : headers.Select(static header => header.Name).ToArray();
+        nvrtcCreateProgram(out var program, source, sourceName, headerSources.Length, headerSources, headerNames).Ok();
+        try
+        {
+            nvrtcAddNameExpression(program, nameExpression).Ok();
+            var options = CreateNvrtcOptions(config, additionalOptions);
+            var result = nvrtcCompileProgram(program, options.Length, options);
+            if (result != nvrtcResult.NVRTC_SUCCESS)
+                throw new CudaException<nvrtcResult>(result,
+                    $"NVRTC CUDA Tile C++ compilation failed with {result.ToStringFast()}:\n{nvrtcGetProgramLogString(program)}");
+
+            return new TileCppCompilation(nvrtcGetTileIR(program), nvrtcGetLoweredNameString(program, nameExpression));
+        }
+        finally
+        {
+            nvrtcDestroyProgram(ref program).Ok();
+        }
     }
 
     string[] CreateNvrtcOptions(TileCppConfig config, IReadOnlyList<string>? additionalOptions)
@@ -190,7 +179,7 @@ public sealed class TileCppCompiler
 
         var options = new List<string>(4 + config.Parameters.Count + (additionalOptions?.Count ?? 0))
         {
-            $"--gpu-architecture=compute_{Architecture}",
+            $"--gpu-architecture=sm_{Architecture}",
             "--std=c++20",
             "-enable-tile",
         };
