@@ -1,4 +1,5 @@
-﻿using System.Text;
+﻿using System.Buffers;
+using System.Text;
 
 namespace CudaSharp;
 
@@ -9,28 +10,37 @@ public static partial class nvJitLink
         ReadOnlySpan<string> options)
     {
         var optionPointers = stackalloc byte*[options.Length];
-        var allocatedOptions = new IntPtr[options.Length];
+        var byteCount = 0;
+        for (var i = 0; i < options.Length; i++)
+        {
+            byteCount = checked(byteCount + Encoding.UTF8.GetByteCount(options[i]) + 1);
+        }
+
+        byte[]? pooledBuffer = null;
+        Span<byte> buffer = byteCount <= 4096
+            ? stackalloc byte[byteCount]
+            : (pooledBuffer = ArrayPool<byte>.Shared.Rent(byteCount)).AsSpan(0, byteCount);
 
         try
         {
-            for (var i = 0; i < options.Length; i++)
+            fixed (byte* bufferPointer = buffer)
             {
-                var optionBytes = Encoding.UTF8.GetBytes($"{options[i]}\0");
-                allocatedOptions[i] = Marshal.AllocHGlobal(optionBytes.Length);
-                Marshal.Copy(optionBytes, 0, allocatedOptions[i], optionBytes.Length);
-                optionPointers[i] = (byte*)allocatedOptions[i];
-            }
+                var offset = 0;
+                for (var i = 0; i < options.Length; i++)
+                {
+                    optionPointers[i] = bufferPointer + offset;
+                    offset += Encoding.UTF8.GetBytes(options[i], buffer[offset..]);
+                    buffer[offset++] = 0;
+                }
 
-            return nvJitLinkCreate(out handle, (uint)options.Length, optionPointers);
+                return nvJitLinkCreate(out handle, (uint)options.Length, optionPointers);
+            }
         }
         finally
         {
-            for (var i = 0; i < allocatedOptions.Length; i++)
+            if (pooledBuffer is not null)
             {
-                if (allocatedOptions[i] != IntPtr.Zero)
-                {
-                    Marshal.FreeHGlobal(allocatedOptions[i]);
-                }
+                ArrayPool<byte>.Shared.Return(pooledBuffer);
             }
         }
     }
@@ -78,14 +88,31 @@ public static partial class nvJitLink
         GetOutputSize getSize,
         GetOutput getOutput)
     {
-        var output = AllocateOutput(handle, getSize, getOutput);
-        var length = output.AsSpan().IndexOf((byte)0);
-        if (length < 0)
-        {
-            length = output.Length;
-        }
+        getSize(handle, out var size).Ok();
+        var length = checked((int)size);
+        byte[]? pooledBuffer = null;
+        Span<byte> output = length <= 4096
+            ? stackalloc byte[length]
+            : (pooledBuffer = ArrayPool<byte>.Shared.Rent(length)).AsSpan(0, length);
 
-        return Encoding.UTF8.GetString(output.AsSpan(0, length));
+        try
+        {
+            getOutput(handle, output).Ok();
+            var nullIndex = output.IndexOf((byte)0);
+            if (nullIndex >= 0)
+            {
+                output = output[..nullIndex];
+            }
+
+            return Encoding.UTF8.GetString(output);
+        }
+        finally
+        {
+            if (pooledBuffer is not null)
+            {
+                ArrayPool<byte>.Shared.Return(pooledBuffer);
+            }
+        }
     }
 
     delegate nvJitLinkResult GetOutputSize(nvJitLinkHandle handle, out nuint size);
