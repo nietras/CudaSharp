@@ -15,6 +15,8 @@ public static partial class nvcuda
 
     const string LibName = nameof(nvcuda);
 
+    // Initialization and error handling
+
     /// <summary>
     /// Initialize the CUDA driver API.
     /// </summary>
@@ -28,6 +30,39 @@ public static partial class nvcuda
     /// <param name="driverVersion">Returns the CUDA driver version.</param>
     [LibraryImport(LibName)]
     public static partial CUresult cuDriverGetVersion(out int driverVersion);
+
+    /// <summary>Returns the symbolic name for a CUDA error code.</summary>
+    /// <param name="error">Error code.</param>
+    /// <param name="name">Returned pointer to a null-terminated error name.</param>
+    [LibraryImport(LibName)]
+    public static partial CUresult cuGetErrorName(CUresult error, out IntPtr name);
+
+    /// <summary>Returns the description for a CUDA error code.</summary>
+    /// <param name="error">Error code.</param>
+    /// <param name="description">Returned pointer to a null-terminated error description.</param>
+    [LibraryImport(LibName)]
+    public static partial CUresult cuGetErrorString(CUresult error, out IntPtr description);
+
+    /// <summary>Returns a CUDA driver entry point compatible with the requested CUDA version.</summary>
+    /// <param name="symbol">Driver API symbol name.</param>
+    /// <param name="pfn">Returned function pointer.</param>
+    /// <param name="cudaVersion">Exact CUDA API version requested.</param>
+    /// <param name="flags">Entry-point selection flags.</param>
+    [LibraryImport(LibName, StringMarshalling = StringMarshalling.Utf8)]
+    public static partial CUresult cuGetProcAddress(string symbol, out IntPtr pfn, int cudaVersion, ulong flags);
+
+    /// <summary>Returns a CUDA driver entry point and reports why the query succeeded or failed.</summary>
+    /// <param name="symbol">Driver API symbol name.</param>
+    /// <param name="pfn">Returned function pointer.</param>
+    /// <param name="cudaVersion">Exact CUDA API version requested.</param>
+    /// <param name="flags">Entry-point selection flags.</param>
+    /// <param name="symbolStatus">Returned symbol-query status.</param>
+    [LibraryImport(LibName, StringMarshalling = StringMarshalling.Utf8)]
+    public static partial CUresult cuGetProcAddress_v2(
+        string symbol, out IntPtr pfn, int cudaVersion, ulong flags,
+        out CUdriverProcAddressQueryResult symbolStatus);
+
+    // Device management
 
     /// <summary>
     /// Returns the number of compute-capable devices.
@@ -45,7 +80,7 @@ public static partial class nvcuda
     public static partial CUresult cuDeviceGet(out CUdevice device, int ordinal);
 
     /// <summary>
-    /// Returns an identifer string for the device.
+    /// Returns an identifier string for the device.
     /// </summary>
     /// <param name="name">Returned identifier string.</param>
     /// <param name="len">Maximum length of string to store in name.</param>
@@ -104,6 +139,21 @@ public static partial class nvcuda
     [LibraryImport(LibName)]
     public static unsafe partial CUresult cuDeviceGetLuid(byte* luid, out uint deviceNodeMask, CUdevice dev);
 
+    /// <summary>Returns the device associated with a PCI bus identifier.</summary>
+    /// <param name="dev">Returned device.</param>
+    /// <param name="pciBusId">Null-terminated PCI bus identifier.</param>
+    [LibraryImport(LibName, StringMarshalling = StringMarshalling.Utf8)]
+    public static partial CUresult cuDeviceGetByPCIBusId(out CUdevice dev, string pciBusId);
+
+    /// <summary>Returns the PCI bus identifier for a device.</summary>
+    /// <param name="pciBusId">Buffer that receives the null-terminated PCI bus identifier.</param>
+    /// <param name="len">Buffer length in bytes.</param>
+    /// <param name="dev">Device.</param>
+    [LibraryImport(LibName)]
+    public static partial CUresult cuDeviceGetPCIBusId(Span<byte> pciBusId, int len, CUdevice dev);
+
+    // Context management
+
     /// <summary>
     /// Create a CUDA context.
     /// </summary>
@@ -113,6 +163,7 @@ public static partial class nvcuda
     [LibraryImport(LibName)]
     public static partial CUresult cuCtxCreate(out CUcontext pctx, CUctx_flags flags, CUdevice dev);
 
+    /// <summary>Creates a CUDA context using the version 2 ABI.</summary>
     [LibraryImport(LibName)]
     public static partial CUresult cuCtxCreate_v2(out CUcontext pctx, CUctx_flags flags, CUdevice dev);
 
@@ -226,6 +277,29 @@ public static partial class nvcuda
     [LibraryImport(LibName)]
     public static partial CUresult cuCtxSetSharedMemConfig(CUsharedconfig config);
 
+    /// <summary>Returns the API version used to create a context.</summary>
+    /// <param name="ctx">Context.</param>
+    /// <param name="version">Returned API version.</param>
+    [LibraryImport(LibName)]
+    public static partial CUresult cuCtxGetApiVersion(CUcontext ctx, out uint version);
+
+    /// <summary>Returns the flags for the current context.</summary>
+    /// <param name="flags">Returned context flags.</param>
+    [LibraryImport(LibName)]
+    public static partial CUresult cuCtxGetFlags(out CUctx_flags flags);
+
+    /// <summary>Returns the supported stream-priority range for the current context.</summary>
+    /// <param name="leastPriority">Returned least-favorable priority.</param>
+    /// <param name="greatestPriority">Returned greatest-favorable priority.</param>
+    [LibraryImport(LibName)]
+    public static partial CUresult cuCtxGetStreamPriorityRange(out int leastPriority, out int greatestPriority);
+
+    /// <summary>Waits for all preceding work in the current context to complete.</summary>
+    [LibraryImport(LibName)]
+    public static partial CUresult cuCtxSynchronize();
+
+    // Profiler control
+
     /// <summary>
     /// Initialize the profiling.
     /// </summary>
@@ -248,6 +322,8 @@ public static partial class nvcuda
     /// </summary>
     [LibraryImport(LibName)]
     public static partial CUresult cuProfilerStop();
+
+    // Primary context management
 
     /// <summary>
     /// Retain the primary context on the GPU.
@@ -288,6 +364,8 @@ public static partial class nvcuda
     [LibraryImport(LibName)]
     public static partial CUresult cuDevicePrimaryCtxReset(CUdevice dev);
 
+    // Module, library, and linker management
+
     /// <summary>
     /// Loads a compute module.
     /// </summary>
@@ -303,6 +381,12 @@ public static partial class nvcuda
     /// <param name="image">Module data to load.</param>
     [LibraryImport(LibName)]
     public static partial CUresult cuModuleLoadData(out CUmodule module, ReadOnlySpan<byte> image);
+
+    /// <summary>Loads a compute module from a fat binary image.</summary>
+    /// <param name="module">Returned module.</param>
+    /// <param name="fatCubin">Fat binary image.</param>
+    [LibraryImport(LibName)]
+    public static partial CUresult cuModuleLoadFatBinary(out CUmodule module, ReadOnlySpan<byte> fatCubin);
 
     /// <summary>
     /// Loads a compute module from a memory buffer with JIT options.
@@ -470,12 +554,92 @@ public static partial class nvcuda
     [LibraryImport(LibName, StringMarshalling = StringMarshalling.Utf8)]
     public static partial CUresult cuModuleGetFunction(out CUfunction hfunc, CUmodule hmod, string name);
 
+    /// <summary>Returns a global variable from a module.</summary>
+    /// <param name="dptr">Returned device pointer.</param>
+    /// <param name="bytes">Returned variable size in bytes.</param>
+    /// <param name="hmod">Module.</param>
+    /// <param name="name">Variable name.</param>
+    [LibraryImport(LibName, EntryPoint = "cuModuleGetGlobal_v2", StringMarshalling = StringMarshalling.Utf8)]
+    public static partial CUresult cuModuleGetGlobal(
+        out CUdeviceptr dptr, out nuint bytes,
+        CUmodule hmod, string name);
+
+    /// <summary>Returns a texture reference from a module.</summary>
+    /// <param name="texRef">Returned texture reference.</param>
+    /// <param name="hmod">Module.</param>
+    /// <param name="name">Texture-reference name.</param>
+    [LibraryImport(LibName, StringMarshalling = StringMarshalling.Utf8)]
+    public static partial CUresult cuModuleGetTexRef(out CUtexref texRef, CUmodule hmod, string name);
+
+    /// <summary>Returns a surface reference from a module.</summary>
+    /// <param name="surfRef">Returned surface reference.</param>
+    /// <param name="hmod">Module.</param>
+    /// <param name="name">Surface-reference name.</param>
+    [LibraryImport(LibName, StringMarshalling = StringMarshalling.Utf8)]
+    public static partial CUresult cuModuleGetSurfRef(out CUsurfref surfRef, CUmodule hmod, string name);
+
     /// <summary>
     /// Unloads a module.
     /// </summary>
     /// <param name="hmod">Module to unload.</param>
     [LibraryImport(LibName)]
     public static partial CUresult cuModuleUnload(CUmodule hmod);
+
+    // Array management
+
+    /// <summary>Creates a one- or two-dimensional CUDA array.</summary>
+    /// <param name="array">Returned array.</param>
+    /// <param name="descriptor">Array descriptor.</param>
+    [LibraryImport(LibName, EntryPoint = "cuArrayCreate_v2")]
+    public static partial CUresult cuArrayCreate(out CUarray array, in CUDA_ARRAY_DESCRIPTOR descriptor);
+
+    /// <summary>Returns the descriptor for a CUDA array.</summary>
+    /// <param name="descriptor">Returned array descriptor.</param>
+    /// <param name="array">Array.</param>
+    [LibraryImport(LibName, EntryPoint = "cuArrayGetDescriptor_v2")]
+    public static partial CUresult cuArrayGetDescriptor(out CUDA_ARRAY_DESCRIPTOR descriptor, CUarray array);
+
+    /// <summary>Creates a one-, two-, or three-dimensional CUDA array.</summary>
+    /// <param name="array">Returned array.</param>
+    /// <param name="descriptor">Three-dimensional array descriptor.</param>
+    [LibraryImport(LibName, EntryPoint = "cuArray3DCreate_v2")]
+    public static partial CUresult cuArray3DCreate(out CUarray array, in CUDA_ARRAY3D_DESCRIPTOR descriptor);
+
+    /// <summary>Returns the three-dimensional descriptor for a CUDA array.</summary>
+    /// <param name="descriptor">Returned descriptor.</param>
+    /// <param name="array">Array.</param>
+    [LibraryImport(LibName, EntryPoint = "cuArray3DGetDescriptor_v2")]
+    public static partial CUresult cuArray3DGetDescriptor(out CUDA_ARRAY3D_DESCRIPTOR descriptor, CUarray array);
+
+    /// <summary>Destroys a CUDA array.</summary>
+    /// <param name="array">Array to destroy.</param>
+    [LibraryImport(LibName)]
+    public static partial CUresult cuArrayDestroy(CUarray array);
+
+    /// <summary>Creates a CUDA mipmapped array.</summary>
+    /// <param name="mipmappedArray">Returned mipmapped array.</param>
+    /// <param name="descriptor">Array descriptor.</param>
+    /// <param name="numMipmapLevels">Number of mipmap levels.</param>
+    [LibraryImport(LibName)]
+    public static partial CUresult cuMipmappedArrayCreate(
+        out CUmipmappedArray mipmappedArray,
+        in CUDA_ARRAY3D_DESCRIPTOR descriptor,
+        uint numMipmapLevels);
+
+    /// <summary>Returns one level of a CUDA mipmapped array.</summary>
+    /// <param name="levelArray">Returned level array.</param>
+    /// <param name="mipmappedArray">Mipmapped array.</param>
+    /// <param name="level">Mipmap level.</param>
+    [LibraryImport(LibName)]
+    public static partial CUresult cuMipmappedArrayGetLevel(
+        out CUarray levelArray, CUmipmappedArray mipmappedArray, uint level);
+
+    /// <summary>Destroys a CUDA mipmapped array.</summary>
+    /// <param name="mipmappedArray">Mipmapped array to destroy.</param>
+    [LibraryImport(LibName)]
+    public static partial CUresult cuMipmappedArrayDestroy(CUmipmappedArray mipmappedArray);
+
+    // Texture references
 
     /// <summary>
     /// Creates a texture reference.
@@ -611,6 +775,8 @@ public static partial class nvcuda
     [LibraryImport(LibName)]
     public static partial CUresult cuTexRefGetFlags(out uint pFlags, CUtexref hTexRef);
 
+    // Surface references
+
     /// <summary>
     /// Creates a surface reference.
     /// </summary>
@@ -641,6 +807,8 @@ public static partial class nvcuda
     /// <param name="hSurfRef">Surface reference.</param>
     [LibraryImport(LibName)]
     public static partial CUresult cuSurfRefGetArray(out CUarray phArray, CUsurfref hSurfRef);
+
+    // Texture objects
 
     /// <summary>
     /// Creates a texture object.
@@ -686,6 +854,8 @@ public static partial class nvcuda
     [LibraryImport(LibName)]
     public static partial CUresult cuTexObjectGetResourceViewDesc(out CUDA_RESOURCE_VIEW_DESC pResViewDesc, CUtexObject texObject);
 
+    // Surface objects
+
     /// <summary>
     /// Creates a surface object.
     /// </summary>
@@ -709,6 +879,37 @@ public static partial class nvcuda
     [LibraryImport(LibName)]
     public static partial CUresult cuSurfObjectGetResourceDesc(out CUDA_RESOURCE_DESC pResDesc, CUsurfObject surfObject);
 
+    // Execution control and occupancy
+
+    /// <summary>Returns an attribute of a CUDA function.</summary>
+    /// <param name="value">Returned attribute value.</param>
+    /// <param name="attribute">Attribute to query.</param>
+    /// <param name="function">Function.</param>
+    [LibraryImport(LibName)]
+    public static partial CUresult cuFuncGetAttribute(
+        out int value, CUfunction_attribute attribute, CUfunction function);
+
+    /// <summary>Sets an attribute on a CUDA function.</summary>
+    /// <param name="attribute">Attribute to set.</param>
+    /// <param name="value">Attribute value.</param>
+    /// <param name="function">Function.</param>
+    [LibraryImport(LibName)]
+    public static partial CUresult cuFuncSetAttribute(
+        CUfunction_attribute attribute, int value, CUfunction function);
+
+    /// <summary>Sets the preferred cache configuration for a CUDA function.</summary>
+    /// <param name="function">Function.</param>
+    /// <param name="config">Preferred cache configuration.</param>
+    [LibraryImport(LibName)]
+    public static partial CUresult cuFuncSetCacheConfig(CUfunction function, CUfunc_cache config);
+
+    /// <summary>Sets the shared-memory bank size for a CUDA function.</summary>
+    /// <param name="function">Function.</param>
+    /// <param name="config">Shared-memory configuration.</param>
+    [LibraryImport(LibName)]
+    public static partial CUresult cuFuncSetSharedMemConfig(CUfunction function, CUsharedconfig config);
+
+    /// <summary>Launches a CUDA function on a grid.</summary>
     [LibraryImport(LibName)]
     public unsafe static partial CUresult cuLaunchKernel(CUfunction f,
         uint gridDimX, uint gridDimY, uint gridDimZ,
@@ -716,6 +917,7 @@ public static partial class nvcuda
         uint sharedMemBytes, CUstream hStream,
         void** kernelParams, void** extra);
 
+    /// <summary>Launches a CUDA function using an extensible launch configuration.</summary>
     [LibraryImport(LibName)]
     public unsafe static partial CUresult cuLaunchKernelEx(
         in CUlaunchConfig config,
@@ -723,131 +925,247 @@ public static partial class nvcuda
         void** kernelParams,
         void** extra);
 
+    /// <summary>Returns the maximum active blocks per multiprocessor for a function.</summary>
     [LibraryImport(LibName)]
     public static partial CUresult cuOccupancyMaxActiveBlocksPerMultiprocessor(
         out int numBlocks, CUfunction func,
         int blockSize, nuint dynamicSMemSize);
 
+    /// <summary>Returns the maximum active blocks per multiprocessor using occupancy flags.</summary>
     [LibraryImport(LibName)]
     public static partial CUresult cuOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(
         out int numBlocks, CUfunction func,
         int blockSize, nuint dynamicSMemSize, uint flags);
 
+    // Memory management
+
+    /// <summary>Allocates device memory.</summary>
     [LibraryImport(LibName)]
     public static partial CUresult cuMemAlloc(out CUdeviceptr dptr, nuint bytesize);
 
+    /// <summary>Allocates device memory using the version 2 ABI.</summary>
     [LibraryImport(LibName)]
     public static partial CUresult cuMemAlloc_v2(out CUdeviceptr dptr, nuint bytesize);
 
+    /// <summary>Frees device memory.</summary>
     [LibraryImport(LibName)]
     public static partial CUresult cuMemFree(CUdeviceptr dptr);
 
+    /// <summary>Frees device memory using the version 2 ABI.</summary>
     [LibraryImport(LibName)]
     public static partial CUresult cuMemFree_v2(CUdeviceptr dptr);
 
+    /// <summary>Copies memory from host to device.</summary>
     [LibraryImport(LibName)]
     public static partial CUresult cuMemcpyHtoD(CUdeviceptr dstDevice, IntPtr srcHost, nuint bytesize);
 
+    /// <summary>Copies memory from device to host.</summary>
     [LibraryImport(LibName)]
     public static partial CUresult cuMemcpyDtoH(IntPtr dstHost, CUdeviceptr srcDevice, nuint bytesize);
 
+    /// <summary>Copies memory from device to host using the version 2 ABI.</summary>
     [LibraryImport(LibName)]
     public static partial CUresult cuMemcpyDtoH_v2(IntPtr dstHost, CUdeviceptr srcDevice, nuint bytesize);
 
+    /// <summary>Asynchronously copies memory from host to device.</summary>
     [LibraryImport(LibName)]
     public static partial CUresult cuMemcpyHtoDAsync(
         CUdeviceptr dstDevice, IntPtr srcHost,
         nuint bytesize, CUstream hStream);
 
+    /// <summary>Asynchronously copies memory from device to host.</summary>
     [LibraryImport(LibName)]
     public static partial CUresult cuMemcpyDtoHAsync(
         IntPtr dstHost, CUdeviceptr srcDevice,
         nuint bytesize, CUstream hStream);
 
+    /// <summary>Asynchronously copies memory between device allocations.</summary>
     [LibraryImport(LibName)]
     public static partial CUresult cuMemcpyDtoDAsync(
         CUdeviceptr dstDevice, CUdeviceptr srcDevice,
         nuint bytesize, CUstream hStream);
 
+    /// <summary>Copies memory between two unified virtual addresses.</summary>
+    /// <param name="destination">Destination device address.</param>
+    /// <param name="source">Source device address.</param>
+    /// <param name="bytes">Number of bytes to copy.</param>
+    [LibraryImport(LibName)]
+    public static partial CUresult cuMemcpy(CUdeviceptr destination, CUdeviceptr source, nuint bytes);
+
+    /// <summary>Copies memory between two device allocations.</summary>
+    /// <param name="destination">Destination device pointer.</param>
+    /// <param name="source">Source device pointer.</param>
+    /// <param name="bytes">Number of bytes to copy.</param>
+    [LibraryImport(LibName, EntryPoint = "cuMemcpyDtoD_v2")]
+    public static partial CUresult cuMemcpyDtoD(CUdeviceptr destination, CUdeviceptr source, nuint bytes);
+
+    /// <summary>Copies memory between devices in different contexts.</summary>
+    /// <param name="destination">Destination device pointer.</param>
+    /// <param name="destinationContext">Destination context.</param>
+    /// <param name="source">Source device pointer.</param>
+    /// <param name="sourceContext">Source context.</param>
+    /// <param name="bytes">Number of bytes to copy.</param>
+    [LibraryImport(LibName)]
+    public static partial CUresult cuMemcpyPeer(
+        CUdeviceptr destination, CUcontext destinationContext,
+        CUdeviceptr source, CUcontext sourceContext,
+        nuint bytes);
+
+    /// <summary>Asynchronously copies memory between devices in different contexts.</summary>
+    /// <param name="destination">Destination device pointer.</param>
+    /// <param name="destinationContext">Destination context.</param>
+    /// <param name="source">Source device pointer.</param>
+    /// <param name="sourceContext">Source context.</param>
+    /// <param name="bytes">Number of bytes to copy.</param>
+    /// <param name="stream">Stream.</param>
+    [LibraryImport(LibName)]
+    public static partial CUresult cuMemcpyPeerAsync(
+        CUdeviceptr destination, CUcontext destinationContext,
+        CUdeviceptr source, CUcontext sourceContext,
+        nuint bytes, CUstream stream);
+
+    /// <summary>Allocates pitched device memory.</summary>
     [LibraryImport(LibName)]
     public static partial CUresult cuMemAllocPitch(
         out CUdeviceptr dptr, out nuint pPitch,
         nuint WidthInBytes, nuint Height, uint ElementSizeBytes);
 
+    /// <summary>Frees page-locked host memory.</summary>
     [LibraryImport(LibName)]
     public static partial CUresult cuMemFreeHost(IntPtr p);
 
+    /// <summary>Allocates page-locked host memory with flags.</summary>
     [LibraryImport(LibName)]
     public static partial CUresult cuMemHostAlloc(out IntPtr pp, nuint bytesize, uint Flags);
 
+    /// <summary>Returns free and total device memory for the current context.</summary>
     [LibraryImport(LibName)]
     public static partial CUresult cuMemGetInfo(out nuint free, out nuint total);
 
+    /// <summary>Returns the allocation base and size for a device pointer.</summary>
+    /// <param name="basePointer">Returned allocation base.</param>
+    /// <param name="size">Returned allocation size.</param>
+    /// <param name="pointer">Address within the allocation.</param>
+    [LibraryImport(LibName, EntryPoint = "cuMemGetAddressRange_v2")]
+    public static partial CUresult cuMemGetAddressRange(
+        out CUdeviceptr basePointer, out nuint size, CUdeviceptr pointer);
+
+    /// <summary>Allocates page-locked host memory.</summary>
+    /// <param name="pointer">Returned host pointer.</param>
+    /// <param name="bytes">Allocation size in bytes.</param>
+    [LibraryImport(LibName, EntryPoint = "cuMemAllocHost_v2")]
+    public static partial CUresult cuMemAllocHost(out IntPtr pointer, nuint bytes);
+
+    /// <summary>Returns the device pointer corresponding to mapped host memory.</summary>
+    /// <param name="devicePointer">Returned device pointer.</param>
+    /// <param name="hostPointer">Host pointer.</param>
+    /// <param name="flags">Reserved; must be zero.</param>
+    [LibraryImport(LibName, EntryPoint = "cuMemHostGetDevicePointer_v2")]
+    public static partial CUresult cuMemHostGetDevicePointer(
+        out CUdeviceptr devicePointer, IntPtr hostPointer, uint flags = 0);
+
+    /// <summary>Returns the flags used to allocate page-locked host memory.</summary>
+    /// <param name="flags">Returned allocation flags.</param>
+    /// <param name="hostPointer">Host pointer.</param>
+    [LibraryImport(LibName)]
+    public static partial CUresult cuMemHostGetFlags(out CUmemhostalloc_flags flags, IntPtr hostPointer);
+
+    /// <summary>Registers an existing host-memory range as page-locked.</summary>
+    /// <param name="hostPointer">Host pointer.</param>
+    /// <param name="bytes">Range size in bytes.</param>
+    /// <param name="flags">Registration flags.</param>
+    [LibraryImport(LibName)]
+    public static partial CUresult cuMemHostRegister(IntPtr hostPointer, nuint bytes, uint flags);
+
+    /// <summary>Unregisters a page-locked host-memory range.</summary>
+    /// <param name="hostPointer">Host pointer.</param>
+    [LibraryImport(LibName)]
+    public static partial CUresult cuMemHostUnregister(IntPtr hostPointer);
+
+    /// <summary>Performs a two-dimensional memory copy.</summary>
     [LibraryImport(LibName)]
     public static partial CUresult cuMemcpy2D(in CUDA_MEMCPY2D pCopy);
 
+    /// <summary>Performs a three-dimensional memory copy.</summary>
     [LibraryImport(LibName)]
     public static partial CUresult cuMemcpy3D(in CUDA_MEMCPY3D pCopy);
 
+    /// <summary>Asynchronously performs a two-dimensional memory copy.</summary>
     [LibraryImport(LibName)]
     public static partial CUresult cuMemcpy2DAsync(in CUDA_MEMCPY2D pCopy, CUstream hStream);
 
+    /// <summary>Asynchronously performs a three-dimensional memory copy.</summary>
     [LibraryImport(LibName)]
     public static partial CUresult cuMemcpy3DAsync(in CUDA_MEMCPY3D pCopy, CUstream hStream);
 
+    /// <summary>Sets eight-bit elements in device memory.</summary>
     [LibraryImport(LibName)]
     public static partial CUresult cuMemsetD8(CUdeviceptr dstDevice, byte uc, nuint N);
 
+    /// <summary>Sets sixteen-bit elements in device memory.</summary>
     [LibraryImport(LibName)]
     public static partial CUresult cuMemsetD16(CUdeviceptr dstDevice, ushort us, nuint N);
 
+    /// <summary>Sets thirty-two-bit elements in device memory.</summary>
     [LibraryImport(LibName)]
     public static partial CUresult cuMemsetD32(CUdeviceptr dstDevice, uint ui, nuint N);
 
+    /// <summary>Sets thirty-two-bit elements in device memory using the version 2 ABI.</summary>
     [LibraryImport(LibName)]
     public static partial CUresult cuMemsetD32_v2(CUdeviceptr dstDevice, uint ui, nuint N);
 
+    /// <summary>Sets eight-bit elements in a two-dimensional device-memory region.</summary>
     [LibraryImport(LibName)]
     public static partial CUresult cuMemsetD2D8(
         CUdeviceptr dstDevice, nuint dstPitch,
         byte uc, nuint Width, nuint Height);
 
+    /// <summary>Sets sixteen-bit elements in a two-dimensional device-memory region.</summary>
     [LibraryImport(LibName)]
     public static partial CUresult cuMemsetD2D16(
         CUdeviceptr dstDevice, nuint dstPitch,
         ushort us, nuint Width, nuint Height);
 
+    /// <summary>Sets thirty-two-bit elements in a two-dimensional device-memory region.</summary>
     [LibraryImport(LibName)]
     public static partial CUresult cuMemsetD2D32(
         CUdeviceptr dstDevice, nuint dstPitch,
         uint ui, nuint Width, nuint Height);
 
+    /// <summary>Asynchronously sets eight-bit elements in device memory.</summary>
     [LibraryImport(LibName)]
     public static partial CUresult cuMemsetD8Async(CUdeviceptr dstDevice, byte uc, nuint N, CUstream hStream);
 
+    /// <summary>Asynchronously sets sixteen-bit elements in device memory.</summary>
     [LibraryImport(LibName)]
     public static partial CUresult cuMemsetD16Async(CUdeviceptr dstDevice, ushort us, nuint N, CUstream hStream);
 
+    /// <summary>Asynchronously sets thirty-two-bit elements in device memory.</summary>
     [LibraryImport(LibName)]
     public static partial CUresult cuMemsetD32Async(CUdeviceptr dstDevice, uint ui, nuint N, CUstream hStream);
 
+    /// <summary>Asynchronously sets eight-bit elements in a two-dimensional device-memory region.</summary>
     [LibraryImport(LibName)]
     public static partial CUresult cuMemsetD2D8Async(
         CUdeviceptr dstDevice, nuint dstPitch,
         byte uc, nuint Width, nuint Height,
         CUstream hStream);
 
+    /// <summary>Asynchronously sets sixteen-bit elements in a two-dimensional device-memory region.</summary>
     [LibraryImport(LibName)]
     public static partial CUresult cuMemsetD2D16Async(
         CUdeviceptr dstDevice, nuint dstPitch,
         ushort us, nuint Width, nuint Height,
         CUstream hStream);
 
+    /// <summary>Asynchronously sets thirty-two-bit elements in a two-dimensional device-memory region.</summary>
     [LibraryImport(LibName)]
     public static partial CUresult cuMemsetD2D32Async(
         CUdeviceptr dstDevice, nuint dstPitch,
         uint ui, nuint Width, nuint Height,
         CUstream hStream);
+
+    // External resource interoperability
 
     /// <summary>
     /// Imports an external memory object.
@@ -931,6 +1249,120 @@ public static partial class nvcuda
     [LibraryImport(LibName)]
     public static partial CUresult cuDestroyExternalSemaphore(CUexternalSemaphore extSem);
 
+    // Graphics interoperability
+
+    /// <summary>Unregisters a graphics resource.</summary>
+    /// <param name="resource">Graphics resource.</param>
+    [LibraryImport(LibName)]
+    public static partial CUresult cuGraphicsUnregisterResource(CUgraphicsResource resource);
+
+    /// <summary>Maps graphics resources for CUDA access.</summary>
+    /// <param name="count">Number of resources.</param>
+    /// <param name="resources">Graphics resources.</param>
+    /// <param name="stream">Stream in which synchronization is performed.</param>
+    [LibraryImport(LibName)]
+    public static partial CUresult cuGraphicsMapResources(
+        uint count, ReadOnlySpan<CUgraphicsResource> resources, CUstream stream);
+
+    /// <summary>Unmaps graphics resources from CUDA access.</summary>
+    /// <param name="count">Number of resources.</param>
+    /// <param name="resources">Graphics resources.</param>
+    /// <param name="stream">Stream in which synchronization is performed.</param>
+    [LibraryImport(LibName)]
+    public static partial CUresult cuGraphicsUnmapResources(
+        uint count, ReadOnlySpan<CUgraphicsResource> resources, CUstream stream);
+
+    /// <summary>Sets mapping flags for a graphics resource.</summary>
+    /// <param name="resource">Graphics resource.</param>
+    /// <param name="flags">Mapping flags.</param>
+    [LibraryImport(LibName, EntryPoint = "cuGraphicsResourceSetMapFlags_v2")]
+    public static partial CUresult cuGraphicsResourceSetMapFlags(CUgraphicsResource resource, uint flags);
+
+    /// <summary>Returns a device pointer for a mapped graphics resource.</summary>
+    /// <param name="devicePointer">Returned device pointer.</param>
+    /// <param name="size">Returned mapped size in bytes.</param>
+    /// <param name="resource">Mapped graphics resource.</param>
+    [LibraryImport(LibName, EntryPoint = "cuGraphicsResourceGetMappedPointer_v2")]
+    public static partial CUresult cuGraphicsResourceGetMappedPointer(
+        out CUdeviceptr devicePointer, out nuint size, CUgraphicsResource resource);
+
+    /// <summary>Returns an array for a mapped graphics subresource.</summary>
+    /// <param name="array">Returned array.</param>
+    /// <param name="resource">Mapped graphics resource.</param>
+    /// <param name="arrayIndex">Array index.</param>
+    /// <param name="mipLevel">Mipmap level.</param>
+    [LibraryImport(LibName)]
+    public static partial CUresult cuGraphicsSubResourceGetMappedArray(
+        out CUarray array, CUgraphicsResource resource, uint arrayIndex, uint mipLevel);
+
+    /// <summary>Returns a mipmapped array for a mapped graphics resource.</summary>
+    /// <param name="mipmappedArray">Returned mipmapped array.</param>
+    /// <param name="resource">Mapped graphics resource.</param>
+    [LibraryImport(LibName)]
+    public static partial CUresult cuGraphicsResourceGetMappedMipmappedArray(
+        out CUmipmappedArray mipmappedArray, CUgraphicsResource resource);
+
+    // Stream management
+
+    /// <summary>Creates a CUDA stream.</summary>
+    [LibraryImport(LibName)]
+    public static partial CUresult cuStreamCreate(out CUstream pStream, uint Flags);
+
+    /// <summary>Creates a stream with a requested priority.</summary>
+    /// <param name="stream">Returned stream.</param>
+    /// <param name="flags">Stream creation flags.</param>
+    /// <param name="priority">Requested priority.</param>
+    [LibraryImport(LibName)]
+    public static partial CUresult cuStreamCreateWithPriority(
+        out CUstream stream, uint flags, int priority);
+
+    /// <summary>Returns the priority of a stream.</summary>
+    /// <param name="stream">Stream.</param>
+    /// <param name="priority">Returned priority.</param>
+    [LibraryImport(LibName)]
+    public static partial CUresult cuStreamGetPriority(CUstream stream, out int priority);
+
+    /// <summary>Returns the creation flags of a stream.</summary>
+    /// <param name="stream">Stream.</param>
+    /// <param name="flags">Returned flags.</param>
+    [LibraryImport(LibName)]
+    public static partial CUresult cuStreamGetFlags(CUstream stream, out uint flags);
+
+    /// <summary>Returns the context associated with a stream.</summary>
+    /// <param name="stream">Stream.</param>
+    /// <param name="context">Returned context.</param>
+    [LibraryImport(LibName)]
+    public static partial CUresult cuStreamGetCtx(CUstream stream, out CUcontext context);
+
+    /// <summary>Queries whether all preceding operations in a stream have completed.</summary>
+    /// <param name="stream">Stream.</param>
+    [LibraryImport(LibName)]
+    public static partial CUresult cuStreamQuery(CUstream stream);
+
+    /// <summary>Makes future work in a stream wait for an event.</summary>
+    /// <param name="stream">Waiting stream.</param>
+    /// <param name="eventHandle">Event to wait for.</param>
+    /// <param name="flags">Reserved; must be zero.</param>
+    [LibraryImport(LibName)]
+    public static partial CUresult cuStreamWaitEvent(
+        CUstream stream, CUevent eventHandle, uint flags = 0);
+
+    /// <summary>Begins capturing work submitted to a stream.</summary>
+    [LibraryImport(LibName, EntryPoint = "cuStreamBeginCapture_v2")]
+    public static partial CUresult cuStreamBeginCapture(CUstream hStream, CUstreamCaptureMode mode);
+
+    /// <summary>Ends stream capture and returns the captured graph.</summary>
+    [LibraryImport(LibName)]
+    public static partial CUresult cuStreamEndCapture(CUstream hStream, out CUgraph phGraph);
+
+    /// <summary>Waits for all preceding operations in a stream to complete.</summary>
+    [LibraryImport(LibName)]
+    public static partial CUresult cuStreamSynchronize(CUstream hStream);
+
+    /// <summary>Destroys a CUDA stream.</summary>
+    [LibraryImport(LibName)]
+    public static partial CUresult cuStreamDestroy(CUstream hStream);
+
     /// <summary>
     /// Wait on a memory location.
     /// </summary>
@@ -983,6 +1415,42 @@ public static partial class nvcuda
         CUstream stream, uint count,
         ReadOnlySpan<CUstreamBatchMemOpParams> paramArray,
         uint flags);
+
+    // Event management
+
+    /// <summary>Creates a CUDA event.</summary>
+    [LibraryImport(LibName)]
+    public static partial CUresult cuEventCreate(out CUevent phEvent, uint Flags);
+
+    /// <summary>Destroys a CUDA event.</summary>
+    [LibraryImport(LibName)]
+    public static partial CUresult cuEventDestroy(CUevent hEvent);
+
+    /// <summary>Records a CUDA event in a stream.</summary>
+    [LibraryImport(LibName)]
+    public static partial CUresult cuEventRecord(CUevent hEvent, CUstream hStream);
+
+    /// <summary>Records an event in a stream with record flags.</summary>
+    /// <param name="eventHandle">Event.</param>
+    /// <param name="stream">Stream.</param>
+    /// <param name="flags">Record flags.</param>
+    [LibraryImport(LibName)]
+    public static partial CUresult cuEventRecordWithFlags(
+        CUevent eventHandle, CUstream stream, uint flags);
+
+    /// <summary>Queries whether an event has completed.</summary>
+    [LibraryImport(LibName)]
+    public static partial CUresult cuEventQuery(CUevent hEvent);
+
+    /// <summary>Waits for an event to complete.</summary>
+    [LibraryImport(LibName)]
+    public static partial CUresult cuEventSynchronize(CUevent hEvent);
+
+    /// <summary>Returns elapsed time in milliseconds between two events.</summary>
+    [LibraryImport(LibName)]
+    public static partial CUresult cuEventElapsedTime(out float pMilliseconds, CUevent hStart, CUevent hEnd);
+
+    // Graph management
 
     /// <summary>
     /// Creates a graph.
@@ -1074,40 +1542,4 @@ public static partial class nvcuda
     /// <param name="hStream">Stream.</param>
     [LibraryImport(LibName)]
     public static partial CUresult cuGraphLaunch(CUgraphExec hGraphExec, CUstream hStream);
-
-    [LibraryImport(LibName)]
-    public static partial CUresult cuCtxSynchronize();
-
-    [LibraryImport(LibName)]
-    public static partial CUresult cuStreamCreate(out CUstream pStream, uint Flags);
-
-    [LibraryImport(LibName)]
-    public static partial CUresult cuStreamBeginCapture(CUstream hStream, CUstreamCaptureMode mode);
-
-    [LibraryImport(LibName)]
-    public static partial CUresult cuStreamEndCapture(CUstream hStream, out CUgraph phGraph);
-
-    [LibraryImport(LibName)]
-    public static partial CUresult cuStreamSynchronize(CUstream hStream);
-
-    [LibraryImport(LibName)]
-    public static partial CUresult cuStreamDestroy(CUstream hStream);
-
-    [LibraryImport(LibName)]
-    public static partial CUresult cuEventCreate(out CUevent phEvent, uint Flags);
-
-    [LibraryImport(LibName)]
-    public static partial CUresult cuEventDestroy(CUevent hEvent);
-
-    [LibraryImport(LibName)]
-    public static partial CUresult cuEventRecord(CUevent hEvent, CUstream hStream);
-
-    [LibraryImport(LibName)]
-    public static partial CUresult cuEventQuery(CUevent hEvent);
-
-    [LibraryImport(LibName)]
-    public static partial CUresult cuEventSynchronize(CUevent hEvent);
-
-    [LibraryImport(LibName)]
-    public static partial CUresult cuEventElapsedTime(out float pMilliseconds, CUevent hStart, CUevent hEnd);
 }

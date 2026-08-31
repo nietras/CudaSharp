@@ -17,12 +17,14 @@ public static partial class nvcuda
     public readonly record struct CUtexObject(ulong Value);
     public readonly record struct CUtexref(IntPtr Value);
     public readonly record struct CUarray(IntPtr Value);
+    public readonly record struct CUmipmappedArray(IntPtr Value);
     public readonly record struct CUgraph(IntPtr Value);
     public readonly record struct CUgraphNode(IntPtr Value);
     public readonly record struct CUgraphDeviceNode(IntPtr Value);
     public readonly record struct CUgraphExec(IntPtr Value);
     public readonly record struct CUexternalMemory(IntPtr Value);
     public readonly record struct CUexternalSemaphore(IntPtr Value);
+    public readonly record struct CUgraphicsResource(IntPtr Value);
 
     /// <summary>CUDA driver API error codes.</summary>
     public enum CUresult
@@ -233,6 +235,35 @@ public static partial class nvcuda
         CUDA_ERROR_GRAPH_RECAPTURE_FAILURE = 918,
         /// <summary>An unknown internal error has occurred.</summary>
         CUDA_ERROR_UNKNOWN = 999,
+    }
+
+    /// <summary>CUDA function attributes.</summary>
+    public enum CUfunction_attribute
+    {
+        CU_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK = 0,
+        CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES = 1,
+        CU_FUNC_ATTRIBUTE_CONST_SIZE_BYTES = 2,
+        CU_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES = 3,
+        CU_FUNC_ATTRIBUTE_NUM_REGS = 4,
+        CU_FUNC_ATTRIBUTE_PTX_VERSION = 5,
+        CU_FUNC_ATTRIBUTE_BINARY_VERSION = 6,
+        CU_FUNC_ATTRIBUTE_CACHE_MODE_CA = 7,
+        CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES = 8,
+        CU_FUNC_ATTRIBUTE_PREFERRED_SHARED_MEMORY_CARVEOUT = 9,
+        CU_FUNC_ATTRIBUTE_CLUSTER_SIZE_MUST_BE_SET = 10,
+        CU_FUNC_ATTRIBUTE_REQUIRED_CLUSTER_WIDTH = 11,
+        CU_FUNC_ATTRIBUTE_REQUIRED_CLUSTER_HEIGHT = 12,
+        CU_FUNC_ATTRIBUTE_REQUIRED_CLUSTER_DEPTH = 13,
+        CU_FUNC_ATTRIBUTE_NON_PORTABLE_CLUSTER_SIZE_ALLOWED = 14,
+        CU_FUNC_ATTRIBUTE_CLUSTER_SCHEDULING_POLICY_PREFERENCE = 15,
+    }
+
+    /// <summary>Result of querying a CUDA driver entry point.</summary>
+    public enum CUdriverProcAddressQueryResult
+    {
+        CU_GET_PROC_ADDRESS_SUCCESS = 0,
+        CU_GET_PROC_ADDRESS_SYMBOL_NOT_FOUND = 1,
+        CU_GET_PROC_ADDRESS_VERSION_NOT_SUFFICIENT = 2,
     }
 
     public enum CUevent_flags
@@ -470,7 +501,7 @@ public static partial class nvcuda
         [FieldOffset(0)]
         public CUDA_RESOURCE_DESC_PITCH2D pitch2D;
         [FieldOffset(0)]
-        public unsafe fixed int reserved[16];
+        public unsafe fixed int reserved[32];
     }
 
     [StructLayout(LayoutKind.Sequential)]
