@@ -1,10 +1,10 @@
 ```
 
-BenchmarkDotNet v0.15.8, Windows 10 (10.0.19045.7058/22H2/2022Update)
+BenchmarkDotNet v0.15.8, Windows 10 (10.0.19045.7417/22H2/2022Update)
 AMD Ryzen 9 9950X 4.30GHz, 1 CPU, 32 logical and 16 physical cores
-.NET SDK 10.0.104
-  [Host]    : .NET 10.0.5 (10.0.5, 10.0.526.15411), X64 RyuJIT x86-64-v4
-  .NET 10.0 : .NET 10.0.5 (10.0.5, 10.0.526.15411), X64 RyuJIT x86-64-v4
+.NET SDK 10.0.109
+  [Host]    : .NET 10.0.9 (10.0.9, 10.0.926.27113), X64 RyuJIT x86-64-v4
+  .NET 10.0 : .NET 10.0.9 (10.0.9, 10.0.926.27113), X64 RyuJIT x86-64-v4
 
 Job=.NET 10.0  EnvironmentVariables=DOTNET_GCDynamicAdaptationMode=0  Runtime=.NET 10.0  
 Toolchain=net10.0  IterationTime=350ms  MaxIterationCount=15  
@@ -13,6 +13,6 @@ MinIterationCount=5  WarmupCount=6  RatioSD=0.02
 ```
 | Method                          | Mean     | Ratio | Allocated | Alloc Ratio |
 |-------------------------------- |---------:|------:|----------:|------------:|
-| cuLaunchKernel_Raw_CtxSync      | 25.35 μs |  1.00 |         - |          NA |
-| cuLaunchKernel_Overload_CtxSync | 25.47 μs |  1.01 |         - |          NA |
-| cuLaunchKernelEx_CtxSync        | 25.28 μs |  1.00 |         - |          NA |
+| cuLaunchKernel_Raw_CtxSync      | 25.42 μs |  1.00 |         - |          NA |
+| cuLaunchKernel_Overload_CtxSync | 25.39 μs |  1.00 |         - |          NA |
+| cuLaunchKernelEx_CtxSync        | 25.25 μs |  0.99 |         - |          NA |
