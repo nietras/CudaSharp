@@ -5,6 +5,40 @@ namespace CudaSharp;
 
 public static partial class nvrtc
 {
+    /// <summary>Creates an NVRTC program using managed virtual-header strings.</summary>
+    /// <seealso href="https://docs.nvidia.com/cuda/nvrtc/index.html#group__compilation" />
+    public unsafe static nvrtcResult nvrtcCreateProgram(out nvrtcProgram program,
+        string source, string name, int numHeaders,
+        in ReadOnlySpan<string> headers, in ReadOnlySpan<string> includeNames)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(numHeaders);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(numHeaders, headers.Length);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(numHeaders, includeNames.Length);
+
+        var headerPointers = stackalloc byte*[numHeaders];
+        var includeNamePointers = stackalloc byte*[numHeaders];
+        try
+        {
+            for (var i = 0; i < numHeaders; i++)
+            {
+                headerPointers[i] = (byte*)Marshal.StringToCoTaskMemUTF8(headers[i]);
+                includeNamePointers[i] = (byte*)Marshal.StringToCoTaskMemUTF8(includeNames[i]);
+            }
+
+            return nvrtcCreateProgram(out program, source, name, numHeaders,
+                numHeaders == 0 ? null : headerPointers,
+                numHeaders == 0 ? null : includeNamePointers);
+        }
+        finally
+        {
+            for (var i = 0; i < numHeaders; i++)
+            {
+                Marshal.FreeCoTaskMem((IntPtr)headerPointers[i]);
+                Marshal.FreeCoTaskMem((IntPtr)includeNamePointers[i]);
+            }
+        }
+    }
+
     /// <summary>Returns the null-terminated NVRTC error text as UTF-8 bytes.</summary>
     public unsafe static ReadOnlySpan<byte> nvrtcGetErrorStringSpan(nvrtcResult result)
     {

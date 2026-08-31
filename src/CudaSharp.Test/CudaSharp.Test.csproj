@@ -9,6 +9,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\CudaSharp\CudaSharp.csproj" />
+    <Content Include="..\..\src-tilecpp\**\*.cuh" Link="src-tilecpp\%(RecursiveDir)%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
   
   <ItemGroup>

@@ -27,6 +27,8 @@
 
 * **Code Quality:** Run `dotnet format` before every commit.
 * **Atomic Commits:** Commit after each successful change or logical unit of work.
+* **No Local CUDA Toolkit Assumption:** NEVER probe for or depend on a CUDA Toolkit installation on the machine. This repository obtains NVIDIA user-mode libraries and tools from NuGet packages and requires only the NVIDIA display driver to be installed.
+* **NVIDIA API Research:** Use the configured NVIDIA documentation MCP server as the source for CUDA API definitions, headers, samples, and CUDA Tile C++ behavior instead of searching the local machine.
 
 ## Agent Instruction Source
 

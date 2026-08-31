@@ -67,9 +67,9 @@ public static partial class nvrtc
     /// <param name="headers">Header sources.</param>
     /// <param name="includeNames">Header include names.</param>
     [LibraryImport(LibName, StringMarshalling = StringMarshalling.Utf8)]
-    public static partial nvrtcResult nvrtcCreateProgram(out nvrtcProgram prog,
+    public unsafe static partial nvrtcResult nvrtcCreateProgram(out nvrtcProgram prog,
         string src, string name, int numHeaders,
-        in ReadOnlySpan<string> headers, in ReadOnlySpan<string> includeNames);
+        byte** headers, byte** includeNames);
 
     /// <summary>
     /// Destroys the program.

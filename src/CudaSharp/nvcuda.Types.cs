@@ -537,6 +537,10 @@ public static partial class nvcuda
         CU_DEVICE_ATTRIBUTE_CAN_MAP_HOST_MEMORY = 19,
         /// <summary>Compute mode.</summary>
         CU_DEVICE_ATTRIBUTE_COMPUTE_MODE = 20,
+        /// <summary>Major compute capability version number.</summary>
+        CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR = 75,
+        /// <summary>Minor compute capability version number.</summary>
+        CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR = 76,
     }
 
     /// <summary>Universally unique identifier for a CUDA device.</summary>
