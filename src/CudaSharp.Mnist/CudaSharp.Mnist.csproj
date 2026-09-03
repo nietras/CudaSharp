@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  
+  <PropertyGroup>
+    <RootNamespace>CudaSharp.Mnist</RootNamespace>
+    <OutputType>Exe</OutputType>
+    <IsTrimmable>true</IsTrimmable>
+    <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
+    <EnableAOTAnalyzer>true</EnableAOTAnalyzer>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <IlcInstructionSet Condition="$(RuntimeIdentifier) == 'win-x64'">native</IlcInstructionSet>
+    <IlcInvariantGlobalization>true</IlcInvariantGlobalization>
+    <IlcDisableReflection>true</IlcDisableReflection>
+    <IlcGenerateMstatFile>true</IlcGenerateMstatFile>
+    <IlcGenerateDgmlFile>true</IlcGenerateDgmlFile>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <DebugType>pdbonly</DebugType>
+    <DebugSymbols>true</DebugSymbols>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.Numerics.Tensors" Version="10.0.11" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CudaSharp\CudaSharp.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="NtvLibs.cuda13.nvrtc-builtins64_133.runtime.json" Version="13.3.0" />
+    <PackageReference Include="NtvLibs.cuda13.nvrtc-builtins64_133.runtime.win-x64" Version="13.3.0" />
+    <PackageReference Include="NtvLibs.cuda13.nvrtc64_130_0.runtime.json" Version="13.3.0" />
+    <PackageReference Include="NtvLibs.cuda13.nvrtc64_130_0.runtime.win-x64" Version="13.3.0" />
+  </ItemGroup>
+
+</Project>
