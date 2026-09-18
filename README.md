@@ -434,6 +434,9 @@ namespace CudaSharp
         [System.Runtime.CompilerServices.SkipLocalsInit]
         [System.Runtime.InteropServices.LibraryImport("nvcuda")]
         public static CudaSharp.nvcuda.CUresult cuFuncGetAttribute(out int value, CudaSharp.nvcuda.CUfunction_attribute attribute, CudaSharp.nvcuda.CUfunction function) { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
+        [System.Runtime.InteropServices.LibraryImport("nvcuda")]
+        public static CudaSharp.nvcuda.CUresult cuFuncGetName(out System.IntPtr name, CudaSharp.nvcuda.CUfunction function) { }
         [System.Runtime.InteropServices.LibraryImport("nvcuda")]
         public static CudaSharp.nvcuda.CUresult cuFuncSetAttribute(CudaSharp.nvcuda.CUfunction_attribute attribute, int value, CudaSharp.nvcuda.CUfunction function) { }
         [System.Runtime.InteropServices.LibraryImport("nvcuda")]
@@ -631,6 +634,8 @@ namespace CudaSharp
         [System.Runtime.InteropServices.LibraryImport("nvcuda")]
         public static CudaSharp.nvcuda.CUresult cuMemcpyHtoDAsync(CudaSharp.nvcuda.CUdeviceptr dstDevice, nint srcHost, nuint bytesize, CudaSharp.nvcuda.CUstream hStream) { }
         [System.Runtime.InteropServices.LibraryImport("nvcuda")]
+        public static CudaSharp.nvcuda.CUresult cuMemcpyHtoD_v2(CudaSharp.nvcuda.CUdeviceptr dstDevice, nint srcHost, nuint bytesize) { }
+        [System.Runtime.InteropServices.LibraryImport("nvcuda")]
         public static CudaSharp.nvcuda.CUresult cuMemcpyPeer(CudaSharp.nvcuda.CUdeviceptr destination, CudaSharp.nvcuda.CUcontext destinationContext, CudaSharp.nvcuda.CUdeviceptr source, CudaSharp.nvcuda.CUcontext sourceContext, nuint bytes) { }
         [System.Runtime.InteropServices.LibraryImport("nvcuda")]
         public static CudaSharp.nvcuda.CUresult cuMemcpyPeerAsync(CudaSharp.nvcuda.CUdeviceptr destination, CudaSharp.nvcuda.CUcontext destinationContext, CudaSharp.nvcuda.CUdeviceptr source, CudaSharp.nvcuda.CUcontext sourceContext, nuint bytes, CudaSharp.nvcuda.CUstream stream) { }
@@ -660,6 +665,8 @@ namespace CudaSharp
         public static CudaSharp.nvcuda.CUresult cuMemsetD8(CudaSharp.nvcuda.CUdeviceptr dstDevice, byte uc, nuint N) { }
         [System.Runtime.InteropServices.LibraryImport("nvcuda")]
         public static CudaSharp.nvcuda.CUresult cuMemsetD8Async(CudaSharp.nvcuda.CUdeviceptr dstDevice, byte uc, nuint N, CudaSharp.nvcuda.CUstream hStream) { }
+        [System.Runtime.InteropServices.LibraryImport("nvcuda", EntryPoint="cuMemsetD8_v2")]
+        public static CudaSharp.nvcuda.CUresult cuMemsetD8_v2(CudaSharp.nvcuda.CUdeviceptr dstDevice, byte uc, nuint N) { }
         [System.Runtime.CompilerServices.SkipLocalsInit]
         [System.Runtime.InteropServices.LibraryImport("nvcuda")]
         public static CudaSharp.nvcuda.CUresult cuMipmappedArrayCreate(out CudaSharp.nvcuda.CUmipmappedArray mipmappedArray, in CudaSharp.nvcuda.CUDA_ARRAY3D_DESCRIPTOR descriptor, uint numMipmapLevels) { }
@@ -669,8 +676,14 @@ namespace CudaSharp
         [System.Runtime.InteropServices.LibraryImport("nvcuda")]
         public static CudaSharp.nvcuda.CUresult cuMipmappedArrayGetLevel(out CudaSharp.nvcuda.CUarray levelArray, CudaSharp.nvcuda.CUmipmappedArray mipmappedArray, uint level) { }
         [System.Runtime.CompilerServices.SkipLocalsInit]
+        [System.Runtime.InteropServices.LibraryImport("nvcuda")]
+        public static CudaSharp.nvcuda.CUresult cuModuleEnumerateFunctions(System.Span<CudaSharp.nvcuda.CUfunction> functions, uint count, CudaSharp.nvcuda.CUmodule module) { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
         [System.Runtime.InteropServices.LibraryImport("nvcuda", StringMarshalling=System.Runtime.InteropServices.StringMarshalling.Utf8)]
         public static CudaSharp.nvcuda.CUresult cuModuleGetFunction(out CudaSharp.nvcuda.CUfunction hfunc, CudaSharp.nvcuda.CUmodule hmod, string name) { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
+        [System.Runtime.InteropServices.LibraryImport("nvcuda")]
+        public static CudaSharp.nvcuda.CUresult cuModuleGetFunctionCount(out uint count, CudaSharp.nvcuda.CUmodule module) { }
         [System.Runtime.CompilerServices.SkipLocalsInit]
         [System.Runtime.InteropServices.LibraryImport("nvcuda", EntryPoint="cuModuleGetGlobal_v2", StringMarshalling=System.Runtime.InteropServices.StringMarshalling.Utf8)]
         public static CudaSharp.nvcuda.CUresult cuModuleGetGlobal(out CudaSharp.nvcuda.CUdeviceptr dptr, out System.UIntPtr bytes, CudaSharp.nvcuda.CUmodule hmod, string name) { }
@@ -1165,6 +1178,8 @@ namespace CudaSharp
             CU_DEVICE_ATTRIBUTE_INTEGRATED = 18,
             CU_DEVICE_ATTRIBUTE_CAN_MAP_HOST_MEMORY = 19,
             CU_DEVICE_ATTRIBUTE_COMPUTE_MODE = 20,
+            CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR = 75,
+            CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR = 76,
         }
         public readonly struct CUdeviceptr : System.IEquatable<CudaSharp.nvcuda.CUdeviceptr>
         {
@@ -1754,7 +1769,8 @@ namespace CudaSharp
         public static CudaSharp.nvrtc.nvrtcResult nvrtcCompileProgram(CudaSharp.nvrtc.nvrtcProgram program, int numOptions, string[] options) { }
         [System.Runtime.CompilerServices.SkipLocalsInit]
         [System.Runtime.InteropServices.LibraryImport("nvrtc", StringMarshalling=System.Runtime.InteropServices.StringMarshalling.Utf8)]
-        public static CudaSharp.nvrtc.nvrtcResult nvrtcCreateProgram(out CudaSharp.nvrtc.nvrtcProgram prog, string src, string name, int numHeaders, in System.ReadOnlySpan<string> headers, in System.ReadOnlySpan<string> includeNames) { }
+        public static unsafe CudaSharp.nvrtc.nvrtcResult nvrtcCreateProgram(out CudaSharp.nvrtc.nvrtcProgram prog, string src, string name, int numHeaders, byte** headers, byte** includeNames) { }
+        public static CudaSharp.nvrtc.nvrtcResult nvrtcCreateProgram(out CudaSharp.nvrtc.nvrtcProgram program, string source, string name, int numHeaders, in System.ReadOnlySpan<string> headers, in System.ReadOnlySpan<string> includeNames) { }
         [System.Runtime.CompilerServices.SkipLocalsInit]
         [System.Runtime.InteropServices.LibraryImport("nvrtc")]
         public static CudaSharp.nvrtc.nvrtcResult nvrtcDestroyProgram(ref CudaSharp.nvrtc.nvrtcProgram prog) { }
@@ -1887,6 +1903,110 @@ namespace CudaSharp
         extension(CudaSharp.nvrtc.nvrtcResult result)
         {
         }
+    }
+}
+namespace CudaSharp.Tile
+{
+    public sealed class CudaEventTileCppTimer : CudaSharp.Tile.ITileCppTimer
+    {
+        public CudaEventTileCppTimer() { }
+        public float Measure(System.Action launch, CudaSharp.nvcuda.CUstream stream, CudaSharp.Tile.TileCppTimingOptions options) { }
+        public void Synchronize(CudaSharp.nvcuda.CUstream stream) { }
+    }
+    public interface ITileCppTimer
+    {
+        float Measure(System.Action launch, CudaSharp.nvcuda.CUstream stream, CudaSharp.Tile.TileCppTimingOptions options);
+        void Synchronize(CudaSharp.nvcuda.CUstream stream);
+    }
+    public sealed class TileCppAutotuner
+    {
+        public TileCppAutotuner(CudaSharp.Tile.TileCppSearchSpace searchSpace, CudaSharp.Tile.ITileCppTimer? timer = null) { }
+        public void ClearCache() { }
+        public bool ClearCache(object key) { }
+        public CudaSharp.Tile.TileCppTunedResult Tune(CudaSharp.nvcuda.CUstream stream, object key, System.Action<CudaSharp.Tile.TileCppConfig> launch, System.Func<System.Collections.Generic.IReadOnlyDictionary<string, object?>, CudaSharp.Tile.TileCppConfig, CudaSharp.Tile.TileCppGrid> getGrid, System.Collections.Generic.IReadOnlyDictionary<string, object?>? namedArguments = null, int maxIterations = 60, int? seed = default, bool forceRetune = false, CudaSharp.Tile.TileCppTimingOptions? timingOptions = null, System.Action<string>? log = null) { }
+    }
+    public sealed class TileCppCompilation : System.IEquatable<CudaSharp.Tile.TileCppCompilation>
+    {
+        public TileCppCompilation(byte[] TileIr, string EntryPoint) { }
+        public string EntryPoint { get; init; }
+        public byte[] TileIr { get; init; }
+    }
+    public sealed class TileCppCompiler
+    {
+        public TileCppCompiler(int architecture, bool installBundledHeaders = true, string? bundledHeadersPath = null) { }
+        public int Architecture { get; }
+        public byte[] Compile(string source, string sourceName, CudaSharp.Tile.TileCppConfig config, System.Collections.Generic.IReadOnlyList<CudaSharp.Tile.TileCppHeader>? headers = null, System.Collections.Generic.IReadOnlyList<string>? additionalOptions = null) { }
+        public CudaSharp.Tile.TileCppCompilation CompileKernel(string source, string sourceName, string nameExpression, CudaSharp.Tile.TileCppConfig config, System.Collections.Generic.IReadOnlyList<CudaSharp.Tile.TileCppHeader>? headers = null, System.Collections.Generic.IReadOnlyList<string>? additionalOptions = null) { }
+        public byte[] CompileToTileIr(string source, string sourceName, CudaSharp.Tile.TileCppConfig config, System.Collections.Generic.IReadOnlyList<CudaSharp.Tile.TileCppHeader>? headers = null, System.Collections.Generic.IReadOnlyList<string>? additionalOptions = null) { }
+        public static int GetArchitecture(CudaSharp.nvcuda.CUdevice device) { }
+    }
+    public sealed class TileCppConfig
+    {
+        public TileCppConfig(System.Collections.Generic.IEnumerable<System.Collections.Generic.KeyValuePair<string, string>> parameters, int? numCtas = default, int? occupancy = default, int optimizationLevel = 3, int? numWorkerWarps = default) { }
+        public string this[string name] { get; }
+        public int? NumCtas { get; }
+        public int? NumWorkerWarps { get; }
+        public int? Occupancy { get; }
+        public int OptimizationLevel { get; }
+        public System.Collections.Generic.IReadOnlyDictionary<string, string> Parameters { get; }
+        public override string ToString() { }
+    }
+    public readonly struct TileCppGrid : System.IEquatable<CudaSharp.Tile.TileCppGrid>
+    {
+        public TileCppGrid(uint x, uint y = 1, uint z = 1) { }
+        public uint X { get; }
+        public uint Y { get; }
+        public uint Z { get; }
+    }
+    public sealed class TileCppHeader : System.IEquatable<CudaSharp.Tile.TileCppHeader>
+    {
+        public TileCppHeader(string name, string source) { }
+        public string Name { get; }
+        public string Source { get; }
+    }
+    public sealed class TileCppKernel : System.IDisposable
+    {
+        public TileCppKernel(CudaSharp.Tile.TileCppCompiler compiler, string source, string sourceName, string kernelName, System.Collections.Generic.IReadOnlyList<CudaSharp.Tile.TileCppHeader>? headers = null, System.Collections.Generic.IReadOnlyList<string>? additionalOptions = null, string? nameExpression = null) { }
+        public void Dispose() { }
+        public CudaSharp.nvcuda.CUfunction GetFunction(CudaSharp.Tile.TileCppConfig config) { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
+        public void Launch(CudaSharp.Tile.TileCppConfig config, CudaSharp.Tile.TileCppGrid grid, CudaSharp.nvcuda.CUstream stream, System.ReadOnlySpan<System.IntPtr> argumentPointers) { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
+        public void Launch<T1>(CudaSharp.Tile.TileCppConfig config, CudaSharp.Tile.TileCppGrid grid, CudaSharp.nvcuda.CUstream stream, T1 arg1)
+            where T1 :  unmanaged { }
+        public void Launch<T1, T2>(CudaSharp.Tile.TileCppConfig config, CudaSharp.Tile.TileCppGrid grid, CudaSharp.nvcuda.CUstream stream, T1 arg1, T2 arg2)
+            where T1 :  unmanaged
+            where T2 :  unmanaged { }
+        public void Launch<T1, T2, T3>(CudaSharp.Tile.TileCppConfig config, CudaSharp.Tile.TileCppGrid grid, CudaSharp.nvcuda.CUstream stream, T1 arg1, T2 arg2, T3 arg3)
+            where T1 :  unmanaged
+            where T2 :  unmanaged
+            where T3 :  unmanaged { }
+        public void Launch<T1, T2, T3, T4>(CudaSharp.Tile.TileCppConfig config, CudaSharp.Tile.TileCppGrid grid, CudaSharp.nvcuda.CUstream stream, T1 arg1, T2 arg2, T3 arg3, T4 arg4)
+            where T1 :  unmanaged
+            where T2 :  unmanaged
+            where T3 :  unmanaged
+            where T4 :  unmanaged { }
+    }
+    public sealed class TileCppSearchSpace : System.Collections.Generic.IEnumerable<CudaSharp.Tile.TileCppConfig>, System.Collections.Generic.IReadOnlyCollection<CudaSharp.Tile.TileCppConfig>, System.Collections.Generic.IReadOnlyList<CudaSharp.Tile.TileCppConfig>, System.Collections.IEnumerable
+    {
+        public TileCppSearchSpace(System.Collections.Generic.IEnumerable<CudaSharp.Tile.TileCppConfig> configs, System.Func<System.Collections.Generic.IReadOnlyDictionary<string, object?>, CudaSharp.Tile.TileCppConfig, bool>? predicate = null) { }
+        public int Count { get; }
+        public CudaSharp.Tile.TileCppConfig this[int index] { get; }
+        public System.Collections.Generic.IEnumerator<CudaSharp.Tile.TileCppConfig> GetEnumerator() { }
+        public bool IsMatch(System.Collections.Generic.IReadOnlyDictionary<string, object?> namedArguments, CudaSharp.Tile.TileCppConfig config) { }
+    }
+    public sealed class TileCppTimingOptions : System.IEquatable<CudaSharp.Tile.TileCppTimingOptions>
+    {
+        public TileCppTimingOptions(float warmupMilliseconds = 25, float measurementMilliseconds = 100) { }
+        public float MeasurementMilliseconds { get; }
+        public float WarmupMilliseconds { get; }
+    }
+    public sealed class TileCppTunedResult : System.IEquatable<CudaSharp.Tile.TileCppTunedResult>
+    {
+        public TileCppTunedResult(CudaSharp.Tile.TileCppConfig config, CudaSharp.Tile.TileCppGrid grid, float milliseconds) { }
+        public CudaSharp.Tile.TileCppConfig Config { get; }
+        public CudaSharp.Tile.TileCppGrid Grid { get; }
+        public float Milliseconds { get; }
     }
 }
 ```
