@@ -9,8 +9,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\CudaSharp\CudaSharp.csproj" />
-    <Content Include="..\..\src-tilecpp\**\*.cuh" Link="src-tilecpp\%(RecursiveDir)%(Filename)%(Extension)"
-             CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\src-tilecpp\**\*.cuh" Link="src-tilecpp\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
   
   <ItemGroup>
@@ -22,14 +21,14 @@
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
-    <PackageReference Include="MSTest" Version="4.3.3" />
+    <PackageReference Include="MSTest" Version="4.4.1" />
 
-    <PackageReference Include="NtvLibs.cuda13.nvrtc-builtins64_133.runtime.json" Version="13.3.0" />
-    <PackageReference Include="NtvLibs.cuda13.nvrtc-builtins64_133.runtime.win-x64" Version="13.3.0" />
-    <PackageReference Include="NtvLibs.cuda13.nvrtc64_130_0.runtime.json" Version="13.3.0" />
-    <PackageReference Include="NtvLibs.cuda13.nvrtc64_130_0.runtime.win-x64" Version="13.3.0" />
-    <PackageReference Include="NtvLibs.cuda13.nvJitLink_130_0.runtime.json" Version="13.3.0" />
-    <PackageReference Include="NtvLibs.cuda13.nvJitLink_130_0.runtime.win-x64" Version="13.3.0" />
+    <PackageReference Include="NtvLibs.cuda13.nvrtc-builtins64_133.runtime.json" Version="13.3.1" />
+    <PackageReference Include="NtvLibs.cuda13.nvrtc-builtins64_133.runtime.win-x64" Version="13.3.1" />
+    <PackageReference Include="NtvLibs.cuda13.nvrtc64_130_0.runtime.json" Version="13.4.2" />
+    <PackageReference Include="NtvLibs.cuda13.nvrtc64_130_0.runtime.win-x64" Version="13.4.2" />
+    <PackageReference Include="NtvLibs.cuda13.nvJitLink_130_0.runtime.json" Version="13.4.2" />
+    <PackageReference Include="NtvLibs.cuda13.nvJitLink_130_0.runtime.win-x64" Version="13.4.2" />
   </ItemGroup>
 
 </Project>
