@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using CudaSharp.Tile;
 using static CudaSharp.nvcuda;
@@ -7,6 +8,8 @@ namespace CudaSharp.Tester;
 
 sealed class TileGymRuntime : IDisposable
 {
+    readonly Dictionary<object, IDisposable> _tuningSessions = [];
+
     public TileGymRuntime(int deviceOrdinal)
     {
         CuInit.EnsureInit();
@@ -32,11 +35,31 @@ sealed class TileGymRuntime : IDisposable
     public CUcontext Context { get; }
     public CUstream Stream { get; }
     public int Architecture { get; }
+    public bool EnableAutotuning { get; set; } = true;
 
     public CudaBuffer<T> Allocate<T>(int length) where T : unmanaged => new(length);
 
+    public T GetOrCreateTuningSession<T>(object key, Func<T> create) where T : class, IDisposable
+    {
+        ArgumentNullException.ThrowIfNull(key);
+        ArgumentNullException.ThrowIfNull(create);
+        if (_tuningSessions.TryGetValue(key, out var session))
+        {
+            return (T)session;
+        }
+        var created = create();
+        _tuningSessions.Add(key, created);
+        return created;
+    }
+
     public void Dispose()
     {
+        cuStreamSynchronize(Stream).Ok();
+        foreach (var session in _tuningSessions.Values)
+        {
+            session.Dispose();
+        }
+        _tuningSessions.Clear();
         cuStreamDestroy(Stream).Ok();
         cuCtxSetCurrent(default).Ok();
         cuDevicePrimaryCtxRelease(Device).Ok();

@@ -22,7 +22,7 @@ static class TileGymRecurrentScenarios
         const ulong seed = 2654435761;
         const string name = "seeded_dropout_kernel";
 
-        using var kernel = TileGymKernel.Create(runtime, "dropout.cuh", name, "float, 1024", "const float*, float*, float, uint64_t, int");
+        var problem = new TileGymDropoutProblem(n);
         using var x = runtime.Allocate<float>(n);
         using var y = runtime.Allocate<float>(n);
 
@@ -30,7 +30,7 @@ static class TileGymRecurrentScenarios
         Array.Fill(hx, 1f);
         x.CopyFrom(hx);
 
-        void Launch()
+        void Launch(TileCppKernel kernel, TileCppConfig config, TileCppGrid grid)
         {
             var px = x.Pointer.Value;
             var py = y.Pointer.Value;
@@ -47,10 +47,9 @@ static class TileGymRecurrentScenarios
                 (IntPtr)(&count)
             };
 
-            kernel.Launch(Config, new(n / 1024), runtime.Stream, new(args, 5));
+            kernel.Launch(config, grid, runtime.Stream, new(args, 5));
         }
 
-        var timing = TileGymKernel.Measure(runtime, Launch);
         var expected = new float[n];
         for (var i = 0; i < n; i++)
         {
@@ -62,8 +61,16 @@ static class TileGymRecurrentScenarios
             expected[i] = random > probability ? 1f / (1f - probability) : 0f;
         }
 
+        var tuned = TileGymTuning.Tune(runtime, problem, TileGymDropoutCandidates.For(),
+            "dropout.cuh", name, "const float*, float*, float, uint64_t, int",
+            static (p, candidate) => p.TemplateArguments(candidate),
+            static (p, candidate) => p.Grid(candidate), Launch,
+            validate: _ => TileGymKernel.Validate(y.CopyToHost(), expected, name, 1e-6f, 1e-6f));
+        void LaunchSelected() => Launch(tuned.Kernel, tuned.Candidate.CompilerConfig, tuned.Grid);
+        var timing = TileGymKernel.Measure(runtime, LaunchSelected);
         TileGymKernel.Validate(y.CopyToHost(), expected, name, 1e-6f, 1e-6f);
-        TileGymKernel.Report(report, "dropout", name, $"{n},p={probability},seed=1", "float,BLOCK_SIZE=1024", x.ByteLength + y.ByteLength, timing);
+        TileGymKernel.Report(report, "dropout", name, $"{n},p={probability},seed=1",
+            x.ByteLength + y.ByteLength, timing, tuned);
     }
 
     static unsafe void RunRecurrent(TileGymRuntime runtime, TileGymReport report)
@@ -290,15 +297,27 @@ static class TileGymRecurrentScenarios
         for (var step = 0; step < t; step++)
         {
             var decay = MathF.Exp(g[step]);
-            for (var i = 0; i < state.Length; i++) state[i] *= decay;
+            for (var i = 0; i < state.Length; i++)
+            {
+                state[i] *= decay;
+            }
             for (var col = 0; col < vd; col++)
             {
                 var memory = 0f;
-                for (var row = 0; row < kd; row++) memory += state[row * vd + col] * k[step * kd + row];
+                for (var row = 0; row < kd; row++)
+                {
+                    memory += state[row * vd + col] * k[step * kd + row];
+                }
                 var delta = (v[step * vd + col] - memory) * beta[step];
-                for (var row = 0; row < kd; row++) state[row * vd + col] += k[step * kd + row] * delta;
+                for (var row = 0; row < kd; row++)
+                {
+                    state[row * vd + col] += k[step * kd + row] * delta;
+                }
                 var value = 0f;
-                for (var row = 0; row < kd; row++) value += state[row * vd + col] * q[step * kd + row] * scale;
+                for (var row = 0; row < kd; row++)
+                {
+                    value += state[row * vd + col] * q[step * kd + row] * scale;
+                }
                 output[step * vd + col] = value;
             }
         }
@@ -309,7 +328,10 @@ static class TileGymRecurrentScenarios
     static float[] Values(int count, float scale)
     {
         var a = new float[count];
-        for (var i = 0; i < count; i++) a[i] = (i % 23 - 11) * scale;
+        for (var i = 0; i < count; i++)
+        {
+            a[i] = (i % 23 - 11) * scale;
+        }
         return a;
     }
 }

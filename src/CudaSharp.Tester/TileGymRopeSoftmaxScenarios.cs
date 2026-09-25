@@ -90,8 +90,7 @@ static class TileGymRopeSoftmaxScenarios
             : online
                 ? "float*, const float*, int, int, int"
                 : "float*, const float*, int, int, int, int, int";
-        using var kernel = TileGymKernel.Create(
-            runtime, "softmax.cuh", name, $"float, {block}", signature);
+        var problem = new TileGymSoftmaxProblem(rows, columns, online, backward);
         using var input = runtime.Allocate<float>(rows * columns);
         using var output = runtime.Allocate<float>(input.Length);
         using var dy = backward ? runtime.Allocate<float>(input.Length) : null;
@@ -108,7 +107,7 @@ static class TileGymRopeSoftmaxScenarios
             input.CopyFrom(hi);
         }
 
-        void Launch()
+        void Launch(TileCppKernel kernel, TileCppConfig config, TileCppGrid grid)
         {
             var po = output.Pointer.Value;
             var pi = input.Pointer.Value;
@@ -124,12 +123,12 @@ static class TileGymRopeSoftmaxScenarios
                     (IntPtr)(&po), (IntPtr)(&pi), (IntPtr)(&pdy), (IntPtr)(&stride),
                     (IntPtr)(&stride), (IntPtr)(&stride), (IntPtr)(&ncols)
                 };
-                kernel.Launch(Config, new(rows), runtime.Stream, new(args, 7));
+                kernel.Launch(config, grid, runtime.Stream, new(args, 7));
             }
             else if (online)
             {
                 var args = stackalloc IntPtr[] { (IntPtr)(&po), (IntPtr)(&pi), (IntPtr)(&stride), (IntPtr)(&stride), (IntPtr)(&ncols) };
-                kernel.Launch(Config, new(rows), runtime.Stream, new(args, 5));
+                kernel.Launch(config, grid, runtime.Stream, new(args, 5));
             }
             else
             {
@@ -138,10 +137,9 @@ static class TileGymRopeSoftmaxScenarios
                     (IntPtr)(&po), (IntPtr)(&pi), (IntPtr)(&stride), (IntPtr)(&stride),
                     (IntPtr)(&nrows), (IntPtr)(&ncols), (IntPtr)(&programs)
                 };
-                kernel.Launch(Config, new(rows), runtime.Stream, new(args, 7));
+                kernel.Launch(config, grid, runtime.Stream, new(args, 7));
             }
         }
-        var timing = TileGymKernel.Measure(runtime, Launch);
         float[] expected;
         if (backward)
         {
@@ -150,18 +148,30 @@ static class TileGymRopeSoftmaxScenarios
             for (var r = 0; r < rows; r++)
             {
                 var dot = 0f;
-                for (var c = 0; c < columns; c++) dot += probabilities[r * columns + c] * hdy[r * columns + c];
-                for (var c = 0; c < columns; c++) expected[r * columns + c] = probabilities[r * columns + c] * (hdy[r * columns + c] - dot);
+                for (var c = 0; c < columns; c++)
+                {
+                    dot += probabilities[r * columns + c] * hdy[r * columns + c];
+                }
+                for (var c = 0; c < columns; c++)
+                {
+                    expected[r * columns + c] = probabilities[r * columns + c] * (hdy[r * columns + c] - dot);
+                }
             }
         }
         else
         {
             expected = probabilities;
         }
+        var tuned = TileGymTuning.Tune(runtime, problem, TileGymSoftmaxCandidates.For(problem),
+            "softmax.cuh", name, signature,
+            static (p, candidate) => p.TemplateArguments(candidate),
+            static (p, candidate) => p.Grid(candidate), Launch,
+            validate: _ => TileGymKernel.Validate(output.CopyToHost(), expected, name, 8e-4f, 8e-4f));
+        void LaunchSelected() => Launch(tuned.Kernel, tuned.Candidate.CompilerConfig, tuned.Grid);
+        var timing = TileGymKernel.Measure(runtime, LaunchSelected);
         TileGymKernel.Validate(output.CopyToHost(), expected, name, 8e-4f, 8e-4f);
-        TileGymKernel.Report(
-            report, "softmax", name, $"{rows}x{columns}", $"float,BLOCK_SIZE={block}",
-            input.ByteLength + output.ByteLength + (dy?.ByteLength ?? 0), timing);
+        TileGymKernel.Report(report, "softmax", name, $"{rows}x{columns}",
+            input.ByteLength + output.ByteLength + (dy?.ByteLength ?? 0), timing, tuned);
     }
 
     static float[] Rotate(float[] x, float[] cos, float[] sin, int heads, int sequence, int head, bool backward)
@@ -193,7 +203,10 @@ static class TileGymRopeSoftmaxScenarios
         for (var r = 0; r < rows; r++)
         {
             var max = float.NegativeInfinity;
-            for (var c = 0; c < columns; c++) max = Math.Max(max, x[r * columns + c]);
+            for (var c = 0; c < columns; c++)
+            {
+                max = Math.Max(max, x[r * columns + c]);
+            }
             var sum = 0f;
             for (var c = 0; c < columns; c++)
             {
@@ -201,7 +214,10 @@ static class TileGymRopeSoftmaxScenarios
                 y[r * columns + c] = value;
                 sum += value;
             }
-            for (var c = 0; c < columns; c++) y[r * columns + c] /= sum;
+            for (var c = 0; c < columns; c++)
+            {
+                y[r * columns + c] /= sum;
+            }
         }
         return y;
     }
@@ -209,7 +225,10 @@ static class TileGymRopeSoftmaxScenarios
     static float[] Values(int count)
     {
         var a = new float[count];
-        for (var i = 0; i < count; i++) a[i] = (i % 127 - 63) / 32f;
+        for (var i = 0; i < count; i++)
+        {
+            a[i] = (i % 127 - 63) / 32f;
+        }
         return a;
     }
 }

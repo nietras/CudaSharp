@@ -18,7 +18,7 @@ static class TileGymMoeScenarios
 
     static unsafe void RunAlignment(TileGymRuntime runtime, TileGymReport report)
     {
-        const int experts = 4, numel = 8, block = 4, tokensPerThread = 2;
+        const int experts = 4, numel = 8, tokensPerThread = 2;
         var ids = new[] { 2, 0, 2, 1, 3, 2, 0, 1 };
         using var top = runtime.Allocate<int>(numel);
         using var counts = runtime.Allocate<int>((experts + 1) * experts);
@@ -117,13 +117,19 @@ static class TileGymMoeScenarios
 
         var cs = cumsum.CopyToHost();
         if (!cs.AsSpan().SequenceEqual([0, 4, 8, 12, 16]))
+        {
             throw new InvalidOperationException("MoE alignment cumsum validation failed.");
+        }
         if (total.CopyToHost()[0] != 16 || max.CopyToHost()[0] != 3)
+        {
             throw new InvalidOperationException("MoE alignment totals validation failed.");
+        }
         var actual = sorted.CopyToHost();
         var expected = new[] { 1, 6, 8, 8, 3, 7, 8, 8, 0, 2, 5, 8, 4, 8, 8, 8 };
         if (!actual.AsSpan().SequenceEqual(expected))
+        {
             throw new InvalidOperationException("MoE sorted-token validation failed.");
+        }
 
         TileGymKernel.Report(
             report,
@@ -191,7 +197,9 @@ static class TileGymMoeScenarios
         weights.CopyFrom(hw);
         var hs = new int[m];
         for (var i = 0; i < m; i++)
+        {
             hs[i] = i;
+        }
         sorted.CopyFrom(hs);
         experts.CopyFrom([0]);
         padded.CopyFrom([m]);
@@ -219,9 +227,15 @@ static class TileGymMoeScenarios
         var timing = TileGymKernel.Measure(runtime, Launch);
         var expected = new float[m * n];
         for (var row = 0; row < m; row++)
+        {
             for (var col = 0; col < n; col++)
+            {
                 for (var x = 0; x < kdim; x++)
+                {
                     expected[row * n + col] += ha[row * kdim + x] * hb[col * kdim + x];
+                }
+            }
+        }
         TileGymKernel.Validate(c.CopyToHost(), expected, name, 2e-3f, 2e-3f);
         TileGymKernel.Report(report, "moe", name, $"M={m},N={n},K={kdim},E=1", templates, a.ByteLength + b.ByteLength + c.ByteLength, timing);
     }

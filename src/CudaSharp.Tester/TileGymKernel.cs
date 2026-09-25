@@ -47,6 +47,44 @@ static class TileGymKernel
             nameExpression: $"&{kernelName}<{templateArguments}>");
     }
 
+    public static (double CompileMilliseconds, double KernelMilliseconds) MeasureFixed(
+        TileGymRuntime runtime, Action launch, int warmupCount, int iterationCount)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(warmupCount);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(iterationCount);
+
+        var compile = Stopwatch.StartNew();
+        launch();
+        cuStreamSynchronize(runtime.Stream).Ok();
+        compile.Stop();
+
+        for (var i = 0; i < warmupCount; i++)
+        {
+            launch();
+        }
+        cuStreamSynchronize(runtime.Stream).Ok();
+
+        cuEventCreate(out var start, 0).Ok();
+        cuEventCreate(out var end, 0).Ok();
+        try
+        {
+            cuEventRecord(start, runtime.Stream).Ok();
+            for (var i = 0; i < iterationCount; i++)
+            {
+                launch();
+            }
+            cuEventRecord(end, runtime.Stream).Ok();
+            cuEventSynchronize(end).Ok();
+            cuEventElapsedTime(out var milliseconds, start, end).Ok();
+            return (compile.Elapsed.TotalMilliseconds, milliseconds / iterationCount);
+        }
+        finally
+        {
+            cuEventDestroy(start).Ok();
+            cuEventDestroy(end).Ok();
+        }
+    }
+
     public static (double CompileMilliseconds, double KernelMilliseconds) Measure(
         TileGymRuntime runtime, Action launch)
     {
@@ -118,5 +156,24 @@ static class TileGymKernel
             throughput,
             "GB/s",
             null));
+    }
+
+    public static void Report(TileGymReport report, string family, string kernel, string shape,
+        nuint bytes, (double CompileMilliseconds, double KernelMilliseconds) timing, TileGymTunedResult tuned)
+    {
+        var throughput = bytes / (timing.KernelMilliseconds * 1_000_000.0);
+        report.Add(new TileGymResult(
+            family,
+            kernel,
+            shape,
+            tuned.Candidate.ToString(),
+            tuned.CandidateCount == 1 ? "Passed (fixed)" : tuned.CacheHit ? "Passed (cached)" : "Passed (searched)",
+            tuned.CandidateCount == 1 ? tuned.TuneMilliseconds : 0,
+            tuned.CandidateCount == 1 ? 0 : tuned.TuneMilliseconds,
+            timing.KernelMilliseconds,
+            throughput,
+            "GB/s",
+            tuned.CandidateCount == 1 ? "Compilation and initial measurement included in compile time." :
+                $"{tuned.CandidateCount} candidates offered; rejected variants may be skipped. Compilation included in tuning time."));
     }
 }

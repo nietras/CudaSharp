@@ -1,5 +1,6 @@
 ﻿using System;
 using CudaSharp.Tile;
+using static CudaSharp.nvcuda;
 
 namespace CudaSharp.Tester;
 
@@ -44,7 +45,10 @@ static class TileGymNormalizationScenarios
             ? "const float*, float*, const float*, const float*, float*, float*"
             : "float*, float*, const float*, const float*, float*, float*, float, float";
         var header = persistent ? "persistent_layer_norm.cuh" : "layer_norm_legacy.cuh";
-        using var kernel = TileGymKernel.Create(runtime, header, name, templates, signature);
+        TileCppKernel? kernel = persistent ? null : TileGymKernel.Create(runtime, header, name, templates, signature);
+        cuDeviceGetAttribute(out var smCount,
+            CUdevice_attribute.CU_DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT, runtime.Device).Ok();
+        var problem = new TileGymPersistentLayerNormProblem(rows, columns, smCount);
         using var x = runtime.Allocate<float>(rows * columns);
         using var y = runtime.Allocate<float>(x.Length);
         using var w = runtime.Allocate<float>(columns);
@@ -64,7 +68,7 @@ static class TileGymNormalizationScenarios
         w.CopyFrom(hw);
         b.CopyFrom(hb);
 
-        void Launch()
+        void Launch(TileCppKernel selectedKernel, TileCppConfig config, TileCppGrid grid)
         {
             var px = x.Pointer.Value;
             var py = y.Pointer.Value;
@@ -85,7 +89,7 @@ static class TileGymNormalizationScenarios
                     (IntPtr)(&pm),
                     (IntPtr)(&pr)
                 };
-                kernel.Launch(Config, new(4), runtime.Stream, new(args, 6));
+                selectedKernel.Launch(config, grid, runtime.Stream, new(args, 6));
             }
             else
             {
@@ -100,22 +104,34 @@ static class TileGymNormalizationScenarios
                     (IntPtr)(&eps),
                     (IntPtr)(&shift)
                 };
-                kernel.Launch(Config, new(rows), runtime.Stream, new(args, 8));
+                selectedKernel.Launch(config, grid, runtime.Stream, new(args, 8));
             }
         }
 
-        var timing = TileGymKernel.Measure(runtime, Launch);
         var expected = LayerNorm(hx, hw, hb, rows, columns, .00001f);
-        TileGymKernel.Validate(y.CopyToHost(), expected, name, 8e-4f, 8e-4f);
-        TileGymKernel.Report(
-            report,
-            "normalization",
-            name,
-            $"{rows}x{columns}",
-            templates,
-            x.ByteLength + y.ByteLength + w.ByteLength + b.ByteLength,
-            timing
-        );
+        if (persistent)
+        {
+            var tuned = TileGymTuning.Tune(runtime, problem, TileGymPersistentLayerNormCandidates.For(problem),
+                header, name, signature, static (p, candidate) => p.TemplateArguments(candidate),
+                static (p, candidate) => p.Grid(candidate), Launch,
+                validate: _ => TileGymKernel.Validate(y.CopyToHost(), expected, name, 8e-4f, 8e-4f));
+            void LaunchSelected() => Launch(tuned.Kernel, tuned.Candidate.CompilerConfig, tuned.Grid);
+            var timing = TileGymKernel.Measure(runtime, LaunchSelected);
+            TileGymKernel.Validate(y.CopyToHost(), expected, name, 8e-4f, 8e-4f);
+            TileGymKernel.Report(report, "normalization", name, $"{rows}x{columns}",
+                x.ByteLength + y.ByteLength + w.ByteLength + b.ByteLength, timing, tuned);
+        }
+        else
+        {
+            using (kernel)
+            {
+                void LaunchLegacy() => Launch(kernel!, Config, new TileCppGrid(rows));
+                var timing = TileGymKernel.Measure(runtime, LaunchLegacy);
+                TileGymKernel.Validate(y.CopyToHost(), expected, name, 8e-4f, 8e-4f);
+                TileGymKernel.Report(report, "normalization", name, $"{rows}x{columns}",
+                    templates, x.ByteLength + y.ByteLength + w.ByteLength + b.ByteLength, timing);
+            }
+        }
     }
 
     static unsafe void RunRmsNorm(TileGymRuntime runtime, TileGymReport report, string name,
@@ -213,13 +229,9 @@ static class TileGymNormalizationScenarios
         const int rows = 8;
         const int columns = 256;
         const string name = "rms_norm_static_persistent_kernel";
-        using var kernel = TileGymKernel.Create(
-            runtime,
-            "rms_norm.cuh",
-            name,
-            "float, float, 2, 256, 1, 8, 256, 4, 0.00001f, 0.0f",
-            "const float*, float*, const float*, float*"
-        );
+        cuDeviceGetAttribute(out var smCount,
+            CUdevice_attribute.CU_DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT, runtime.Device).Ok();
+        var problem = new TileGymPersistentRmsNormProblem(rows, columns, smCount);
         using var x = runtime.Allocate<float>(rows * columns);
         using var y = runtime.Allocate<float>(x.Length);
         using var w = runtime.Allocate<float>(columns);
@@ -229,7 +241,7 @@ static class TileGymNormalizationScenarios
         x.CopyFrom(hx);
         w.CopyFrom(hw);
 
-        void Launch()
+        void Launch(TileCppKernel kernel, TileCppConfig config, TileCppGrid grid)
         {
             var px = x.Pointer.Value;
             var py = y.Pointer.Value;
@@ -242,20 +254,20 @@ static class TileGymNormalizationScenarios
                 (IntPtr)(&pw),
                 (IntPtr)(&pr)
             };
-            kernel.Launch(Config, new(4), runtime.Stream, new(args, 4));
+            kernel.Launch(config, grid, runtime.Stream, new(args, 4));
         }
 
-        var timing = TileGymKernel.Measure(runtime, Launch);
-        TileGymKernel.Validate(y.CopyToHost(), RmsNorm(hx, hw, rows, columns), name, 8e-4f, 8e-4f);
-        TileGymKernel.Report(
-            report,
-            "normalization",
-            name,
-            $"{rows}x{columns}",
-            "float,TILE_M=2,TILE_N=256",
-            x.ByteLength + y.ByteLength + w.ByteLength,
-            timing
-        );
+        var expected = RmsNorm(hx, hw, rows, columns);
+        var tuned = TileGymTuning.Tune(runtime, problem, TileGymPersistentRmsNormCandidates.For(problem),
+            "rms_norm.cuh", name, "const float*, float*, const float*, float*",
+            static (p, candidate) => p.TemplateArguments(candidate),
+            static (p, candidate) => p.Grid(candidate), Launch,
+            validate: _ => TileGymKernel.Validate(y.CopyToHost(), expected, name, 8e-4f, 8e-4f));
+        void LaunchSelected() => Launch(tuned.Kernel, tuned.Candidate.CompilerConfig, tuned.Grid);
+        var timing = TileGymKernel.Measure(runtime, LaunchSelected);
+        TileGymKernel.Validate(y.CopyToHost(), expected, name, 8e-4f, 8e-4f);
+        TileGymKernel.Report(report, "normalization", name, $"{rows}x{columns}",
+            x.ByteLength + y.ByteLength + w.ByteLength, timing, tuned);
     }
 
     static unsafe void RunRmsNormBackward(TileGymRuntime runtime, TileGymReport report)
@@ -315,7 +327,10 @@ static class TileGymNormalizationScenarios
         for (var row = 0; row < rows; row++)
         {
             var dot = 0f;
-            for (var c = 0; c < columns; c++) dot += hw[c] * hx[row * columns + c];
+            for (var c = 0; c < columns; c++)
+            {
+                dot += hw[c] * hx[row * columns + c];
+            }
             for (var c = 0; c < columns; c++)
             {
                 var value = hx[row * columns + c];
@@ -328,8 +343,24 @@ static class TileGymNormalizationScenarios
             dx.ByteLength + dy.ByteLength + x.ByteLength + w.ByteLength + r.ByteLength + temp.ByteLength, timing);
     }
 
-    static float[] Values(int count) { var a = new float[count]; for (var i = 0; i < count; i++) a[i] = (i % 251 - 125) / 64f; return a; }
-    static float[] Weights(int n) { var a = new float[n]; for (var i = 0; i < n; i++) a[i] = .75f + i / 1024f; return a; }
+    static float[] Values(int count)
+    {
+        var a = new float[count];
+        for (var i = 0; i < count; i++)
+        {
+            a[i] = (i % 251 - 125) / 64f;
+        }
+        return a;
+    }
+    static float[] Weights(int n)
+    {
+        var a = new float[n];
+        for (var i = 0; i < n; i++)
+        {
+            a[i] = .75f + i / 1024f;
+        }
+        return a;
+    }
     static float[] Rstd(float[] x, int rows, int n)
     {
         var r = new float[rows];

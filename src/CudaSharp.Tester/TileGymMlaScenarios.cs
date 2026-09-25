@@ -218,7 +218,9 @@ static class TileGymMlaScenarios
         var b = MathF.Pow(2, hl[1] - max);
 
         for (var i = 0; i < d; i++)
+        {
             expected[i] = (a * hi[i] + b * hi[d + i]) / (a + b);
+        }
 
         TileGymKernel.Validate(output.CopyToHost(), expected, name, 5e-4f, 5e-4f);
         TileGymKernel.Report(report, "reduction", name, $"B=1,H=1,SPLITS={splits},D={d}", "BLOCK_D=64,USE_DOT=false", input.ByteLength + lse.ByteLength + output.ByteLength, timing);
@@ -245,10 +247,14 @@ static class TileGymMlaScenarios
                 var dot = 0f;
 
                 for (var x = 0; x < d; x++)
+                {
                     dot += q[i * d + x] * k[j * d + x];
+                }
 
                 for (var x = 0; x < kd; x++)
+                {
                     dot += qpe[i * kd + x] * kpe[j * kd + x];
+                }
 
                 scores[j] = dot * scale;
                 max = Math.Max(max, scores[j]);
@@ -267,7 +273,9 @@ static class TileGymMlaScenarios
                 var p = scores[j] / sum;
 
                 for (var x = 0; x < d; x++)
+                {
                     o[i * d + x] += p * v[j * d + x];
+                }
             }
         }
 
@@ -279,7 +287,9 @@ static class TileGymMlaScenarios
         var a = new float[count];
 
         for (var i = 0; i < count; i++)
+        {
             a[i] = (i % 29 - 14) * scale;
+        }
 
         return a;
     }

@@ -33,7 +33,9 @@ static class TileGymAttentionScenarios
     static unsafe void RunPrefill(TileGymRuntime runtime, TileGymReport report, string header, string name,
         string templates, string signature, bool causal, bool gemma = false)
     {
-        using var kernel = TileGymKernel.Create(runtime, header, name, templates, signature);
+        var problem = new TileGymAttentionProblem(gemma ? TileGymAttentionKind.GemmaForward : TileGymAttentionKind.Forward,
+            Sequence, Dimension, causal, runtime.Architecture);
+        var candidates = TileGymAttentionCandidates.For(problem);
         using var q = runtime.Allocate<float>(Sequence * Dimension);
         using var k = runtime.Allocate<float>(q.Length);
         using var v = runtime.Allocate<float>(q.Length);
@@ -47,7 +49,7 @@ static class TileGymAttentionScenarios
         k.CopyFrom(hk);
         v.CopyFrom(hv);
 
-        void Launch()
+        void Launch(TileCppKernel kernel, TileCppConfig config, TileCppGrid grid)
         {
             var pq = q.Pointer.Value;
             var pk = k.Pointer.Value;
@@ -59,22 +61,27 @@ static class TileGymAttentionScenarios
             if (gemma)
             {
                 var args = stackalloc IntPtr[] { (IntPtr)(&pq), (IntPtr)(&pk), (IntPtr)(&pv), (IntPtr)(&po), (IntPtr)(&scale), (IntPtr)(&cap) };
-                kernel.Launch(Config, new(1, 1), runtime.Stream, new(args, 6));
+                kernel.Launch(config, grid, runtime.Stream, new(args, 6));
             }
             else
             {
                 var args = stackalloc IntPtr[] { (IntPtr)(&pq), (IntPtr)(&pk), (IntPtr)(&pv), (IntPtr)(&po), (IntPtr)(&pl), (IntPtr)(&scale) };
-                kernel.Launch(Config, new(1, 1), runtime.Stream, new(args, 6));
+                kernel.Launch(config, grid, runtime.Stream, new(args, 6));
             }
         }
 
-        var timing = TileGymKernel.Measure(runtime, Launch);
-        TileGymKernel.Validate(output.CopyToHost(), Attention(hq, hk, hv, Sequence, Sequence, Dimension, Scale, causal), name, 2e-3f, 2e-3f);
-        TileGymKernel.Report(
-            report, "attention", name,
-            $"B=1,H=1,Sq={Sequence},Sk={Sequence},D={Dimension}", templates,
+        var expected = Attention(hq, hk, hv, Sequence, Sequence, Dimension, Scale, causal);
+        var tuned = TileGymTuning.Tune(runtime, problem, candidates, header, name, signature,
+            static (p, candidate) => p.TemplateArguments(candidate),
+            static (p, candidate) => p.Grid(candidate), Launch,
+            validate: _ => TileGymKernel.Validate(output.CopyToHost(), expected, name, 2e-3f, 2e-3f));
+        void LaunchSelected() => Launch(tuned.Kernel, tuned.Candidate.CompilerConfig, tuned.Grid);
+        var timing = TileGymKernel.Measure(runtime, LaunchSelected);
+        TileGymKernel.Validate(output.CopyToHost(), expected, name, 2e-3f, 2e-3f);
+        TileGymKernel.Report(report, "attention", name,
+            $"B=1,H=1,Sq={Sequence},Sk={Sequence},D={Dimension}",
             q.ByteLength + k.ByteLength + v.ByteLength + output.ByteLength + (lse?.ByteLength ?? 0),
-            timing);
+            timing, tuned);
     }
 
     static unsafe void RunSink(TileGymRuntime runtime, TileGymReport report)
@@ -193,7 +200,10 @@ static class TileGymAttentionScenarios
     static unsafe void RunAttentionBackward(TileGymRuntime runtime, TileGymReport report)
     {
         const string name = "fmha_bwd_preprocess_kernel";
-        using var kernel = TileGymKernel.Create(runtime, "attention.cuh", name, "float, 1, 1, 64, 64, 64, 2", "const float*, const float*, const float*, float*, float*, float");
+        const string signature = "const float*, const float*, const float*, float*, float*, float";
+        var problem = new TileGymAttentionProblem(TileGymAttentionKind.BackwardPreprocess,
+            Sequence, Dimension, true, runtime.Architecture);
+        var candidates = TileGymAttentionCandidates.For(problem);
         using var o = runtime.Allocate<float>(Sequence * Dimension);
         using var d = runtime.Allocate<float>(o.Length);
         using var l = runtime.Allocate<float>(Sequence);
@@ -207,7 +217,7 @@ static class TileGymAttentionScenarios
         d.CopyFrom(hd);
         l.CopyFrom(hl);
 
-        void Launch()
+        void Launch(TileCppKernel kernel, TileCppConfig config, TileCppGrid grid)
         {
             var po = o.Pointer.Value;
             var pd = d.Pointer.Value;
@@ -216,27 +226,45 @@ static class TileGymAttentionScenarios
             var pml = minusL.Pointer.Value;
             var scale = Scale;
             var args = stackalloc IntPtr[] { (IntPtr)(&po), (IntPtr)(&pd), (IntPtr)(&pl), (IntPtr)(&pdel), (IntPtr)(&pml), (IntPtr)(&scale) };
-            kernel.Launch(Config, new(1, 1), runtime.Stream, new(args, 6));
+            kernel.Launch(config, grid, runtime.Stream, new(args, 6));
         }
 
-        var timing = TileGymKernel.Measure(runtime, Launch);
         var ed = new float[Sequence];
         var el = new float[Sequence];
         for (var r = 0; r < Sequence; r++)
         {
             var sum = 0f;
-            for (var c = 0; c < Dimension; c++) sum += ho[r * Dimension + c] * hd[r * Dimension + c];
+            for (var c = 0; c < Dimension; c++)
+            {
+                sum += ho[r * Dimension + c] * hd[r * Dimension + c];
+            }
             ed[r] = -sum * Scale;
             el[r] = -hl[r];
         }
+        void Validate(TileGymCandidate _)
+        {
+            TileGymKernel.Validate(delta.CopyToHost(), ed, name, 1e-3f, 1e-3f);
+            TileGymKernel.Validate(minusL.CopyToHost(), el, name);
+        }
+        var tuned = TileGymTuning.Tune(runtime, problem, candidates, "attention.cuh", name, signature,
+            static (p, candidate) => p.TemplateArguments(candidate),
+            static (p, candidate) => p.Grid(candidate), Launch, validate: Validate);
+        void LaunchSelected() => Launch(tuned.Kernel, tuned.Candidate.CompilerConfig, tuned.Grid);
+        var timing = TileGymKernel.Measure(runtime, LaunchSelected);
         TileGymKernel.Validate(delta.CopyToHost(), ed, name, 1e-3f, 1e-3f);
         TileGymKernel.Validate(minusL.CopyToHost(), el, name);
-        TileGymKernel.Report(report, "attention", name, $"B=1,H=1,S={Sequence},D={Dimension}", "float,BLOCK_M=64,BLOCK_D=64", o.ByteLength + d.ByteLength + l.ByteLength + delta.ByteLength + minusL.ByteLength, timing);
+        TileGymKernel.Report(report, "attention", name, $"B=1,H=1,S={Sequence},D={Dimension}",
+            o.ByteLength + d.ByteLength + l.ByteLength + delta.ByteLength + minusL.ByteLength, timing, tuned);
     }
 
     static unsafe void RunAttentionBackwardMain(TileGymRuntime runtime, TileGymReport report)
     {
         const string name = "fmha_bwd_main_kernel";
+        const string signature = "const float*, const float*, const float*, const float*, const float*, const float*, " +
+            "float*, float*, float*, float";
+        var problem = new TileGymAttentionProblem(TileGymAttentionKind.BackwardMain,
+            Sequence, Dimension, true, runtime.Architecture);
+        var candidates = TileGymAttentionCandidates.For(problem);
         using var forward = TileGymKernel.Create(
             runtime, "attention.cuh", "prefill_fmha_fwd_kernel",
             "float, 1, 1, 1, 64, 64, 64, 64, 64, true, true, 2, 1",
@@ -245,11 +273,6 @@ static class TileGymAttentionScenarios
             runtime, "attention.cuh", "fmha_bwd_preprocess_kernel",
             "float, 1, 1, 64, 64, 64, 2",
             "const float*, const float*, const float*, float*, float*, float");
-        using var kernel = TileGymKernel.Create(
-            runtime, "attention.cuh", name, "float, 1, 1, 64, 64, 64, 64, 64, true, 2",
-            "const float*, const float*, const float*, const float*, const float*, const float*, " +
-            "float*, float*, float*, float");
-
         using var q = runtime.Allocate<float>(Sequence * Dimension);
         using var k = runtime.Allocate<float>(q.Length);
         using var v = runtime.Allocate<float>(q.Length);
@@ -300,7 +323,7 @@ static class TileGymAttentionScenarios
         cuStreamSynchronize(runtime.Stream).Ok();
         dq.Clear();
 
-        void Launch()
+        void Launch(TileCppKernel kernel, TileCppConfig config, TileCppGrid grid)
         {
             var pq = q.Pointer.Value;
             var pk = k.Pointer.Value;
@@ -318,12 +341,9 @@ static class TileGymAttentionScenarios
                 (IntPtr)(&pml), (IntPtr)(&pdel), (IntPtr)(&pdq), (IntPtr)(&pdk),
                 (IntPtr)(&pdv), (IntPtr)(&scale)
             };
-            kernel.Launch(Config, new(1, 1), runtime.Stream, new(args, 10));
+            kernel.Launch(config, grid, runtime.Stream, new(args, 10));
         }
 
-        var timing = TileGymKernel.Measure(runtime, Launch);
-        dq.Clear();
-        Launch();
         static void Cpu(float[] q, float[] k, float[] v, float[] dO, out float[] dQ, out float[] dK, out float[] dV)
         {
             dQ = new float[q.Length];
@@ -336,7 +356,10 @@ static class TileGymAttentionScenarios
                 for (var j = 0; j <= i; j++)
                 {
                     var dot = 0f;
-                    for (var x = 0; x < Dimension; x++) dot += q[i * Dimension + x] * k[j * Dimension + x];
+                    for (var x = 0; x < Dimension; x++)
+                    {
+                        dot += q[i * Dimension + x] * k[j * Dimension + x];
+                    }
                     p[i * Sequence + j] = dot * Scale;
                     max = Math.Max(max, p[i * Sequence + j]);
                 }
@@ -346,22 +369,34 @@ static class TileGymAttentionScenarios
                     p[i * Sequence + j] = MathF.Exp(p[i * Sequence + j] - max);
                     sum += p[i * Sequence + j];
                 }
-                for (var j = 0; j <= i; j++) p[i * Sequence + j] /= sum;
+                for (var j = 0; j <= i; j++)
+                {
+                    p[i * Sequence + j] /= sum;
+                }
             }
             for (var i = 0; i < Sequence; i++)
             {
                 var rowDot = 0f;
                 for (var j = 0; j <= i; j++)
                 {
-                    for (var x = 0; x < Dimension; x++) dV[j * Dimension + x] += p[i * Sequence + j] * dO[i * Dimension + x];
+                    for (var x = 0; x < Dimension; x++)
+                    {
+                        dV[j * Dimension + x] += p[i * Sequence + j] * dO[i * Dimension + x];
+                    }
                     var dp = 0f;
-                    for (var x = 0; x < Dimension; x++) dp += dO[i * Dimension + x] * v[j * Dimension + x];
+                    for (var x = 0; x < Dimension; x++)
+                    {
+                        dp += dO[i * Dimension + x] * v[j * Dimension + x];
+                    }
                     rowDot += p[i * Sequence + j] * dp;
                 }
                 for (var j = 0; j <= i; j++)
                 {
                     var dp = 0f;
-                    for (var x = 0; x < Dimension; x++) dp += dO[i * Dimension + x] * v[j * Dimension + x];
+                    for (var x = 0; x < Dimension; x++)
+                    {
+                        dp += dO[i * Dimension + x] * v[j * Dimension + x];
+                    }
                     var ds = p[i * Sequence + j] * (dp - rowDot) * Scale;
                     for (var x = 0; x < Dimension; x++)
                     {
@@ -372,10 +407,27 @@ static class TileGymAttentionScenarios
             }
         }
         Cpu(hq, hk, hv, hd, out var edq, out var edk, out var edv);
+        void Validate(TileGymCandidate _)
+        {
+            TileGymKernel.Validate(dq.CopyToHost(), edq, name, 3e-3f, 3e-3f);
+            TileGymKernel.Validate(dk.CopyToHost(), edk, name, 3e-3f, 3e-3f);
+            TileGymKernel.Validate(dv.CopyToHost(), edv, name, 3e-3f, 3e-3f);
+        }
+        var tuned = TileGymTuning.Tune(runtime, problem, candidates, "attention.cuh", name, signature,
+            static (p, candidate) => p.TemplateArguments(candidate),
+            static (p, candidate) => p.Grid(candidate), Launch, validate: Validate,
+            prepare: dq.Clear);
+        void LaunchSelected() => Launch(tuned.Kernel, tuned.Candidate.CompilerConfig, tuned.Grid);
+        dq.Clear();
+        var timing = TileGymKernel.Measure(runtime, LaunchSelected);
+        dq.Clear();
+        LaunchSelected();
         TileGymKernel.Validate(dq.CopyToHost(), edq, name, 3e-3f, 3e-3f);
         TileGymKernel.Validate(dk.CopyToHost(), edk, name, 3e-3f, 3e-3f);
         TileGymKernel.Validate(dv.CopyToHost(), edv, name, 3e-3f, 3e-3f);
-        TileGymKernel.Report(report, "attention", name, $"B=1,H=1,S={Sequence},D={Dimension}", "float,BLOCK_M=64,BLOCK_N=64", q.ByteLength + k.ByteLength + v.ByteLength + dout.ByteLength + dq.ByteLength + dk.ByteLength + dv.ByteLength, timing);
+        TileGymKernel.Report(report, "attention", name, $"B=1,H=1,S={Sequence},D={Dimension}",
+            q.ByteLength + k.ByteLength + v.ByteLength + dout.ByteLength + dq.ByteLength + dk.ByteLength + dv.ByteLength,
+            timing, tuned);
     }
 
     static float[] Attention(float[] q, float[] k, float[] v, int sq, int sk, int d, float scale, bool causal)
@@ -387,17 +439,43 @@ static class TileGymAttentionScenarios
             var max = float.NegativeInfinity;
             for (var j = 0; j < sk; j++)
             {
-                if (causal && j > i) { scores[j] = float.NegativeInfinity; continue; }
+                if (causal && j > i)
+                {
+                    scores[j] = float.NegativeInfinity;
+                    continue;
+                }
                 var dot = 0f;
-                for (var x = 0; x < d; x++) dot += q[i * d + x] * k[j * d + x];
+                for (var x = 0; x < d; x++)
+                {
+                    dot += q[i * d + x] * k[j * d + x];
+                }
                 scores[j] = dot * scale;
                 max = Math.Max(max, scores[j]);
             }
             var sum = 0f;
-            for (var j = 0; j < sk; j++) { scores[j] = MathF.Exp(scores[j] - max); sum += scores[j]; }
-            for (var j = 0; j < sk; j++) { var p = scores[j] / sum; for (var x = 0; x < d; x++) o[i * d + x] += p * v[j * d + x]; }
+            for (var j = 0; j < sk; j++)
+            {
+                scores[j] = MathF.Exp(scores[j] - max);
+                sum += scores[j];
+            }
+            for (var j = 0; j < sk; j++)
+            {
+                var p = scores[j] / sum;
+                for (var x = 0; x < d; x++)
+                {
+                    o[i * d + x] += p * v[j * d + x];
+                }
+            }
         }
         return o;
     }
-    static float[] Values(int count, float scale) { var a = new float[count]; for (var i = 0; i < count; i++) a[i] = (i % 31 - 15) * scale; return a; }
+    static float[] Values(int count, float scale)
+    {
+        var a = new float[count];
+        for (var i = 0; i < count; i++)
+        {
+            a[i] = (i % 31 - 15) * scale;
+        }
+        return a;
+    }
 }
