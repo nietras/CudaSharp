@@ -51,6 +51,12 @@ sealed record TileGymConvolutionProblem(
 
     public TileCppGrid Grid(int block) => new(checked((uint)((OutputLength + block - 1) / block)));
 
+    public TileCppGrid MmaGrid() => new(
+        checked((uint)((N * Od * Oh * Ow + 31) / 32)),
+        checked((uint)(Groups * ((Co / Groups + MmaTileN - 1) / MmaTileN))));
+
+    public int MmaTileN => Co / Groups <= 32 ? 32 : 64;
+
     public float[] Reference(float[] input, float[] weights, float[] convBias, float[] modelBias)
     {
         var output = new float[OutputLength];
@@ -122,12 +128,20 @@ static class TileGymConvolutionScenarios
         new(TileGymConvolutionKind.Transpose3D, 1, 4, 4, 3, 4, 3, 2, 2, 2, 2, 1, 2, 1, 0, 1, 1, 2, 1, 2, 1, 0, 1)
     ];
 
+    internal static TileGymConvolutionProblem MmaBoundaryProblem =>
+        new(TileGymConvolutionKind.Forward2D, 1, 16, 132, 1, 4, 4, 1, 3, 3,
+            1, 1, 1, 0, 1, 1, 1, 1, 1, 2);
+
     public static void RunAll(TileGymRuntime runtime, TileGymReport report)
     {
         foreach (var problem in Problems)
         {
             Run(runtime, report, problem);
+            RunMma(runtime, report, problem, false);
+            RunMma(runtime, report, problem, true);
         }
+        RunMma(runtime, report, MmaBoundaryProblem, false);
+        RunMma(runtime, report, MmaBoundaryProblem, true);
     }
 
     static float[] Values(int length, float scale)
@@ -138,6 +152,114 @@ static class TileGymConvolutionScenarios
             values[i] = ((i * 17) % 23 - 11) * scale;
         }
         return values;
+    }
+
+    internal static ushort ToBfloat16(float value)
+    {
+        var bits = BitConverter.SingleToUInt32Bits(value);
+        if ((bits & 0x7f800000u) == 0x7f800000u)
+        {
+            return (ushort)((bits >> 16) | ((bits & 0x007fffffu) == 0 ? 0u : 0x40u));
+        }
+        return unchecked((ushort)((bits + 0x7fffu + ((bits >> 16) & 1u)) >> 16));
+    }
+
+    internal static float FromBfloat16(ushort bits)
+        => BitConverter.UInt32BitsToSingle((uint)bits << 16);
+
+    internal static void ValidateMmaOutput(ReadOnlySpan<ushort> actual, ReadOnlySpan<float> expected,
+        bool bfloat16, string name)
+    {
+        if (actual.Length != expected.Length)
+        {
+            throw new InvalidOperationException($"{name} validation length mismatch.");
+        }
+        for (var i = 0; i < actual.Length; i++)
+        {
+            var value = bfloat16 ? FromBfloat16(actual[i]) : (float)BitConverter.UInt16BitsToHalf(actual[i]);
+            var reference = expected[i];
+            if (!float.IsFinite(value) || !float.IsFinite(reference))
+            {
+                throw new InvalidOperationException($"{name} validation failed at {i}: {value} != {reference}.");
+            }
+            var referenceBits = bfloat16 ? ToBfloat16(reference) : BitConverter.HalfToUInt16Bits((Half)reference);
+            var orderedActual = (actual[i] & 0x8000) != 0 ? 0x8000 - (actual[i] & 0x7fff) : 0x8000 + actual[i];
+            var orderedExpected = (referenceBits & 0x8000) != 0
+                ? 0x8000 - (referenceBits & 0x7fff) : 0x8000 + referenceBits;
+            if (Math.Abs(orderedActual - orderedExpected) > 1)
+            {
+                throw new InvalidOperationException($"{name} validation failed at {i}: {value} != {reference} (more than one output ULP).");
+            }
+        }
+    }
+
+    static unsafe void RunMma(TileGymRuntime runtime, TileGymReport report,
+        TileGymConvolutionProblem problem, bool bfloat16)
+    {
+        var type = bfloat16 ? "__nv_bfloat16" : "__half";
+        var name = problem.Kind switch
+        {
+            TileGymConvolutionKind.Forward2D => "conv2d_mma_kernel",
+            TileGymConvolutionKind.Forward3D => "conv3d_mma_kernel",
+            TileGymConvolutionKind.Transpose2D => "conv_transpose_2d_mma_kernel",
+            _ => "conv_transpose_3d_mma_kernel"
+        };
+        var hasBias = !problem.ThreeDimensional;
+        var signature = hasBias
+            ? $"const {type}*, const {type}*, const {type}*, const {type}*, {type}*"
+            : $"const {type}*, const {type}*, {type}*";
+        var dimensions = problem.TemplateArguments(128);
+        dimensions = dimensions[..dimensions.LastIndexOf(", ", StringComparison.Ordinal)];
+        using var kernel = TileGymKernel.Create(runtime, problem.Header, name, $"{type}, {dimensions}", signature);
+        using var input = runtime.Allocate<ushort>(problem.InputLength);
+        using var weights = runtime.Allocate<ushort>(problem.WeightLength);
+        using var bias = runtime.Allocate<ushort>(problem.Co);
+        using var modelBias = runtime.Allocate<ushort>(problem.Co);
+        using var output = runtime.Allocate<ushort>(problem.OutputLength);
+
+        float[] Pack(CudaBuffer<ushort> buffer, float[] values)
+        {
+            var packed = new ushort[values.Length];
+            var rounded = new float[values.Length];
+            for (var i = 0; i < values.Length; i++)
+            {
+                packed[i] = bfloat16 ? ToBfloat16(values[i]) : BitConverter.HalfToUInt16Bits((Half)values[i]);
+                rounded[i] = bfloat16 ? FromBfloat16(packed[i]) : (float)BitConverter.UInt16BitsToHalf(packed[i]);
+            }
+            buffer.CopyFrom(packed);
+            return rounded;
+        }
+
+        var hostInput = Pack(input, Values(input.Length, .05f));
+        var hostWeights = Pack(weights, Values(weights.Length, .04f));
+        var hostBias = Pack(bias, Values(bias.Length, .03f));
+        var hostModelBias = Pack(modelBias, Values(modelBias.Length, .02f));
+        var expected = problem.Reference(hostInput, hostWeights, hostBias, hostModelBias);
+
+        void Launch()
+        {
+            if (hasBias)
+            {
+                var pi = input.Pointer.Value;
+                var pw = weights.Pointer.Value;
+                var pb = bias.Pointer.Value;
+                var pm = modelBias.Pointer.Value;
+                var po = output.Pointer.Value;
+                var args = stackalloc IntPtr[] { (IntPtr)(&pi), (IntPtr)(&pw), (IntPtr)(&pb),
+                    (IntPtr)(&pm), (IntPtr)(&po) };
+                kernel.Launch(Config, problem.MmaGrid(), runtime.Stream, new(args, 5));
+            }
+            else
+            {
+                kernel.Launch(Config, problem.MmaGrid(), runtime.Stream, input.Pointer, weights.Pointer, output.Pointer);
+            }
+        }
+
+        var timing = TileGymKernel.Measure(runtime, Launch);
+        ValidateMmaOutput(output.CopyToHost(), expected, bfloat16, name);
+        TileGymKernel.Report(report, "convolution", name,
+            $"N={problem.N},Ci={problem.Ci},Co={problem.Co},out={problem.Od}x{problem.Oh}x{problem.Ow},groups={problem.Groups}",
+            $"{(bfloat16 ? "bf16" : "fp16")},MMA=32x{problem.MmaTileN}x64", input.ByteLength + weights.ByteLength + output.ByteLength, timing);
     }
 
     static unsafe void Run(TileGymRuntime runtime, TileGymReport report, TileGymConvolutionProblem problem)

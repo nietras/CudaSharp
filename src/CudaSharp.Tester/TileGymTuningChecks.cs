@@ -117,6 +117,9 @@ static class TileGymTuningChecks
                 (problem.OutputLength + 127) / 128, "Convolution output grid.");
             Require(problem.TemplateArguments(128).EndsWith($"{problem.Groups}, 128", StringComparison.Ordinal),
                 "Convolution template dimensions.");
+            Require(problem.MmaGrid().X == (problem.N * problem.Od * problem.Oh * problem.Ow + 31) / 32 &&
+                problem.MmaGrid().Y == problem.Groups * ((problem.Co / problem.Groups + problem.MmaTileN - 1) / problem.MmaTileN),
+                "Grouped convolution MMA grid.");
             var input = new float[problem.InputLength];
             var weights = new float[problem.WeightLength];
             Array.Fill(input, 1f);
@@ -140,6 +143,40 @@ static class TileGymTuningChecks
             "Forward convolution bias, ReLU and model bias order.");
         Require(problems[2].OutputPaddingH == 1 && problems[3].OutputPaddingD == 1,
             "Transposed convolution output padding.");
+        var boundary = TileGymConvolutionScenarios.MmaBoundaryProblem;
+        Require(boundary.WeightLength / boundary.Co > 64 && boundary.Co / boundary.Groups > 64 &&
+            boundary.MmaGrid().Y == 4, "Grouped MMA K and N tail coverage.");
+        Require(TileGymConvolutionScenarios.ToBfloat16(1f) == 0x3f80 &&
+            TileGymConvolutionScenarios.FromBfloat16(0x3f80) == 1f &&
+            TileGymConvolutionScenarios.ToBfloat16(BitConverter.UInt32BitsToSingle(0x3f808000)) == 0x3f80,
+            "BF16 packing and ties-to-even rounding.");
+        Require(TileGymConvolutionScenarios.ToBfloat16(BitConverter.UInt32BitsToSingle(0x3f818000)) == 0x3f82 &&
+            TileGymConvolutionScenarios.ToBfloat16(float.PositiveInfinity) == 0x7f80 &&
+            TileGymConvolutionScenarios.ToBfloat16(float.NegativeInfinity) == 0xff80,
+            "BF16 odd ties and infinities.");
+        Require(float.IsNaN(TileGymConvolutionScenarios.FromBfloat16(
+                TileGymConvolutionScenarios.ToBfloat16(BitConverter.UInt32BitsToSingle(0x7f800001)))) &&
+            float.IsNaN(TileGymConvolutionScenarios.FromBfloat16(
+                TileGymConvolutionScenarios.ToBfloat16(BitConverter.UInt32BitsToSingle(0xff800001)))),
+            "BF16 positive and negative NaNs retain a payload.");
+        TileGymConvolutionScenarios.ValidateMmaOutput([0x3dcd], [0.1f], true, "bf16 one ULP");
+        try
+        {
+            TileGymConvolutionScenarios.ValidateMmaOutput([0x3dd0], [0.1f], true, "bf16 drift");
+            throw new InvalidOperationException("BF16 validation accepted an output beyond one ULP.");
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("more than one output ULP", StringComparison.Ordinal))
+        {
+        }
+        TileGymConvolutionScenarios.ValidateMmaOutput([0x2e67], [0.1f], false, "fp16 one ULP");
+        try
+        {
+            TileGymConvolutionScenarios.ValidateMmaOutput([0x2e70], [0.1f], false, "fp16 drift");
+            throw new InvalidOperationException("FP16 validation accepted an output beyond one ULP.");
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("more than one output ULP", StringComparison.Ordinal))
+        {
+        }
     }
 
     static void VerifySession()

@@ -1,6 +1,8 @@
 #pragma once
 
 #include <cuda_tile.h>
+#include <cuda_fp16.h>
+#include <cuda_bf16.h>
 
 // NCDHW input/output; weights are packed as [output channel, input channel per group, kernel depth, height, width].
 template<bool TRANSPOSED, bool BIAS, bool RELU, bool MODEL_BIAS,
@@ -63,4 +65,80 @@ __tile__ void convolution_body(const float* input, const float* weights,
         acc = acc + ct::load_masked(model_bias + oc, valid_output, 0.0f);
     }
     ct::store_masked(output + index, acc, valid_output);
+}
+
+// Each CTA owns one spatial tile and one output-channel tile within a single group.
+template<typename T, bool TRANSPOSED, bool BIAS, bool RELU, bool MODEL_BIAS,
+    int N, int CI, int CO, int D, int H, int W, int OD, int OH, int OW,
+    int KD, int KH, int KW, int SD, int SH, int SW, int PD, int PH, int PW,
+    int DD, int DH, int DW, int GROUPS>
+__tile__ void convolution_mma_body(const T* input, const T* weights,
+    const T* conv_bias, const T* model_bias, T* output) {
+    namespace ct = cuda::tiles;
+    constexpr int CI_GROUP = CI / GROUPS, CO_GROUP = CO / GROUPS;
+    constexpr int TM = 32, TN = CO_GROUP <= 32 ? 32 : 64, TK = 64;
+    constexpr int K = CI_GROUP * KD * KH * KW;
+    constexpr int SPATIAL = OD * OH * OW;
+    constexpr int M = N * SPATIAL;
+    constexpr int N_TILES = (CO_GROUP + TN - 1) / TN;
+    using Acc = ct::tile<float, ct::shape<TM, TN>>;
+
+    int group = static_cast<int>(ct::bid().y) / N_TILES;
+    int n_tile = static_cast<int>(ct::bid().y) % N_TILES;
+    auto m = ct::reshape(ct::iota<ct::tile<int, ct::shape<TM>>>(), ct::shape<TM, 1>{})
+        + static_cast<int>(ct::bid().x) * TM;
+    auto col = ct::reshape(ct::iota<ct::tile<int, ct::shape<TN>>>(), ct::shape<1, TN>{})
+        + n_tile * TN;
+    auto oc = group * CO_GROUP + col;
+    auto batch = m / SPATIAL;
+    auto od = (m / (OH * OW)) % OD;
+    auto oh = (m / OW) % OH;
+    auto ow = m % OW;
+    auto acc = ct::zeros<Acc>();
+
+    for (int base = 0; base < K; base += TK) {
+        auto k = ct::reshape(ct::iota<ct::tile<int, ct::shape<TK>>>(), ct::shape<1, TK>{}) + base;
+        auto ic = k / (KD * KH * KW);
+        auto kd = (k / (KH * KW)) % KD;
+        auto kh = (k / KW) % KH;
+        auto kw = k % KW;
+        auto in_d = od * SD - PD + kd * DD;
+        auto in_h = oh * SH - PH + kh * DH;
+        auto in_w = ow * SW - PW + kw * DW;
+        auto a_mask = (m < M) & (k < K);
+        if constexpr (TRANSPOSED) {
+            auto d_num = od + PD - kd * DD;
+            auto h_num = oh + PH - kh * DH;
+            auto w_num = ow + PW - kw * DW;
+            in_d = d_num / SD;
+            in_h = h_num / SH;
+            in_w = w_num / SW;
+            a_mask = a_mask & (d_num % SD == 0) & (h_num % SH == 0) & (w_num % SW == 0);
+        }
+        a_mask = a_mask & (in_d >= 0) & (in_d < D) & (in_h >= 0) & (in_h < H)
+            & (in_w >= 0) & (in_w < W);
+        auto a_index = ((((batch * CI + group * CI_GROUP + ic) * D + in_d) * H + in_h) * W + in_w);
+        auto a = ct::load_masked(input + a_index, a_mask, T(0));
+
+        auto bk = ct::reshape(ct::iota<ct::tile<int, ct::shape<TK>>>(), ct::shape<TK, 1>{}) + base;
+        auto b_index = oc * K + bk;
+        auto b_mask = (col < CO_GROUP) & (bk < K);
+        auto b = ct::load_masked(weights + b_index, b_mask, T(0));
+        acc = ct::mma(a, b, acc);
+    }
+
+    auto output_mask = (m < M) & (col < CO_GROUP);
+    if constexpr (BIAS) {
+        auto bias = ct::element_cast<float>(ct::load_masked(conv_bias + oc, col < CO_GROUP, T(0)));
+        acc = acc + bias;
+    }
+    if constexpr (RELU) {
+        acc = ct::max(acc, ct::zeros<Acc>());
+    }
+    if constexpr (MODEL_BIAS) {
+        auto bias = ct::element_cast<float>(ct::load_masked(model_bias + oc, col < CO_GROUP, T(0)));
+        acc = acc + bias;
+    }
+    auto output_index = (batch * CO + oc) * SPATIAL + (m % SPATIAL);
+    ct::store_masked(output + output_index, ct::element_cast<T>(acc), output_mask);
 }

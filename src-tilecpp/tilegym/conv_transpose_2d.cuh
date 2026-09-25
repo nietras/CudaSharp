@@ -11,3 +11,12 @@ __tile_global__ void conv_transpose_2d_implicit_gemm_kernel(const float* input, 
         1, KH, KW, 1, SH, SW, 0, PH, PW, 1, DH, DW, GROUPS, BLOCK>(
             input, weights, conv_bias, model_bias, output);
 }
+
+template<typename T, int N, int CI, int CO, int H, int W, int OH, int OW,
+    int KH, int KW, int SH, int SW, int PH, int PW, int DH, int DW, int GROUPS>
+__tile_global__ void conv_transpose_2d_mma_kernel(const T* input, const T* weights,
+    const T* conv_bias, const T* model_bias, T* output) {
+    convolution_mma_body<T, true, true, false, true, N, CI, CO, 1, H, W, 1, OH, OW,
+        1, KH, KW, 1, SH, SW, 0, PH, PW, 1, DH, DW, GROUPS>(
+            input, weights, conv_bias, model_bias, output);
+}
