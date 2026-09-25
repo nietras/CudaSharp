@@ -18,6 +18,7 @@ static class TileGymCatalog
         new TileGymScenario("recurrent-dropout", TileGymRecurrentScenarios.RunAll),
         new TileGymScenario("moe-alignment", TileGymMoeScenarios.RunAll),
         new TileGymScenario("matmul-bmm", TileGymMatrixScenarios.RunAll),
+        new TileGymScenario("convolution", TileGymConvolutionScenarios.RunAll),
     ];
 
     public static IEnumerable<TileGymScenario> Select(string? filter)

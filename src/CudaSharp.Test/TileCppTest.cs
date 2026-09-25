@@ -39,7 +39,7 @@ public class TileCppTest
         var scenarios = string.Join('\n', Directory.EnumerateFiles(sourceRoot, "TileGym*Scenarios.cs").Select(File.ReadAllText));
         var missing = kernels.Where(kernel => !scenarios.Contains($"\"{kernel}\"", StringComparison.Ordinal)).ToArray();
 
-        Assert.HasCount(52, kernels);
+        Assert.HasCount(56, kernels);
         Assert.IsEmpty(missing, $"Missing Tester scenarios: {string.Join(", ", missing)}");
     }
 

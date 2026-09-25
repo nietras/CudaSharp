@@ -32,6 +32,7 @@ static class TileGymTuningChecks
         Require(TileGymMatmulCandidates.Select(problem, null, 32, null, 3)[0]["Occupancy"] == "3",
             "Override value.");
         VerifyFamilies();
+        VerifyConvolutions();
         VerifySession();
     }
 
@@ -104,6 +105,41 @@ static class TileGymTuningChecks
             "Online softmax variants.");
         Require(new TileGymDropoutProblem(4097).Grid(TileGymDropoutCandidates.For()[0]) == new TileCppGrid(17),
             "Dropout masked tail grid.");
+    }
+
+    static void VerifyConvolutions()
+    {
+        var problems = TileGymConvolutionScenarios.Problems;
+        Require(problems.Length == 4, "Four convolution examples.");
+        foreach (var problem in problems)
+        {
+            Require(problem.OutputLength > 0 && problem.Grid(128).X ==
+                (problem.OutputLength + 127) / 128, "Convolution output grid.");
+            Require(problem.TemplateArguments(128).EndsWith($"{problem.Groups}, 128", StringComparison.Ordinal),
+                "Convolution template dimensions.");
+            var input = new float[problem.InputLength];
+            var weights = new float[problem.WeightLength];
+            Array.Fill(input, 1f);
+            Array.Fill(weights, 1f);
+            var bias = new float[problem.Co];
+            var modelBias = new float[problem.Co];
+            var result = problem.Reference(input, weights, bias, modelBias);
+            Require(result.Length == problem.OutputLength && Array.TrueForAll(result, float.IsFinite),
+                "Convolution CPU reference.");
+        }
+        var forward = problems[0];
+        var x = new float[forward.InputLength];
+        var w = new float[forward.WeightLength];
+        x[0] = 2;
+        w[0] = 3;
+        var cb = new float[forward.Co];
+        var mb = new float[forward.Co];
+        cb[0] = -1;
+        mb[0] = 2;
+        Require(Array.Exists(forward.Reference(x, w, cb, mb), v => v == 2),
+            "Forward convolution bias, ReLU and model bias order.");
+        Require(problems[2].OutputPaddingH == 1 && problems[3].OutputPaddingD == 1,
+            "Transposed convolution output padding.");
     }
 
     static void VerifySession()

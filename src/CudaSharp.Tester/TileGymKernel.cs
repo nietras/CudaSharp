@@ -34,16 +34,23 @@ static class TileGymKernel
             "template<class A, class B> struct is_same { static constexpr bool value = false; }; " +
             "template<class A> struct is_same<A, A> { static constexpr bool value = true; }; " +
             "template<class A, class B> inline constexpr bool is_same_v = is_same<A, B>::value; }";
+        var headers = new System.Collections.Generic.List<TileCppHeader>
+        {
+            new(headerName, headerSource),
+            new("type_traits", typeTraits),
+            new("cmath", string.Empty)
+        };
+        if (relativeHeader.StartsWith("conv", StringComparison.Ordinal))
+        {
+            headers.Add(new TileCppHeader("convolution_common.cuh",
+                File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "src-tilecpp", "tilegym", "convolution_common.cuh"))));
+        }
         return new TileCppKernel(
             new TileCppCompiler(runtime.Architecture),
             source,
             $"{kernelName}.cu",
             kernelName,
-            [
-                new TileCppHeader(headerName, headerSource),
-                new TileCppHeader("type_traits", typeTraits),
-                new TileCppHeader("cmath", string.Empty)
-            ],
+            headers,
             nameExpression: $"&{kernelName}<{templateArguments}>");
     }
 
