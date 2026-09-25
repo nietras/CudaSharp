@@ -3,6 +3,16 @@ using CudaSharp.Tile;
 
 namespace CudaSharp.Tester;
 
+enum TileGymReluOperation
+{
+    Relu,
+    Elu,
+    LeakyRelu,
+    Selu,
+    Celu,
+    Rrelu
+}
+
 static class TileGymActivationScenarios
 {
     static readonly TileCppConfig Config = new([]);
@@ -10,8 +20,11 @@ static class TileGymActivationScenarios
     public static void RunAll(TileGymRuntime runtime, TileGymReport report, int elementCount = 1 << 20)
     {
         var count = Math.Max(1024, elementCount);
-        RunRelu(runtime, report, count);
-        RunReluBackward(runtime, report, count);
+        foreach (var operation in Enum.GetValues<TileGymReluOperation>())
+        {
+            RunRelu(runtime, report, count, operation);
+            RunReluBackward(runtime, report, count, operation);
+        }
         RunGelu(runtime, report, count, backward: false);
         RunGelu(runtime, report, count, backward: true);
         RunGeglu(runtime, report, Math.Max(1, count / 512), 256, backward: false);
@@ -24,10 +37,12 @@ static class TileGymActivationScenarios
         RunSwigluPersistent(runtime, report, 1, 1024);
     }
 
-    public static unsafe void RunRelu(TileGymRuntime runtime, TileGymReport report, int elementCount)
+    public static unsafe void RunRelu(TileGymRuntime runtime, TileGymReport report, int elementCount,
+        TileGymReluOperation operation)
     {
         const string name = "relu_activation_fwd_kernel";
-        var problem = new TileGymElementwiseProblem(elementCount, 0);
+        var problem = new TileGymElementwiseProblem(elementCount, (int)operation);
+        const float alpha = .5f, lower = .125f, upper = 1f / 3;
         using var input = runtime.Allocate<float>(elementCount);
         using var output = runtime.Allocate<float>(elementCount);
         var host = Values(elementCount);
@@ -37,31 +52,33 @@ static class TileGymActivationScenarios
             var x = input.Pointer.Value;
             var y = output.Pointer.Value;
             var n = elementCount;
-            var alpha = 1f;
-            var lower = 0.125f;
-            var upper = 1f / 3;
+            var a = alpha;
+            var lo = lower;
+            var hi = upper;
             byte training = 0;
-            var args = stackalloc IntPtr[] { (IntPtr)(&x), (IntPtr)(&y), (IntPtr)(&n), (IntPtr)(&alpha),
-                (IntPtr)(&lower), (IntPtr)(&upper), (IntPtr)(&training) };
+            var args = stackalloc IntPtr[] { (IntPtr)(&x), (IntPtr)(&y), (IntPtr)(&n), (IntPtr)(&a),
+                (IntPtr)(&lo), (IntPtr)(&hi), (IntPtr)(&training) };
             kernel.Launch(config, grid, runtime.Stream, new(args, 7));
         }
-        var expected = Array.ConvertAll(host, static x => Math.Max(x, 0));
+        var expected = Array.ConvertAll(host, x => ReluReference(x, operation, alpha, lower, upper, false));
         var tuned = TileGymTuning.Tune(runtime, problem, TileGymElementwiseCandidates.For(elementCount),
             "activation/relu.cuh", name, "const float*, float*, int, float, float, float, bool",
             static (p, candidate) => p.TemplateArguments(candidate),
             static (p, candidate) => p.Grid(candidate), Launch,
-            validate: _ => TileGymKernel.Validate(output.CopyToHost(), expected, name));
+            validate: _ => TileGymKernel.Validate(output.CopyToHost(), expected, name, 2e-4f, 2e-4f));
         void LaunchSelected() => Launch(tuned.Kernel, tuned.Candidate.CompilerConfig, tuned.Grid);
         var timing = TileGymKernel.Measure(runtime, LaunchSelected);
-        TileGymKernel.Validate(output.CopyToHost(), expected, name);
-        TileGymKernel.Report(report, "activation", name, $"{elementCount}",
+        TileGymKernel.Validate(output.CopyToHost(), expected, name, 2e-4f, 2e-4f);
+        TileGymKernel.Report(report, "activation", name, $"{elementCount},OP={(int)operation} ({operation})",
             input.ByteLength + output.ByteLength, timing, tuned);
     }
 
-    static unsafe void RunReluBackward(TileGymRuntime runtime, TileGymReport report, int count)
+    static unsafe void RunReluBackward(TileGymRuntime runtime, TileGymReport report, int count,
+        TileGymReluOperation operation)
     {
         const string name = "relu_activation_bwd_kernel";
-        var problem = new TileGymElementwiseProblem(count, 0);
+        var problem = new TileGymElementwiseProblem(count, (int)operation);
+        const float alpha = .5f, lower = .125f, upper = 1f / 3;
         using var dy = runtime.Allocate<float>(count);
         using var x = runtime.Allocate<float>(count);
         using var dx = runtime.Allocate<float>(count);
@@ -75,24 +92,24 @@ static class TileGymActivationScenarios
             var px = x.Pointer.Value;
             var pdx = dx.Pointer.Value;
             var n = count;
-            var alpha = 1f;
-            var lower = .125f;
-            var upper = 1f / 3;
+            var a = alpha;
+            var lo = lower;
+            var hi = upper;
             byte training = 0;
             var args = stackalloc IntPtr[] { (IntPtr)(&pdy), (IntPtr)(&px), (IntPtr)(&pdx), (IntPtr)(&n),
-                (IntPtr)(&alpha), (IntPtr)(&lower), (IntPtr)(&upper), (IntPtr)(&training) };
+                (IntPtr)(&a), (IntPtr)(&lo), (IntPtr)(&hi), (IntPtr)(&training) };
             kernel.Launch(config, grid, runtime.Stream, new(args, 8));
         }
-        var expected = Array.ConvertAll(hx, static value => value > 0 ? 1f : 0f);
+        var expected = Array.ConvertAll(hx, value => ReluReference(value, operation, alpha, lower, upper, true));
         var tuned = TileGymTuning.Tune(runtime, problem, TileGymElementwiseCandidates.For(count),
             "activation/relu.cuh", name, "const float*, const float*, float*, int, float, float, float, bool",
             static (p, candidate) => p.TemplateArguments(candidate),
             static (p, candidate) => p.Grid(candidate), Launch,
-            validate: _ => TileGymKernel.Validate(dx.CopyToHost(), expected, name));
+            validate: _ => TileGymKernel.Validate(dx.CopyToHost(), expected, name, 2e-4f, 2e-4f));
         void LaunchSelected() => Launch(tuned.Kernel, tuned.Candidate.CompilerConfig, tuned.Grid);
         var timing = TileGymKernel.Measure(runtime, LaunchSelected);
-        TileGymKernel.Validate(dx.CopyToHost(), expected, name);
-        TileGymKernel.Report(report, "activation", name, $"{count}",
+        TileGymKernel.Validate(dx.CopyToHost(), expected, name, 2e-4f, 2e-4f);
+        TileGymKernel.Report(report, "activation", name, $"{count},OP={(int)operation} ({operation})",
             dy.ByteLength + x.ByteLength + dx.ByteLength, timing, tuned);
     }
 
@@ -388,6 +405,35 @@ static class TileGymActivationScenarios
         var values = new float[count];
         Array.Fill(values, 1f);
         return values;
+    }
+    internal static float ReluReference(float x, TileGymReluOperation operation, float alpha, float lower,
+        float upper, bool backward)
+    {
+        const float seluScale = 1.0507009873554805f;
+        const float seluAlpha = 1.6732632423543772f;
+        if (backward)
+        {
+            return operation switch
+            {
+                TileGymReluOperation.Relu => x > 0 ? 1f : 0f,
+                TileGymReluOperation.Elu => x > 0 ? 1f : alpha * MathF.Exp(x),
+                TileGymReluOperation.LeakyRelu => x > 0 ? 1f : alpha,
+                TileGymReluOperation.Selu => seluScale * (x > 0 ? 1f : seluAlpha * MathF.Exp(x)),
+                TileGymReluOperation.Celu => x > 0 ? 1f : MathF.Exp(x / alpha),
+                TileGymReluOperation.Rrelu => x > 0 ? 1f : (lower + upper) * .5f,
+                _ => throw new ArgumentOutOfRangeException(nameof(operation))
+            };
+        }
+        return operation switch
+        {
+            TileGymReluOperation.Relu => Math.Max(x, 0),
+            TileGymReluOperation.Elu => x > 0 ? x : alpha * (MathF.Exp(x) - 1f),
+            TileGymReluOperation.LeakyRelu => x > 0 ? x : alpha * x,
+            TileGymReluOperation.Selu => seluScale * (x > 0 ? x : seluAlpha * (MathF.Exp(x) - 1f)),
+            TileGymReluOperation.Celu => x > 0 ? x : alpha * (MathF.Exp(x / alpha) - 1f),
+            TileGymReluOperation.Rrelu => x > 0 ? x : (lower + upper) * .5f * x,
+            _ => throw new ArgumentOutOfRangeException(nameof(operation))
+        };
     }
     static float Sigmoid(float x) => 1f / (1f + MathF.Exp(-x));
     static float Gelu(float x) => .5f * x * (1f + MathF.Tanh(.7978845608028654f * (x + .044715f * x * x * x)));

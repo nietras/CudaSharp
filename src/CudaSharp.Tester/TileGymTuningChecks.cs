@@ -88,6 +88,16 @@ static class TileGymTuningChecks
         var elementwise = new TileGymElementwiseProblem(1025, 0);
         Require(elementwise.Grid(TileGymElementwiseCandidates.For(1025)[0]) == new TileCppGrid(5),
             "Elementwise masked tail grid.");
+        foreach (var operation in Enum.GetValues<TileGymReluOperation>())
+        {
+            var specialization = elementwise with { Operation = (int)operation };
+            Require(specialization.TemplateArguments(TileGymElementwiseCandidates.For(1025)[0]) ==
+                $"float, 256, {(int)operation}", "Activation OP template argument.");
+            Require(float.IsFinite(TileGymActivationScenarios.ReluReference(-1f, operation, .5f, .125f,
+                1f / 3, false)), "Activation forward reference.");
+            Require(float.IsFinite(TileGymActivationScenarios.ReluReference(-1f, operation, .5f, .125f,
+                1f / 3, true)), "Activation backward reference.");
+        }
         var softmax = new TileGymSoftmaxProblem(4, 256, false, false);
         Require(TileGymSoftmaxCandidates.For(softmax).Count == 2, "Single-pass softmax pruning.");
         Require(TileGymSoftmaxCandidates.For(softmax with { Online = true }).Count == 3,
