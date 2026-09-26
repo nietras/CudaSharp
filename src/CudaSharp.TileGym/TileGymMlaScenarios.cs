@@ -203,13 +203,8 @@ static class TileGymMlaScenarios
 
         void Launch()
         {
-            var pi = input.Pointer.Value;
-            var pl = lse.Pointer.Value;
-            var po = output.Pointer.Value;
-
-            var args = stackalloc IntPtr[] { (IntPtr)(&pi), (IntPtr)(&pl), (IntPtr)(&po) };
-
-            kernel.Launch(Config, new(1, 1, 1), runtime.Stream, new(args, 3));
+            kernel.Launch(Config, new(1, 1, 1), runtime.Stream,
+                input.Pointer, lse.Pointer, output.Pointer);
         }
 
         var timing = TileGymKernel.Measure(runtime, Launch);

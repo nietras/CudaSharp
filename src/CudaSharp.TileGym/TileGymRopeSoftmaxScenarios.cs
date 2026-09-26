@@ -58,12 +58,8 @@ static class TileGymRopeSoftmaxScenarios
 
         void Launch()
         {
-            var pq = q.Pointer.Value;
-            var pk = k.Pointer.Value;
-            var pc = cos.Pointer.Value;
-            var ps = sin.Pointer.Value;
-            var args = stackalloc IntPtr[] { (IntPtr)(&pq), (IntPtr)(&pk), (IntPtr)(&pc), (IntPtr)(&ps) };
-            kernel.Launch(Config, new(batch * sequence), runtime.Stream, new(args, 4));
+            kernel.Launch(Config, new(batch * sequence), runtime.Stream,
+                q.Pointer, k.Pointer, cos.Pointer, sin.Pointer);
         }
         var timing = TileGymKernel.Measure(runtime, Launch);
         q.CopyFrom(hq);
@@ -129,8 +125,7 @@ static class TileGymRopeSoftmaxScenarios
             }
             else if (online)
             {
-                var args = stackalloc IntPtr[] { (IntPtr)(&po), (IntPtr)(&pi), (IntPtr)(&stride), (IntPtr)(&stride), (IntPtr)(&ncols) };
-                kernel.Launch(config, grid, runtime.Stream, new(args, 5));
+                kernel.Launch(config, grid, runtime.Stream, po, pi, stride, stride, ncols);
             }
             else
             {

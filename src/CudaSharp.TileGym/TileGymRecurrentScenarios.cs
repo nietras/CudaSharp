@@ -32,10 +32,7 @@ static class TileGymRecurrentScenarios
 
         void Launch(TileCppKernel kernel, TileCppConfig config, TileCppGrid grid)
         {
-            var px = x.Pointer.Value;
-            var py = y.Pointer.Value;
-            var args = stackalloc IntPtr[] { (IntPtr)(&px), (IntPtr)(&py) };
-            kernel.Launch(config, grid, runtime.Stream, new(args, 2));
+            kernel.Launch(config, grid, runtime.Stream, x.Pointer, y.Pointer);
         }
 
         var expected = new float[n];

@@ -60,13 +60,11 @@ static class TileGymAttentionScenarios
             var cap = 0f;
             if (gemma)
             {
-                var args = stackalloc IntPtr[] { (IntPtr)(&pq), (IntPtr)(&pk), (IntPtr)(&pv), (IntPtr)(&po), (IntPtr)(&scale), (IntPtr)(&cap) };
-                kernel.Launch(config, grid, runtime.Stream, new(args, 6));
+                kernel.Launch(config, grid, runtime.Stream, pq, pk, pv, po, scale, cap);
             }
             else
             {
-                var args = stackalloc IntPtr[] { (IntPtr)(&pq), (IntPtr)(&pk), (IntPtr)(&pv), (IntPtr)(&po), (IntPtr)(&pl), (IntPtr)(&scale) };
-                kernel.Launch(config, grid, runtime.Stream, new(args, 6));
+                kernel.Launch(config, grid, runtime.Stream, pq, pk, pv, po, pl, scale);
             }
         }
 
@@ -187,8 +185,7 @@ static class TileGymAttentionScenarios
             }
             else
             {
-                var args = stackalloc IntPtr[] { (IntPtr)(&pq), (IntPtr)(&pk), (IntPtr)(&pv), (IntPtr)(&po), (IntPtr)(&pl), (IntPtr)(&scale) };
-                kernel.Launch(Config, new(1, 1, 1), runtime.Stream, new(args, 6));
+                kernel.Launch(Config, new(1, 1, 1), runtime.Stream, pq, pk, pv, po, pl, scale);
             }
         }
 
@@ -219,14 +216,9 @@ static class TileGymAttentionScenarios
 
         void Launch(TileCppKernel kernel, TileCppConfig config, TileCppGrid grid)
         {
-            var po = o.Pointer.Value;
-            var pd = d.Pointer.Value;
-            var pl = l.Pointer.Value;
-            var pdel = delta.Pointer.Value;
-            var pml = minusL.Pointer.Value;
             var scale = Scale;
-            var args = stackalloc IntPtr[] { (IntPtr)(&po), (IntPtr)(&pd), (IntPtr)(&pl), (IntPtr)(&pdel), (IntPtr)(&pml), (IntPtr)(&scale) };
-            kernel.Launch(config, grid, runtime.Stream, new(args, 6));
+            kernel.Launch(config, grid, runtime.Stream,
+                o.Pointer, d.Pointer, l.Pointer, delta.Pointer, minusL.Pointer, scale);
         }
 
         var ed = new float[Sequence];
@@ -296,26 +288,14 @@ static class TileGymAttentionScenarios
 
         void Forward()
         {
-            var pq = q.Pointer.Value;
-            var pk = k.Pointer.Value;
-            var pv = v.Pointer.Value;
-            var po = o.Pointer.Value;
-            var pl = l.Pointer.Value;
-            var scale = Scale;
-            var args = stackalloc IntPtr[] { (IntPtr)(&pq), (IntPtr)(&pk), (IntPtr)(&pv), (IntPtr)(&po), (IntPtr)(&pl), (IntPtr)(&scale) };
-            forward.Launch(Config, new(1, 1), runtime.Stream, new(args, 6));
+            forward.Launch(Config, new(1, 1), runtime.Stream,
+                q.Pointer, k.Pointer, v.Pointer, o.Pointer, l.Pointer, Scale);
         }
 
         void Preprocess()
         {
-            var po = o.Pointer.Value;
-            var pd = dout.Pointer.Value;
-            var pl = l.Pointer.Value;
-            var pdel = delta.Pointer.Value;
-            var pml = ml.Pointer.Value;
-            var scale = Scale;
-            var args = stackalloc IntPtr[] { (IntPtr)(&po), (IntPtr)(&pd), (IntPtr)(&pl), (IntPtr)(&pdel), (IntPtr)(&pml), (IntPtr)(&scale) };
-            preprocess.Launch(Config, new(1, 1), runtime.Stream, new(args, 6));
+            preprocess.Launch(Config, new(1, 1), runtime.Stream,
+                o.Pointer, dout.Pointer, l.Pointer, delta.Pointer, ml.Pointer, Scale);
         }
 
         Forward();

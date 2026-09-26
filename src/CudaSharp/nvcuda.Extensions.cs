@@ -139,6 +139,23 @@ public static partial class nvcuda
     }
 
     [SkipLocalsInit]
+    public unsafe static CUresult cuLaunchKernel<T1>(CUfunction function,
+        uint gridDimX, uint gridDimY, uint gridDimZ,
+        uint blockDimX, uint blockDimY, uint blockDimZ,
+        uint sharedMemBytes, CUstream stream,
+        T1 arg1)
+        where T1 : unmanaged
+    {
+        var kernelParams = stackalloc void*[]
+        { &arg1 };
+        return cuLaunchKernel(function,
+            gridDimX, gridDimY, gridDimZ,
+            blockDimX, blockDimY, blockDimZ,
+            sharedMemBytes, stream,
+            kernelParams, null);
+    }
+
+    [SkipLocalsInit]
     public unsafe static CUresult cuLaunchKernel<T1, T2>(CUfunction function,
         uint gridDimX, uint gridDimY, uint gridDimZ,
         uint blockDimX, uint blockDimY, uint blockDimZ,

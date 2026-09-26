@@ -240,14 +240,8 @@ static class TileGymConvolutionScenarios
         {
             if (hasBias)
             {
-                var pi = input.Pointer.Value;
-                var pw = weights.Pointer.Value;
-                var pb = bias.Pointer.Value;
-                var pm = modelBias.Pointer.Value;
-                var po = output.Pointer.Value;
-                var args = stackalloc IntPtr[] { (IntPtr)(&pi), (IntPtr)(&pw), (IntPtr)(&pb),
-                    (IntPtr)(&pm), (IntPtr)(&po) };
-                kernel.Launch(Config, problem.MmaGrid(), runtime.Stream, new(args, 5));
+                kernel.Launch(Config, problem.MmaGrid(), runtime.Stream,
+                    input.Pointer, weights.Pointer, bias.Pointer, modelBias.Pointer, output.Pointer);
             }
             else
             {
@@ -290,14 +284,8 @@ static class TileGymConvolutionScenarios
         {
             if (hasBias)
             {
-                var pi = input.Pointer.Value;
-                var pw = weights.Pointer.Value;
-                var pb = bias.Pointer.Value;
-                var pm = modelBias.Pointer.Value;
-                var po = output.Pointer.Value;
-                var args = stackalloc IntPtr[] { (IntPtr)(&pi), (IntPtr)(&pw), (IntPtr)(&pb),
-                    (IntPtr)(&pm), (IntPtr)(&po) };
-                kernel.Launch(Config, problem.Grid(block), runtime.Stream, new(args, 5));
+                kernel.Launch(Config, problem.Grid(block), runtime.Stream,
+                    input.Pointer, weights.Pointer, bias.Pointer, modelBias.Pointer, output.Pointer);
             }
             else
             {

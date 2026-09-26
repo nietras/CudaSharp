@@ -60,29 +60,19 @@ static class TileGymMoeScenarios
 
         void Stage1()
         {
-            var pt = top.Pointer.Value;
-            var pc = counts.Pointer.Value;
-            var n = numel;
-            var per = tokensPerThread;
-            var args = stackalloc IntPtr[] { (IntPtr)(&pt), (IntPtr)(&pc), (IntPtr)(&n), (IntPtr)(&per) };
-            s1.Launch(Config, new(experts), runtime.Stream, new(args, 4));
+            s1.Launch(Config, new(experts), runtime.Stream,
+                top.Pointer, counts.Pointer, numel, tokensPerThread);
         }
 
         void Stage2()
         {
-            var pc = counts.Pointer.Value;
-            var args = stackalloc IntPtr[] { (IntPtr)(&pc) };
-            s2.Launch(Config, new(experts), runtime.Stream, new(args, 1));
+            s2.Launch(Config, new(experts), runtime.Stream, counts.Pointer);
         }
 
         void Stage3()
         {
-            var pt = total.Pointer.Value;
-            var pm = max.Pointer.Value;
-            var pc = counts.Pointer.Value;
-            var ps = cumsum.Pointer.Value;
-            var args = stackalloc IntPtr[] { (IntPtr)(&pt), (IntPtr)(&pm), (IntPtr)(&pc), (IntPtr)(&ps) };
-            s3.Launch(Config, new(1), runtime.Stream, new(args, 4));
+            s3.Launch(Config, new(1), runtime.Stream,
+                total.Pointer, max.Pointer, counts.Pointer, cumsum.Pointer);
         }
 
         void Stage4()

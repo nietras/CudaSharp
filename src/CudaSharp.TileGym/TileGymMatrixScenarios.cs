@@ -108,8 +108,7 @@ static class TileGymMatrixScenarios
             var pc = c.Pointer.Value;
             if (persistent)
             {
-                var args = stackalloc IntPtr[] { (IntPtr)(&pa), (IntPtr)(&pb), (IntPtr)(&pc) };
-                kernel.Launch(config, grid, runtime.Stream, new(args, 3));
+                kernel.Launch(config, grid, runtime.Stream, a.Pointer, b.Pointer, c.Pointer);
             }
             else
             {
