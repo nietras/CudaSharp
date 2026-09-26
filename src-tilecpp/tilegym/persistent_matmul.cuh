@@ -25,7 +25,7 @@ template<typename T,
          int GROUP_SIZE_M,
          bool TRANSPOSE_A, bool TRANSPOSE_B,
          int num_ctas, int occupancy>
-[[ using cutile : hint(1000, num_cta_in_cga=num_ctas, occupancy=occupancy) ]]
+[[ using cutile : hint(0, num_cta_in_cga=num_ctas, occupancy=occupancy) ]]
 __tile_global__ void static_persistent_matmul_kernel(
     const T* __restrict__ _A,
     const T* __restrict__ _B,
@@ -49,7 +49,8 @@ __tile_global__ void static_persistent_matmul_kernel(
 
     constexpr auto zero_pad = ct::view_padding::zero;
 
-    using AccTile = ct::tile<float, ct::shape<TILE_SIZE_M, TILE_SIZE_N>>;
+    using AccType = std::conditional_t<std::is_same_v<T, double>, double, float>;
+    using AccTile = ct::tile<AccType, ct::shape<TILE_SIZE_M, TILE_SIZE_N>>;
     using MmaType = std::conditional_t<std::is_same_v<T, float>, __nv_tf32, T>;
 
     if constexpr (!TRANSPOSE_A && !TRANSPOSE_B) {

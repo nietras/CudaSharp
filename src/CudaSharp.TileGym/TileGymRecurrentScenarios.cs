@@ -19,10 +19,10 @@ static class TileGymRecurrentScenarios
     {
         const int n = 4096;
         const float probability = .25f;
-        const ulong seed = 2654435761;
+        const uint seed = 2654435761;
         const string name = "seeded_dropout_kernel";
 
-        var problem = new TileGymDropoutProblem(n);
+        var problem = new TileGymDropoutProblem(n, probability, seed);
         using var x = runtime.Allocate<float>(n);
         using var y = runtime.Allocate<float>(n);
 
@@ -34,35 +34,23 @@ static class TileGymRecurrentScenarios
         {
             var px = x.Pointer.Value;
             var py = y.Pointer.Value;
-            var p = probability;
-            var s = seed;
-            var count = n;
-
-            var args = stackalloc IntPtr[]
-            {
-                (IntPtr)(&px),
-                (IntPtr)(&py),
-                (IntPtr)(&p),
-                (IntPtr)(&s),
-                (IntPtr)(&count)
-            };
-
-            kernel.Launch(config, grid, runtime.Stream, new(args, 5));
+            var args = stackalloc IntPtr[] { (IntPtr)(&px), (IntPtr)(&py) };
+            kernel.Launch(config, grid, runtime.Stream, new(args, 2));
         }
 
         var expected = new float[n];
         for (var i = 0; i < n; i++)
         {
-            var combined = unchecked((uint)i * 1103515245u + (uint)seed);
+            var combined = unchecked((int)((uint)i * 1103515245u + seed));
             var hash = combined ^ (combined >> 16);
             hash ^= hash << 8;
             hash ^= hash >> 4;
-            var random = (hash & 0x7fffffffu) / 2147483647f;
+            var random = (hash & 0x7fffffff) / 2147483647f;
             expected[i] = random > probability ? 1f / (1f - probability) : 0f;
         }
 
         var tuned = TileGymTuning.Tune(runtime, problem, TileGymDropoutCandidates.For(),
-            "dropout.cuh", name, "const float*, float*, float, uint64_t, int",
+            "dropout.cuh", name, "const float*, float*",
             static (p, candidate) => p.TemplateArguments(candidate),
             static (p, candidate) => p.Grid(candidate), Launch,
             validate: _ => TileGymKernel.Validate(y.CopyToHost(), expected, name, 1e-6f, 1e-6f));

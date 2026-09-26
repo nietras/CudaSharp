@@ -24,7 +24,7 @@
  * Matrix Multiplication Kernel with transpose support
  *
  * Template Parameters:
- *   T: Element type (__half, __nv_bfloat16, float)
+ *   T: Element type (__half, __nv_bfloat16, float, double)
  *   M, N, K: Matrix dimensions (promoted to template params for static shapes)
  *   TILE_SIZE_M, TILE_SIZE_N, TILE_SIZE_K: Tile dimensions
  *   GROUP_SIZE_M: Number of M tiles to group for L2 reuse
@@ -36,8 +36,8 @@ template<typename T, int M, int N, int K,
          bool TRANSPOSE_A, bool TRANSPOSE_B,
          int num_ctas, int occupancy>
 [[ using cutile :
-    hint(1000, num_cta_in_cga=num_ctas),
-    hint(1000, occupancy=occupancy)
+    hint(0, num_cta_in_cga=num_ctas),
+    hint(0, occupancy=occupancy)
 ]]
 __tile_global__ void matmul_kernel(
     const T* __restrict__ _A,
@@ -69,7 +69,8 @@ __tile_global__ void matmul_kernel(
     // Type aliases for tiles
     using ATile = ct::tile<T, ct::shape<TILE_SIZE_M, TILE_SIZE_K>>;
     using BTile = ct::tile<T, ct::shape<TILE_SIZE_K, TILE_SIZE_N>>;
-    using AccTile = ct::tile<float, ct::shape<TILE_SIZE_M, TILE_SIZE_N>>;
+    using AccType = std::conditional_t<std::is_same_v<T, double>, double, float>;
+    using AccTile = ct::tile<AccType, ct::shape<TILE_SIZE_M, TILE_SIZE_N>>;
     using CTile = ct::tile<T, ct::shape<TILE_SIZE_M, TILE_SIZE_N>>;
     using MmaType = std::conditional_t<std::is_same_v<T, float>, __nv_tf32, T>;
 

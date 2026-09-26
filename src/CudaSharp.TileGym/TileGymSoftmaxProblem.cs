@@ -6,7 +6,8 @@ namespace CudaSharp.Tester;
 
 readonly record struct TileGymSoftmaxProblem(int Rows, int Columns, bool Online, bool Backward)
 {
-    public string TemplateArguments(TileGymCandidate candidate) => $"float, {candidate["BlockSize"]}";
+    public string TemplateArguments(TileGymCandidate candidate) =>
+        $"float, {candidate["BlockSize"]}{(!Online && !Backward ? ", 0" : "")}";
 
     public TileCppGrid Grid(TileGymCandidate candidate)
     {

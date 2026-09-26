@@ -70,9 +70,10 @@ static class TileGymMlaScenarios
         var name = transpose ? "naive_absorb_mla_transpose" : "naive_absorb_mla";
 
         using var kernel = TileGymKernel.Create(
-            runtime.Compiler, "mla_decoding.cuh", name, $"float, {d}, 1, 64, {kd}",
+            runtime.Compiler, "mla_decoding.cuh", name,
+            transpose ? $"float, {d}, 1, 64, {kd}, 0, {s}, true" : $"float, {d}, 1, 64, {kd}",
             "float*, float*, float*, float*, float*, float*, float, long long, int, long long, int, " +
-            "long long, int, long long, int, long long, int, int, int, int");
+            "long long, int, long long, int, long long, int, int, int" + (transpose ? "" : ", int"));
         using var q = runtime.Allocate<float>(heads * d);
         using var qpe = runtime.Allocate<float>(heads * kd);
         using var kv = runtime.Allocate<float>(s * d);
@@ -119,7 +120,7 @@ static class TileGymMlaScenarios
                 (IntPtr)(&os), (IntPtr)(&b), (IntPtr)(&h), (IntPtr)(&seq)
             };
 
-            kernel.Launch(Config, new(1, 1), runtime.Stream, new(args, 20));
+            kernel.Launch(Config, new(1, 1), runtime.Stream, new(args, transpose ? 19 : 20));
         }
 
         var timing = TileGymKernel.Measure(runtime, Launch);

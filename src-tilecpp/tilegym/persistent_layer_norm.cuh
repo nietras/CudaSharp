@@ -36,7 +36,7 @@ template<typename T,
          int D,        // ← compile-time so `(... / D)` and partition_view extents fold.
          int NUM_SMS,  // ← compile-time so the persistent for-loop step is constant.
          float EPS>    // ← compile-time so the (var + eps) reshape/broadcast hoists out of the for-loop
-[[ using cutile : hint(1000, num_cta_in_cga=1) ]]
+[[ using cutile : hint(0, num_cta_in_cga=1) ]]
 __tile_global__ void persistent_layer_norm_fwd_kernel(
     const T* __restrict__ X,       // (N, D)
     T* __restrict__ Y,             // (N, D)
@@ -84,9 +84,11 @@ __tile_global__ void persistent_layer_norm_fwd_kernel(
         ct::tensor_span{Rstd, ExtN{}},
         ct::shape<BLOCK_N>{});
 
-    // Load weights once (hoisted out of the grid-stride loop).
-    auto w = ct::element_cast<float>(pW.load(0));  // (BLOCK_D,)
-    auto b = ct::element_cast<float>(pB.load(0));  // (BLOCK_D,)
+    // Load weights once (hoisted out of the grid-stride loop). BLOCK_D is
+    // next_pow2(D), so the tile is wider than the tensor whenever D is not a
+    // power of two; the masked loads zero-fill the tail.
+    auto w = ct::element_cast<float>(pW.load_masked(0));  // (BLOCK_D,)
+    auto b = ct::element_cast<float>(pB.load_masked(0));  // (BLOCK_D,)
 
     // Broadcast weights into (BLOCK_N, BLOCK_D) by reshape to (1, BLOCK_D).
     auto w_bcast = ct::reshape<ct::shape<1, BLOCK_D>>(w);
@@ -100,8 +102,8 @@ __tile_global__ void persistent_layer_norm_fwd_kernel(
 
     for (auto current_pid : ct::irange(pid, upper_bound, NUM_SMS)) {
         TileXNxD x_tile;
-        [[ using cutile : hint(1000, latency=4) ]]
-        x_tile = pX.load(current_pid, 0);
+        [[ using cutile : hint(0, latency=4) ]]
+        x_tile = pX.load_masked(current_pid, 0);
         auto x = ct::element_cast<float>(x_tile);
 
         f32_N mean;
@@ -121,14 +123,14 @@ __tile_global__ void persistent_layer_norm_fwd_kernel(
             rstd = ct::rsqrt(var + eps_tile);
 
             if constexpr (TRAINING) {
-                [[ using cutile : hint(1000, allow_tma=false) ]]
-                pMean.store(mean, current_pid);
-                [[ using cutile : hint(1000, allow_tma=false) ]]
-                pRstd.store(rstd, current_pid);
+                [[ using cutile : hint(0, allow_tma=false) ]]
+                pMean.store_masked(mean, current_pid);
+                [[ using cutile : hint(0, allow_tma=false) ]]
+                pRstd.store_masked(rstd, current_pid);
             }
         } else {
-            mean = pMean.load(current_pid);
-            rstd = pRstd.load(current_pid);
+            mean = pMean.load_masked(current_pid);
+            rstd = pRstd.load_masked(current_pid);
         }
 
         // Broadcast mean/rstd to (BLOCK_N, 1) then rely on implicit broadcast
@@ -146,7 +148,7 @@ __tile_global__ void persistent_layer_norm_fwd_kernel(
         }
 
         auto y_T = ct::element_cast<T>(y_f32);
-        [[ using cutile : hint(1000, allow_tma=false) ]]
-        pY.store(y_T, current_pid, 0);
+        [[ using cutile : hint(0, allow_tma=false) ]]
+        pY.store_masked(y_T, current_pid, 0);
     }
 }

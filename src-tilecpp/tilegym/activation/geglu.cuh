@@ -24,11 +24,29 @@ __tile__ auto tanh_approx_f32(tile_t<float, BLOCK_SIZE> x) {
 }
 
 template<int BLOCK_SIZE>
+__tile__ auto erf_f32(tile_t<float, BLOCK_SIZE> x) {
+    namespace ct = cuda::tiles;
+    using f32xN = tile_t<float, BLOCK_SIZE>;
+    constexpr float p  = 0.3275911f;
+    constexpr float a1 = 0.254829592f;
+    constexpr float a2 = -0.284496736f;
+    constexpr float a3 = 1.421413741f;
+    constexpr float a4 = -1.453152027f;
+    constexpr float a5 = 1.061405429f;
+
+    auto zero = ct::zeros<f32xN>();
+    auto neg = x < zero;
+    auto ax = ct::select(neg, -x, x);
+    auto t = 1.0f / (1.0f + p * ax);
+    auto poly = ((((a5 * t + a4) * t + a3) * t + a2) * t + a1) * t;
+    auto r = 1.0f - poly * ct::exp(-ax * ax);
+    return ct::select(neg, -r, r);
+}
+
+template<int BLOCK_SIZE>
 __tile__ auto normal_cdf_f32(tile_t<float, BLOCK_SIZE> x) {
-    constexpr float sqrt_2_div_pi = 0.7978845608028654f;
-    constexpr float coeff_044715 = 0.044715f;
-    auto x3 = x * x * x;
-    return 0.5f * (1.0f + tanh_approx_f32<BLOCK_SIZE>(sqrt_2_div_pi * (x + coeff_044715 * x3)));
+    constexpr float inv_sqrt_2 = 0.7071067811865476f;
+    return 0.5f * (1.0f + erf_f32<BLOCK_SIZE>(x * inv_sqrt_2));
 }
 
 template<int BLOCK_SIZE>
@@ -36,6 +54,24 @@ __tile__ auto normal_pdf_f32(tile_t<float, BLOCK_SIZE> x) {
     namespace ct = cuda::tiles;
     constexpr float inv_sqrt_2pi = 0.3989422804014327f;
     return inv_sqrt_2pi * ct::exp(-0.5f * x * x);
+}
+
+template<int BLOCK_SIZE>
+__tile__ auto gelu_grad_f32(tile_t<float, BLOCK_SIZE> x) {
+    // d/dx [x * Phi(x)] = Phi(x) + x * phi(x)
+    return normal_cdf_f32<BLOCK_SIZE>(x) + x * normal_pdf_f32<BLOCK_SIZE>(x);
+}
+
+template<int BLOCK_SIZE>
+__tile__ auto tanh_gelu_grad_f32(tile_t<float, BLOCK_SIZE> x) {
+    // d/dx [0.5 * x * (1 + tanh(u))] = 0.5 * (1 + t) + 0.5 * x * (1 - t^2) * u'
+    // with t = tanh(u), u = sqrt(2/pi) * (x + 0.044715 * x^3)
+    constexpr float sqrt_2_div_pi = 0.7978845608028654f;
+    constexpr float coeff_044715 = 0.044715f;
+    auto u = sqrt_2_div_pi * (x + coeff_044715 * x * x * x);
+    auto th = tanh_approx_f32<BLOCK_SIZE>(u);
+    auto du = sqrt_2_div_pi * (1.0f + 3.0f * coeff_044715 * x * x);
+    return 0.5f * (1.0f + th) + 0.5f * x * (1.0f - th * th) * du;
 }
 
 template<typename T, int BLOCK_SIZE, int APPROXIMATE>
@@ -73,6 +109,7 @@ __tile_global__ void geglu_bwd_kernel(T* __restrict__ dx, const T* __restrict__ 
     dy = ct::assume_aligned<16>(dy);
     x = ct::assume_aligned<16>(x);
     using TxN = tile_t<T, BLOCK_SIZE>;
+    using f32xN = tile_t<float, BLOCK_SIZE>;
     using i32xN = tile_t<int32_t, BLOCK_SIZE>;
 
     int base = ct::bid().x * BLOCK_SIZE;
@@ -95,7 +132,14 @@ __tile_global__ void geglu_bwd_kernel(T* __restrict__ dx, const T* __restrict__ 
         gelu_b = 0.5f * b * (1.0f + tanh_approx_f32<BLOCK_SIZE>(0.7978845608028654f * (b + 0.044715f * b * b * b)));
     }
     auto da = dyf * gelu_b;
-    auto db = dyf * a * (normal_cdf_f32<BLOCK_SIZE>(b) + b * normal_pdf_f32<BLOCK_SIZE>(b));
+    // Differentiate the same GELU geglu_fwd_kernel evaluated for this APPROXIMATE
+    f32xN dgelu_b;
+    if constexpr (APPROXIMATE == 1) {
+        dgelu_b = tanh_gelu_grad_f32<BLOCK_SIZE>(b);
+    } else {
+        dgelu_b = gelu_grad_f32<BLOCK_SIZE>(b);
+    }
+    auto db = dyf * a * dgelu_b;
     ct::store_masked(dx + left_offsets, ct::element_cast<T>(da), mask);
     ct::store_masked(dx + right_offsets, ct::element_cast<T>(db), mask);
 }

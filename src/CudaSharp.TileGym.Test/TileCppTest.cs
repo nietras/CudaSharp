@@ -54,9 +54,14 @@ public class TileCppTest
             var root = Path.Combine(AppContext.BaseDirectory, "src-tilecpp", "tilegym");
             var cases = new[]
             {
-                ("softmax.cuh","softmax_kernel","float, 64","float*, const float*, int, int, int, int, int"),
+                ("softmax.cuh","softmax_kernel","float, 64, 0","float*, const float*, int, int, int, int, int"),
                 ("matmul.cuh","matmul_kernel","float, 64, 64, 64, 64, 64, 32, 8, 2, false, false, 1, 2","const float*, const float*, float*"),
                 ("bmm.cuh","bmm_kernel","float, 64, 64, 32, 8, false, false","const float*, const float*, float*, int, int, int, int"),
+                ("dropout.cuh","seeded_dropout_kernel","float, 256, 4096, 0.25f, 2654435761u","const float*, float*"),
+                ("rope.cuh","rope_kernel","float, float, float, 1, 2, 1, 2, 1, 32, 32, 64, 1, 4, 512, 256, 64, 256, 256, 64","float*, float*, const float*, const float*"),
+                ("mla_decoding.cuh","naive_absorb_mla_transpose","float, 64, 1, 64, 16, 0, 64, true","float*, float*, float*, float*, float*, float*, float, long long, int, long long, int, long long, int, long long, int, long long, int, int, int"),
+                ("moe_align_block.cuh","moe_align_block_size_stage2","int, 4, 4, 4","int*"),
+                ("moe_align_block.cuh","moe_align_block_size_stage3","int, 4, 4, 4","int*, int*, const int*, int*"),
             };
             var compiler = new TileCppCompiler(nvrtcGetSupportedArchs()[^1]);
             foreach (var item in cases)
@@ -164,12 +169,12 @@ public class TileCppTest
         const string source = """
             #include <cmath>
             #include "softmax.cuh"
-            template __tile_global__ void softmax_kernel<float, 256>(
+            template __tile_global__ void softmax_kernel<float, 256, 0>(
                 float*, const float*, int, int, int, int, int);
             """;
         var compiler = new TileCppCompiler(nvrtcGetSupportedArchs()[^1]);
         var compilation = compiler.CompileKernel(source, "softmax_infinity.cu",
-            "&softmax_kernel<float, 256>", new TileCppConfig([]),
+            "&softmax_kernel<float, 256, 0>", new TileCppConfig([]),
             [header, new TileCppHeader("cmath", "#ifndef INFINITY\n#define INFINITY __builtin_bit_cast(float, 0x7f800000u)\n#endif\n")]);
         Assert.IsNotEmpty(compilation.TileIr);
     }

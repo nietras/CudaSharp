@@ -101,10 +101,17 @@ static class TileGymTuningChecks
         }
         var softmax = new TileGymSoftmaxProblem(4, 256, false, false);
         Require(TileGymSoftmaxCandidates.For(softmax).Count == 2, "Single-pass softmax pruning.");
+        Require(softmax.TemplateArguments(TileGymSoftmaxCandidates.For(softmax)[0]) == "float, 256, 0",
+            "Single-pass softmax template arguments.");
+        Require((softmax with { Online = true }).TemplateArguments(TileGymSoftmaxCandidates.For(softmax with { Online = true })[0]) == "float, 128",
+            "Online softmax template arguments.");
         Require(TileGymSoftmaxCandidates.For(softmax with { Online = true }).Count == 3,
             "Online softmax variants.");
-        Require(new TileGymDropoutProblem(4097).Grid(TileGymDropoutCandidates.For()[0]) == new TileCppGrid(17),
+        var dropout = new TileGymDropoutProblem(4097, .25f, 2654435761u);
+        Require(dropout.Grid(TileGymDropoutCandidates.For()[0]) == new TileCppGrid(17),
             "Dropout masked tail grid.");
+        Require(dropout.TemplateArguments(TileGymDropoutCandidates.For()[0]) ==
+            "float, 256, 4097, 0.25f, 2654435761u", "Dropout template arguments.");
     }
 
     static void VerifyConvolutions()

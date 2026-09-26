@@ -40,14 +40,14 @@ static class TileGymMoeScenarios
             runtime.Compiler,
             "moe_align_block.cuh",
             "moe_align_block_size_stage2",
-            "int, 4, 4",
+            "int, 4, 4, 4",
             "int*"
         );
         using var s3 = TileGymKernel.Create(
             runtime.Compiler,
             "moe_align_block.cuh",
             "moe_align_block_size_stage3",
-            "int, 4, 4",
+            "int, 4, 4, 4",
             "int*, int*, const int*, int*"
         );
         using var s4 = TileGymKernel.Create(
