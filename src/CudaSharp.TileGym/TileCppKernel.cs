@@ -147,7 +147,7 @@ public sealed class TileCppKernel : IDisposable
     /// <summary>Launches a CUDA Tile C++ kernel with one unmanaged argument.</summary>
     /// <seealso href="https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#launching-kernels" />
     [SkipLocalsInit]
-    public unsafe void Launch<T1>(TileCppConfig config, TileCppGrid grid, CUstream stream, T1 arg1)
+    public void Launch<T1>(TileCppConfig config, TileCppGrid grid, CUstream stream, T1 arg1)
         where T1 : unmanaged
     {
         var function = GetFunction(config);
