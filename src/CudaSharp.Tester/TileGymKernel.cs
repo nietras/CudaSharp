@@ -41,12 +41,9 @@ static class TileGymKernel
             headers.Add(new TileCppHeader("convolution_common.cuh",
                 File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "src-tilecpp", "tilegym", "convolution_common.cuh"))));
         }
-        return new TileCppKernel(
-            new TileCppCompiler(runtime.Architecture),
-            source,
-            $"{kernelName}.cu",
-            kernelName,
-            headers,
+        var compiler = new TileCppCompiler(runtime.Architecture);
+        return new TileCppKernel(compiler,
+            source, $"{kernelName}.cu", kernelName, headers,
             nameExpression: $"&{kernelName}<{templateArguments}>");
     }
 
