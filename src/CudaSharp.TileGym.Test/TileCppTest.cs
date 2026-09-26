@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
 using CudaSharp.Tile;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -32,7 +33,7 @@ public class TileCppTest
     public void TileCppTest_TileGymTesterCoversEveryVendoredKernel()
     {
         var root = Path.Combine(AppContext.BaseDirectory, "src-tilecpp", "tilegym");
-        var sourceRoot = Path.GetFullPath(Path.Combine(root, "..", "..", "..", "..", "..", "..", "src", "CudaSharp.Tester"));
+        var sourceRoot = GetTileGymSourceRoot();
         var kernels = Directory.EnumerateFiles(root, "*.cuh", SearchOption.AllDirectories)
             .SelectMany(path => Regex.Matches(File.ReadAllText(path), @"__tile_global__\s+void\s+(\w+)").Select(match => match.Groups[1].Value))
             .Distinct(StringComparer.Ordinal).OrderBy(name => name).ToArray();
@@ -251,6 +252,9 @@ public class TileCppTest
             cuDevicePrimaryCtxRelease(device).Ok();
         }
     }
+
+    static string GetTileGymSourceRoot([CallerFilePath] string filePath = "") =>
+        Path.GetFullPath(Path.Combine(Path.GetDirectoryName(filePath)!, "..", "CudaSharp.TileGym"));
 
     static TileCppConfig CreateConfig(int blockSize, int? numCtas = null, int? occupancy = null) =>
         new([new("BLOCK_SIZE", blockSize.ToString())], numCtas, occupancy);
