@@ -37,6 +37,7 @@
   <Project Path="src/CudaSharp.ComparisonBenchmarks/CudaSharp.ComparisonBenchmarks.csproj" />
   <Project Path="src/CudaSharp.Test/CudaSharp.Test.csproj" />
   <Project Path="src/CudaSharp.Tester/CudaSharp.Tester.csproj" />
+  <Project Path="src/CudaSharp.TileGym/CudaSharp.TileGym.csproj" />
   <Project Path="src/CudaSharp.XyzTest/CudaSharp.XyzTest.csproj" />
   <Project Path="src/CudaSharp/CudaSharp.csproj" />
 </Solution>
