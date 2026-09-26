@@ -1748,6 +1748,10 @@ namespace CudaSharp
             [System.Runtime.CompilerServices.FixedBuffer(typeof(byte), 16)]
             public CudaSharp.nvcuda.CUuuid.<bytes>e__FixedBuffer bytes;
         }
+        extension(CudaSharp.nvcuda.CUdevice device)
+        {
+            public int GetArchitecture() { }
+        }
         extension(CudaSharp.nvcuda.CUresult result)
         {
             public void Ok() { }
@@ -1938,7 +1942,6 @@ namespace CudaSharp.Tile
         public byte[] Compile(string source, string sourceName, CudaSharp.Tile.TileCppConfig config, System.Collections.Generic.IReadOnlyList<CudaSharp.Tile.TileCppHeader>? headers = null, System.Collections.Generic.IReadOnlyList<string>? additionalOptions = null) { }
         public CudaSharp.Tile.TileCppCompilation CompileKernel(string source, string sourceName, string nameExpression, CudaSharp.Tile.TileCppConfig config, System.Collections.Generic.IReadOnlyList<CudaSharp.Tile.TileCppHeader>? headers = null, System.Collections.Generic.IReadOnlyList<string>? additionalOptions = null) { }
         public byte[] CompileToTileIr(string source, string sourceName, CudaSharp.Tile.TileCppConfig config, System.Collections.Generic.IReadOnlyList<CudaSharp.Tile.TileCppHeader>? headers = null, System.Collections.Generic.IReadOnlyList<string>? additionalOptions = null) { }
-        public static int GetArchitecture(CudaSharp.nvcuda.CUdevice device) { }
     }
     public sealed class TileCppConfig
     {
