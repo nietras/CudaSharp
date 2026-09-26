@@ -151,6 +151,107 @@ public class TileCppTest
         }
     }
 
+    [TestMethod]
+    public void TileCppTest_CUDA13_3CompilesSoftmaxWithInfinity()
+    {
+        nvrtcVersion(out var major, out var minor).Ok();
+        if (major < 13 || major == 13 && minor < 3)
+            Assert.Inconclusive($"CUDA Tile C++ requires NVRTC 13.3 or later; found {major}.{minor}.");
+
+        var path = Path.Combine(AppContext.BaseDirectory, "src-tilecpp", "tilegym", "softmax.cuh");
+        var header = new TileCppHeader("softmax.cuh", File.ReadAllText(path));
+        const string source = """
+            #include <cmath>
+            #include "softmax.cuh"
+            template __tile_global__ void softmax_kernel<float, 256>(
+                float*, const float*, int, int, int, int, int);
+            """;
+        var compiler = new TileCppCompiler(nvrtcGetSupportedArchs()[^1]);
+        var compilation = compiler.CompileKernel(source, "softmax_infinity.cu",
+            "&softmax_kernel<float, 256>", new TileCppConfig([]),
+            [header, new TileCppHeader("cmath", "#ifndef INFINITY\n#define INFINITY __builtin_bit_cast(float, 0x7f800000u)\n#endif\n")]);
+        Assert.IsNotEmpty(compilation.TileIr);
+    }
+
+    [TestMethod]
+    public unsafe void TileCppTest_CUDA13_3LaunchesTileGymReluWithoutUsedAttribute()
+    {
+        nvrtcVersion(out var major, out var minor).Ok();
+        if (major < 13 || major == 13 && minor < 3)
+            Assert.Inconclusive($"CUDA Tile C++ requires NVRTC 13.3 or later; found {major}.{minor}.");
+
+        CuInit.EnsureInit();
+        cuDeviceGet(out var device, 0).Ok();
+        cuCtxGetCurrent(out var previousContext).Ok();
+        cuDevicePrimaryCtxRetain(out var context, device).Ok();
+        try
+        {
+            cuCtxSetCurrent(context).Ok();
+            var headerPath = Path.Combine(AppContext.BaseDirectory, "src-tilecpp", "tilegym", "activation", "relu.cuh");
+            var header = new TileCppHeader("relu.cuh", File.ReadAllText(headerPath));
+            Assert.IsFalse(header.Source.Contains("__attribute__((used))", StringComparison.Ordinal));
+            const string source = """
+                using int32_t = int;
+                #include "relu.cuh"
+                template __tile_global__ void relu_activation_fwd_kernel<float, 64, 0>(
+                    const float*, float*, int, float, float, float, bool);
+                """;
+            var compiler = new TileCppCompiler(device.GetArchitecture());
+            var compilation = compiler.CompileKernel(source, "relu_without_used.cu",
+                "&relu_activation_fwd_kernel<float, 64, 0>", new TileCppConfig([]), [header]);
+
+            cuModuleLoadData(out var module, compilation.TileIr).Ok();
+            try
+            {
+                // Do not use TileCppKernel's substring-name fallback: verify the exact lowered entry exists.
+                cuModuleGetFunction(out var function, module, compilation.EntryPoint).Ok();
+                const int count = 64;
+                var input = new float[count];
+                for (var i = 0; i < count; i++)
+                    input[i] = i - 32;
+                cuMemAlloc_v2(out var x, count * sizeof(float)).Ok();
+                try
+                {
+                    cuMemAlloc_v2(out var y, count * sizeof(float)).Ok();
+                    try
+                    {
+                        fixed (float* pointer = input)
+                            cuMemcpyHtoD_v2(x, (IntPtr)pointer, count * sizeof(float)).Ok();
+                        var px = x.Value;
+                        var py = y.Value;
+                        var length = count;
+                        float alpha = 0, lower = 0, upper = 0;
+                        byte training = 0;
+                        var args = stackalloc void*[] { &px, &py, &length, &alpha, &lower, &upper, &training };
+                        cuLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, default, args, null).Ok();
+                        var result = new float[count];
+                        fixed (float* pointer = result)
+                            cuMemcpyDtoH_v2((IntPtr)pointer, y, count * sizeof(float)).Ok();
+                        for (var i = 0; i < count; i++)
+                            Assert.AreEqual(Math.Max(input[i], 0), result[i], $"ReLU element {i}");
+                    }
+                    finally
+                    {
+                        cuMemFree_v2(y).Ok();
+                    }
+                }
+                finally
+                {
+                    cuMemFree_v2(x).Ok();
+                }
+            }
+            finally
+            {
+                cuModuleUnload(module).Ok();
+            }
+        }
+        finally
+        {
+            cuCtxSetCurrent(previousContext).Ok();
+            cuDevicePrimaryCtxRelease(device).Ok();
+        }
+    }
+
     static TileCppConfig CreateConfig(int blockSize, int? numCtas = null, int? occupancy = null) =>
         new([new("BLOCK_SIZE", blockSize.ToString())], numCtas, occupancy);
 

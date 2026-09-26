@@ -88,7 +88,7 @@ static class TileGymAttentionScenarios
     {
         const string name = "attention_sink_fwd_kernel";
         using var kernel = TileGymKernel.Create(
-            runtime, "attention_sink.cuh", name, "float, 64, 64, 64, false",
+            runtime.Compiler, "attention_sink.cuh", name, "float, 64, 64, 64, false",
             "float*, float*, float*, float*, float, float*, float*, int, int, int, int, int, int");
         using var q = runtime.Allocate<float>(Sequence * Dimension);
         using var k = runtime.Allocate<float>(q.Length);
@@ -142,7 +142,7 @@ static class TileGymAttentionScenarios
             : gemma
                 ? "const float*, const float*, const float*, float*, float*, float, float"
                 : "const float*, const float*, const float*, float*, float*, float";
-        using var kernel = TileGymKernel.Create(runtime, header, name, templates, signature);
+        using var kernel = TileGymKernel.Create(runtime.Compiler, header, name, templates, signature);
         using var q = runtime.Allocate<float>(Dimension);
         using var k = runtime.Allocate<float>(Sequence * Dimension);
         using var v = runtime.Allocate<float>(k.Length);
@@ -266,11 +266,11 @@ static class TileGymAttentionScenarios
             Sequence, Dimension, true, runtime.Architecture);
         var candidates = TileGymAttentionCandidates.For(problem);
         using var forward = TileGymKernel.Create(
-            runtime, "attention.cuh", "prefill_fmha_fwd_kernel",
+            runtime.Compiler, "attention.cuh", "prefill_fmha_fwd_kernel",
             "float, 1, 1, 1, 64, 64, 64, 64, 64, true, true, 2, 1",
             "const float*, const float*, const float*, float*, float*, float");
         using var preprocess = TileGymKernel.Create(
-            runtime, "attention.cuh", "fmha_bwd_preprocess_kernel",
+            runtime.Compiler, "attention.cuh", "fmha_bwd_preprocess_kernel",
             "float, 1, 1, 64, 64, 64, 2",
             "const float*, const float*, const float*, float*, float*, float");
         using var q = runtime.Allocate<float>(Sequence * Dimension);

@@ -45,7 +45,7 @@ static class TileGymNormalizationScenarios
             ? "const float*, float*, const float*, const float*, float*, float*"
             : "float*, float*, const float*, const float*, float*, float*, float, float";
         var header = persistent ? "persistent_layer_norm.cuh" : "layer_norm_legacy.cuh";
-        TileCppKernel? kernel = persistent ? null : TileGymKernel.Create(runtime, header, name, templates, signature);
+        TileCppKernel? kernel = persistent ? null : TileGymKernel.Create(runtime.Compiler, header, name, templates, signature);
         cuDeviceGetAttribute(out var smCount,
             CUdevice_attribute.CU_DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT, runtime.Device).Ok();
         var problem = new TileGymPersistentLayerNormProblem(rows, columns, smCount);
@@ -139,7 +139,7 @@ static class TileGymNormalizationScenarios
     {
         const int rows = 8;
         const int columns = 256;
-        using var kernel = TileGymKernel.Create(runtime, "rms_norm.cuh", name, templates, signature);
+        using var kernel = TileGymKernel.Create(runtime.Compiler, "rms_norm.cuh", name, templates, signature);
         using var x = runtime.Allocate<float>(rows * columns);
         using var y = runtime.Allocate<float>(x.Length);
         using var w = runtime.Allocate<float>(columns);
@@ -178,7 +178,7 @@ static class TileGymNormalizationScenarios
         const int columns = 256;
         const string name = "rms_norm_kernel_pv";
         using var kernel = TileGymKernel.Create(
-            runtime,
+            runtime.Compiler,
             "rms_norm.cuh",
             name,
             "float, float, 8, 256, 256",
@@ -276,7 +276,7 @@ static class TileGymNormalizationScenarios
         const int columns = 256;
         const string name = "rms_norm_backward_dx_kernel";
         using var kernel = TileGymKernel.Create(
-            runtime,
+            runtime.Compiler,
             "rms_norm.cuh",
             name,
             "float, float, 256",

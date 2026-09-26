@@ -80,7 +80,7 @@ static class TileGymRecurrentScenarios
         const string name = "recurrent_gated_delta_rule_fwd_kernel";
 
         using var kernel = TileGymKernel.Create(
-            runtime, "recurrent_gated_delta_rule.cuh", name,
+            runtime.Compiler, "recurrent_gated_delta_rule.cuh", name,
             $"float, float, float, {kd}, {vd}, false, true, false",
             "const float*, const float*, const float*, const float*, const float*, float*, " +
             "const float*, float*, float, int, int, int, int, int");
@@ -161,12 +161,12 @@ static class TileGymRecurrentScenarios
         const float scale = .25f;
 
         using var intra = TileGymKernel.Create(
-            runtime, "chunk_gated_delta_rule.cuh", "chunk_gated_delta_rule_intra_kernel",
+            runtime.Compiler, "chunk_gated_delta_rule.cuh", "chunk_gated_delta_rule_intra_kernel",
             $"float, float, float, {chunk}, {kd}, false, 1",
             "const float*, const float*, const float*, const float*, const float*, float*, " +
             "float*, float*, float*, float*, float, int, int, int, int, int, int");
         using var inter = TileGymKernel.Create(
-            runtime, "chunk_gated_delta_rule.cuh", "chunk_gated_delta_rule_inter_kernel",
+            runtime.Compiler, "chunk_gated_delta_rule.cuh", "chunk_gated_delta_rule_inter_kernel",
             $"float, {chunk}, {kd}, {vd}, false, true, 1",
             "const float*, const float*, const float*, const float*, const float*, float*, " +
             "const float*, float*, int, int, int, int, int");

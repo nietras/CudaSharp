@@ -4,6 +4,19 @@ namespace CudaSharp;
 
 public static partial class nvcuda
 {
+    extension(CUdevice device)
+    {
+        /// <summary>Gets the device's SM architecture encoded as major times ten plus minor.</summary>
+        public int GetArchitecture()
+        {
+            cuDeviceGetAttribute(out var major,
+                CUdevice_attribute.CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, device).Ok();
+            cuDeviceGetAttribute(out var minor,
+                CUdevice_attribute.CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, device).Ok();
+            return checked(major * 10 + minor);
+        }
+    }
+
     extension(CUresult result)
     {
         public void Ok()

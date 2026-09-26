@@ -22,7 +22,7 @@ static class TileGymMlaScenarios
         const float scale = .1f;
         const string name = "prefill_mla_kernel";
 
-        using var kernel = TileGymKernel.Create(runtime, "mla.cuh", name, $"float, 1, 1, 1, {s}, {s}, {d}, {kd}, 64, 64, 0, true", "const float*, const float*, const float*, const float*, const float*, float*, float");
+        using var kernel = TileGymKernel.Create(runtime.Compiler, "mla.cuh", name, $"float, 1, 1, 1, {s}, {s}, {d}, {kd}, 64, 64, 0, true", "const float*, const float*, const float*, const float*, const float*, float*, float");
         using var q = runtime.Allocate<float>(s * d);
         using var qpe = runtime.Allocate<float>(s * kd);
         using var k = runtime.Allocate<float>(s * d);
@@ -70,7 +70,7 @@ static class TileGymMlaScenarios
         var name = transpose ? "naive_absorb_mla_transpose" : "naive_absorb_mla";
 
         using var kernel = TileGymKernel.Create(
-            runtime, "mla_decoding.cuh", name, $"float, {d}, 1, 64, {kd}",
+            runtime.Compiler, "mla_decoding.cuh", name, $"float, {d}, 1, 64, {kd}",
             "float*, float*, float*, float*, float*, float*, float, long long, int, long long, int, " +
             "long long, int, long long, int, long long, int, int, int, int");
         using var q = runtime.Allocate<float>(heads * d);
@@ -135,7 +135,7 @@ static class TileGymMlaScenarios
         const string name = "naive_absorb_mla_transpose";
 
         using var kernel = TileGymKernel.Create(
-            runtime, "mla_decoding_split_kv.cuh", name,
+            runtime.Compiler, "mla_decoding_split_kv.cuh", name,
             $"float, 1, 1, {s}, {d}, 16, 128, {kd}, 1, 128, true",
             "const float*, const float*, const float*, const float*, const float*, float*, float*, float");
         using var q = runtime.Allocate<float>(d);
@@ -187,7 +187,7 @@ static class TileGymMlaScenarios
         const string name = "splitk_reduce_kernel";
 
         using var kernel = TileGymKernel.Create(
-            runtime, "splitk_reduce.cuh", name,
+            runtime.Compiler, "splitk_reduce.cuh", name,
             $"float, 1, 1, {d}, {splits}, {splits}, {d}, false",
             "const float*, const float*, float*");
         using var input = runtime.Allocate<float>(splits * d);

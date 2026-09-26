@@ -222,7 +222,7 @@ static class TileGymActivationScenarios
     {
         var name = backward ? "silu_and_mul_backward_kernel" : "silu_and_mul_kernel";
         var signature = backward ? "const float*, const float*, float*, int, int" : "const float*, float*, int, int";
-        using var kernel = TileGymKernel.Create(runtime, "silu_and_mul.cuh", name, $"float, {hidden}", signature);
+        using var kernel = TileGymKernel.Create(runtime.Compiler, "silu_and_mul.cuh", name, $"float, {hidden}", signature);
         using var input = runtime.Allocate<float>(rows * hidden * 2);
         using var output = runtime.Allocate<float>(backward ? input.Length : rows * hidden);
         using var grad = backward ? runtime.Allocate<float>(rows * hidden) : null;
@@ -263,7 +263,7 @@ static class TileGymActivationScenarios
     static unsafe void RunSiluAndMulRowWise(TileGymRuntime runtime, TileGymReport report, int rows, int hidden)
     {
         var n = hidden * 2;
-        using var kernel = TileGymKernel.Create(runtime, "silu_and_mul.cuh", "silu_and_mul_kernel_row_wise",
+        using var kernel = TileGymKernel.Create(runtime.Compiler, "silu_and_mul.cuh", "silu_and_mul_kernel_row_wise",
             $"float, {n}, {hidden}, {hidden}, {n}, {hidden}", "float*, float*");
         using var input = runtime.Allocate<float>(rows * n);
         using var output = runtime.Allocate<float>(rows * hidden);
@@ -293,7 +293,7 @@ static class TileGymActivationScenarios
         var name = backward ? "swiglu_backward_kernel" : "swiglu_forward_kernel_gather";
         var signature = backward ? "const float*, const float*, const float*, float*, float*, int, int" :
             "const float*, const float*, float*, int, int";
-        using var kernel = TileGymKernel.Create(runtime, "swiglu.cuh", name, $"float, {columns}", signature);
+        using var kernel = TileGymKernel.Create(runtime.Compiler, "swiglu.cuh", name, $"float, {columns}", signature);
         using var a = runtime.Allocate<float>(rows * columns);
         using var b = runtime.Allocate<float>(rows * columns);
         using var c = runtime.Allocate<float>(rows * columns);
@@ -359,7 +359,7 @@ static class TileGymActivationScenarios
 
     static unsafe void RunSwigluPersistent(TileGymRuntime runtime, TileGymReport report, int rows, int columns)
     {
-        using var kernel = TileGymKernel.Create(runtime, "swiglu.cuh", "swiglu_forward_kernel_pv",
+        using var kernel = TileGymKernel.Create(runtime.Compiler, "swiglu.cuh", "swiglu_forward_kernel_pv",
             $"float, {rows}, {columns}, {columns}, 4", "float*, float*, float*");
         using var a = runtime.Allocate<float>(rows * columns);
         using var b = runtime.Allocate<float>(rows * columns);

@@ -30,28 +30,28 @@ static class TileGymMoeScenarios
         top.CopyFrom(ids);
         sorted.CopyFrom([8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8]);
         using var s1 = TileGymKernel.Create(
-            runtime,
+            runtime.Compiler,
             "moe_align_block.cuh",
             "moe_align_block_size_stage1",
             "int, 1, 4",
             "const int*, int*, int, int"
         );
         using var s2 = TileGymKernel.Create(
-            runtime,
+            runtime.Compiler,
             "moe_align_block.cuh",
             "moe_align_block_size_stage2",
             "int, 4, 4",
             "int*"
         );
         using var s3 = TileGymKernel.Create(
-            runtime,
+            runtime.Compiler,
             "moe_align_block.cuh",
             "moe_align_block_size_stage3",
             "int, 4, 4",
             "int*, int*, const int*, int*"
         );
         using var s4 = TileGymKernel.Create(
-            runtime,
+            runtime.Compiler,
             "moe_align_block.cuh",
             "moe_align_block_size_stage4",
             "int, 4, 4",
@@ -175,7 +175,7 @@ static class TileGymMoeScenarios
         const string name = "fused_moe_kernel";
         var templates = "float, float, 16, 16, 16, 1, false, false, 16, 16, 16, 16, 1, 16, 1, 256, 16, 1, 16, 1, 0, 0, 0, 0, 0, 16";
         using var kernel = TileGymKernel.Create(
-            runtime,
+            runtime.Compiler,
             "moe.cuh",
             name,
             templates,
@@ -246,7 +246,7 @@ static class TileGymMoeScenarios
         var name = fc1 ? "fused_moe_fc1_layer_kernel" : "fused_moe_fc2_layer_kernel";
         var signature = fc1 ? Fc1Signature : Fc2Signature;
         using var kernel = TileGymKernel.Create(
-            runtime,
+            runtime.Compiler,
             "moe.cuh",
             name,
             "float, __nv_fp8_e4m3, 16, 16, 16, 1, false",

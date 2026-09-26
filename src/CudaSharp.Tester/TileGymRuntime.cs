@@ -15,7 +15,8 @@ sealed class TileGymRuntime : IDisposable
         CuInit.EnsureInit();
         cuDeviceGet(out var device, deviceOrdinal).Ok();
         Device = device;
-        Architecture = TileCppCompiler.GetArchitecture(device);
+        Architecture = device.GetArchitecture();
+        Compiler = new TileCppCompiler(Architecture);
         cuDevicePrimaryCtxRetain(out var context, device).Ok();
         Context = context;
         try
@@ -35,6 +36,7 @@ sealed class TileGymRuntime : IDisposable
     public CUcontext Context { get; }
     public CUstream Stream { get; }
     public int Architecture { get; }
+    public TileCppCompiler Compiler { get; }
     public bool EnableAutotuning { get; set; } = true;
 
     public CudaBuffer<T> Allocate<T>(int length) where T : unmanaged => new(length);

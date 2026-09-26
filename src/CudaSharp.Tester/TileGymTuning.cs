@@ -33,7 +33,7 @@ static class TileGymTuning
         var key = (typeof(TProblem), problem, header, kernelName, signature, searchSpace);
         var session = runtime.GetOrCreateTuningSession(key, () =>
             new TileGymTuningSession<TProblem>(selectedCandidates,
-                (p, candidate) => TileGymKernel.Create(runtime, header, kernelName,
+                (p, candidate) => TileGymKernel.Create(runtime.Compiler, header, kernelName,
                     templateArguments(p, candidate), signature), grid));
         return session.Tune(problem, runtime.Stream, launch, timingOptions, log, validate, prepare);
     }

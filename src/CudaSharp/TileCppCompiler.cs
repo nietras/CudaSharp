@@ -67,19 +67,6 @@ public sealed class TileCppCompiler
     /// <summary>Gets the target SM architecture encoded as major times ten plus minor.</summary>
     public int Architecture { get; }
 
-    /// <summary>Queries a CUDA device's target architecture.</summary>
-    /// <param name="device">CUDA device handle.</param>
-    /// <returns>The SM architecture encoded as major times ten plus minor.</returns>
-    /// <seealso href="https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__DEVICE.html" />
-    public static int GetArchitecture(CUdevice device)
-    {
-        cuDeviceGetAttribute(out var major,
-            CUdevice_attribute.CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, device).Ok();
-        cuDeviceGetAttribute(out var minor,
-            CUdevice_attribute.CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, device).Ok();
-        return checked(major * 10 + minor);
-    }
-
     /// <summary>Compiles CUDA Tile C++ source to TileIR using NVRTC 13.3 or later.</summary>
     /// <param name="source">CUDA Tile C++ source.</param>
     /// <param name="sourceName">Diagnostic source name.</param>

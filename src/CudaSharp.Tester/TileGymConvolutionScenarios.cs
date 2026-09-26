@@ -210,7 +210,7 @@ static class TileGymConvolutionScenarios
             : $"const {type}*, const {type}*, {type}*";
         var dimensions = problem.TemplateArguments(128);
         dimensions = dimensions[..dimensions.LastIndexOf(", ", StringComparison.Ordinal)];
-        using var kernel = TileGymKernel.Create(runtime, problem.Header, name, $"{type}, {dimensions}", signature);
+        using var kernel = TileGymKernel.Create(runtime.Compiler, problem.Header, name, $"{type}, {dimensions}", signature);
         using var input = runtime.Allocate<ushort>(problem.InputLength);
         using var weights = runtime.Allocate<ushort>(problem.WeightLength);
         using var bias = runtime.Allocate<ushort>(problem.Co);
@@ -269,7 +269,7 @@ static class TileGymConvolutionScenarios
         var signature = hasBias
             ? "const float*, const float*, const float*, const float*, float*"
             : "const float*, const float*, float*";
-        using var kernel = TileGymKernel.Create(runtime, problem.Header, problem.Kernel,
+        using var kernel = TileGymKernel.Create(runtime.Compiler, problem.Header, problem.Kernel,
             problem.TemplateArguments(block), signature);
         using var input = runtime.Allocate<float>(problem.InputLength);
         using var weights = runtime.Allocate<float>(problem.WeightLength);

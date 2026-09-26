@@ -8,9 +8,10 @@ namespace CudaSharp.Tester;
 
 static class TileGymKernel
 {
-    public static TileCppKernel Create(TileGymRuntime runtime, string relativeHeader, string kernelName,
+    public static TileCppKernel Create(TileCppCompiler compiler, string relativeHeader, string kernelName,
         string templateArguments, string signature)
     {
+        ArgumentNullException.ThrowIfNull(compiler);
         var headerPath = Path.Combine(AppContext.BaseDirectory, "src-tilecpp", "tilegym", relativeHeader);
         var headerSource = File.ReadAllText(headerPath);
         var headerName = Path.GetFileName(relativeHeader);
@@ -41,7 +42,6 @@ static class TileGymKernel
             headers.Add(new TileCppHeader("convolution_common.cuh",
                 File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "src-tilecpp", "tilegym", "convolution_common.cuh"))));
         }
-        var compiler = new TileCppCompiler(runtime.Architecture);
         return new TileCppKernel(compiler,
             source, $"{kernelName}.cu", kernelName, headers,
             nameExpression: $"&{kernelName}<{templateArguments}>");

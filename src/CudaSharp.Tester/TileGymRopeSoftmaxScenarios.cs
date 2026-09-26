@@ -28,7 +28,7 @@ static class TileGymRopeSoftmaxScenarios
         const int half = 32;
         var name = backward ? "rope_backward_kernel" : "rope_kernel";
         var templates = $"float, float, float, {batch}, {qHeads}, {kHeads}, {qHeads}, {kHeads}, {half}, {half}, {head}, 1, {sequence}";
-        using var kernel = TileGymKernel.Create(runtime, "rope.cuh", name, templates, "float*, float*, const float*, const float*");
+        using var kernel = TileGymKernel.Create(runtime.Compiler, "rope.cuh", name, templates, "float*, float*, const float*, const float*");
         using var q = runtime.Allocate<float>(batch * qHeads * sequence * head);
         using var k = runtime.Allocate<float>(batch * kHeads * sequence * head);
         using var cos = runtime.Allocate<float>(sequence * 2 * half);
