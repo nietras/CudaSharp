@@ -12,14 +12,14 @@ static class TileGymKernel
         string templateArguments, string signature)
     {
         var headerPath = Path.Combine(AppContext.BaseDirectory, "src-tilecpp", "tilegym", relativeHeader);
-        var headerSource = File.ReadAllText(headerPath)
-            .Replace("INFINITY", "3.402823466e+38F", StringComparison.Ordinal);
+        var headerSource = File.ReadAllText(headerPath);
         var headerName = Path.GetFileName(relativeHeader);
         var source = $$"""
             using int32_t = int;
             using uint32_t = unsigned int;
             using int64_t = long long;
             using uint64_t = unsigned long long;
+            #include <cmath>
             #include "{{headerName}}"
             template __tile_global__ void {{kernelName}}<{{templateArguments}}>({{signature}});
             """;
@@ -34,7 +34,7 @@ static class TileGymKernel
         {
             new(headerName, headerSource),
             new("type_traits", typeTraits),
-            new("cmath", string.Empty)
+            new("cmath", "#ifndef INFINITY\n#define INFINITY __builtin_bit_cast(float, 0x7f800000u)\n#endif\n")
         };
         if (relativeHeader.StartsWith("conv", StringComparison.Ordinal))
         {
