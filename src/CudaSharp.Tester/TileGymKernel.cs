@@ -13,10 +13,6 @@ static class TileGymKernel
     {
         var headerPath = Path.Combine(AppContext.BaseDirectory, "src-tilecpp", "tilegym", relativeHeader);
         var headerSource = File.ReadAllText(headerPath)
-            .Replace(
-                $"__tile_global__ void {kernelName}",
-                $"__attribute__((used)) __tile_global__ void {kernelName}",
-                StringComparison.Ordinal)
             .Replace("INFINITY", "3.402823466e+38F", StringComparison.Ordinal);
         var headerName = Path.GetFileName(relativeHeader);
         var source = $$"""
