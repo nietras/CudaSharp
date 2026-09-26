@@ -60,9 +60,9 @@ public class TileCppTest
             var compiler = new TileCppCompiler(nvrtcGetSupportedArchs()[^1]);
             foreach (var item in cases)
             {
-                var header = new TileCppHeader(item.Item1, File.ReadAllText(Path.Combine(root, item.Item1)).Replace("INFINITY", "3.402823466e+38F", StringComparison.Ordinal));
-                var source = $"using int32_t = int; using uint32_t = unsigned int;\nnamespace std {{ template<class A,class B> struct is_same {{ static constexpr bool value=false; }}; template<class A> struct is_same<A,A> {{ static constexpr bool value=true; }}; template<class A,class B> inline constexpr bool is_same_v=is_same<A,B>::value; template<bool B,class T,class F> struct conditional {{ using type=T; }}; template<class T,class F> struct conditional<false,T,F> {{ using type=F; }}; template<bool B,class T,class F> using conditional_t=typename conditional<B,T,F>::type; }}\n#include \"{item.Item1}\"\ntemplate __tile_global__ void {item.Item2}<{item.Item3}>({item.Item4});";
-                var compilation = compiler.CompileKernel(source, $"{item.Item2}.cu", $"&{item.Item2}<{item.Item3}>", new TileCppConfig([]), [header, new TileCppHeader("type_traits", string.Empty)]);
+                var header = new TileCppHeader(item.Item1, File.ReadAllText(Path.Combine(root, item.Item1)));
+                var source = $"using int32_t = int; using uint32_t = unsigned int;\nnamespace std {{ template<class A,class B> struct is_same {{ static constexpr bool value=false; }}; template<class A> struct is_same<A,A> {{ static constexpr bool value=true; }}; template<class A,class B> inline constexpr bool is_same_v=is_same<A,B>::value; template<bool B,class T,class F> struct conditional {{ using type=T; }}; template<class T,class F> struct conditional<false,T,F> {{ using type=F; }}; template<bool B,class T,class F> using conditional_t=typename conditional<B,T,F>::type; }}\n#include <cmath>\n#include \"{item.Item1}\"\ntemplate __tile_global__ void {item.Item2}<{item.Item3}>({item.Item4});";
+                var compilation = compiler.CompileKernel(source, $"{item.Item2}.cu", $"&{item.Item2}<{item.Item3}>", new TileCppConfig([]), [header, new TileCppHeader("type_traits", string.Empty), new TileCppHeader("cmath", "#ifndef INFINITY\n#define INFINITY __builtin_bit_cast(float, 0x7f800000u)\n#endif\n")]);
                 Assert.IsNotEmpty(compilation.TileIr, item.Item2);
             }
         }
