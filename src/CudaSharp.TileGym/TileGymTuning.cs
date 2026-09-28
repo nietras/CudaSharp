@@ -30,6 +30,7 @@ static class TileGymTuning
         var searchSpace = string.Join(";", selectedCandidates.Select(static candidate =>
             $"{candidate}|{candidate.CompilerConfig}"));
         var key = (typeof(TProblem), problem, header, kernelName, signature, searchSpace);
+        runtime.Compiler.PrepareBundledHeaders();
         var session = runtime.GetOrCreateTuningSession(key, () =>
             new TileGymTuningSession<TProblem>(selectedCandidates,
                 (p, candidate) => TileGymKernel.Create(runtime.Compiler, header, kernelName,

@@ -1,13 +1,13 @@
-﻿using System.Collections.Generic;
+﻿using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Linq;
-using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Threading;
 using static CudaSharp.nvcuda;
 
 namespace CudaSharp.TileGym;
 
-/// <summary>Compiles, caches, loads, and launches variants of a CUDA Tile C++ kernel.</summary>
+/// <summary>Compiles and loads variants of a CUDA Tile C++ kernel.</summary>
 /// <remarks>
 /// Loaded modules are cached per CUDA context. Dispose this object before destroying any context in which a variant
 /// was loaded. CUDA Tile kernels are launched with one thread per tile block as required by NVIDIA.
@@ -15,7 +15,7 @@ namespace CudaSharp.TileGym;
 /// <seealso href="https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#launching-kernels" />
 public sealed class TileCppKernel : IDisposable
 {
-    readonly Dictionary<string, TileCppCompilation> _compilations = new(StringComparer.Ordinal);
+    readonly ConcurrentDictionary<string, Lazy<TileCppCompilation>> _compilations = new(StringComparer.Ordinal);
     readonly Dictionary<LoadedKey, LoadedKernel> _loadedKernels = [];
     readonly Lock _lock = new();
     readonly TileCppCompiler _compiler;
@@ -25,7 +25,7 @@ public sealed class TileCppKernel : IDisposable
     readonly string? _nameExpression;
     readonly IReadOnlyList<TileCppHeader>? _headers;
     readonly IReadOnlyList<string>? _additionalOptions;
-    bool _disposed;
+    volatile bool _disposed;
 
     /// <summary>Creates a reusable CUDA Tile C++ kernel definition.</summary>
     /// <param name="compiler">CUDA Tile C++ compiler.</param>
@@ -53,17 +53,35 @@ public sealed class TileCppKernel : IDisposable
         _additionalOptions = additionalOptions;
     }
 
+    /// <summary>Compiles a configuration to TileIR without requiring a CUDA context or loading a module.</summary>
+    public void Compile(TileCppConfig config)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        GetOrCompile(config, GetConfigKey(config));
+        ObjectDisposedException.ThrowIf(_disposed, this);
+    }
+
+    /// <summary>Loads a previously compiled configuration in the current CUDA context.</summary>
+    public CUfunction LoadFunction(TileCppConfig config)
+        => GetFunctionCore(config, compileIfNeeded: false);
+
     /// <summary>Gets the loaded CUDA function for a configuration in the current CUDA context.</summary>
     /// <param name="config">Compile-time kernel configuration.</param>
     /// <returns>A CUDA function handle for the current context.</returns>
     /// <seealso href="https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__MODULE.html" />
     public CUfunction GetFunction(TileCppConfig config)
+        => GetFunctionCore(config, compileIfNeeded: true);
+
+    CUfunction GetFunctionCore(TileCppConfig config, bool compileIfNeeded)
     {
         ArgumentNullException.ThrowIfNull(config);
         ObjectDisposedException.ThrowIf(_disposed, this);
         cuCtxGetCurrent(out var context).Ok();
         if (context.Value == IntPtr.Zero)
+        {
             throw new InvalidOperationException("A CUDA context must be current before loading a CUDA Tile C++ kernel.");
+        }
 
         var configKey = GetConfigKey(config);
         var loadedKey = new LoadedKey(configKey, context);
@@ -71,18 +89,22 @@ public sealed class TileCppKernel : IDisposable
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
             if (_loadedKernels.TryGetValue(loadedKey, out var loaded))
-                return loaded.Function;
-
-            if (!_compilations.TryGetValue(configKey, out var compilation))
             {
-                compilation = _nameExpression is null
-                    ? new TileCppCompilation(
-                        _compiler.Compile(_source, _sourceName, config, _headers, _additionalOptions), _kernelName)
-                    : _compiler.CompileKernel(
-                        _source, _sourceName, _nameExpression, config, _headers, _additionalOptions);
-                if (compilation.TileIr.Length == 0)
-                    throw new InvalidOperationException("NVRTC returned empty CUDA TileIR.");
-                _compilations.Add(configKey, compilation);
+                return loaded.Function;
+            }
+
+            TileCppCompilation compilation;
+            if (compileIfNeeded)
+            {
+                compilation = GetOrCompile(config, configKey);
+            }
+            else
+            {
+                if (!_compilations.TryGetValue(configKey, out var completed) || !completed.IsValueCreated)
+                {
+                    throw new InvalidOperationException("Compile the configuration before loading its CUDA function.");
+                }
+                compilation = completed.Value;
             }
 
             cuModuleLoadData(out var module, compilation.TileIr).Ok();
@@ -90,9 +112,13 @@ public sealed class TileCppKernel : IDisposable
             {
                 var lookup = cuModuleGetFunction(out var function, module, compilation.EntryPoint);
                 if (lookup == CUresult.CUDA_ERROR_NOT_FOUND)
+                {
                     function = FindFunction(module, _kernelName);
+                }
                 else
+                {
                     lookup.Ok();
+                }
                 _loadedKernels.Add(loadedKey, new LoadedKernel(module, function));
                 return function;
             }
@@ -101,6 +127,33 @@ public sealed class TileCppKernel : IDisposable
                 cuModuleUnload(module).Ok();
                 throw;
             }
+        }
+    }
+
+    TileCppCompilation GetOrCompile(TileCppConfig config, string configKey)
+    {
+        var lazy = _compilations.GetOrAdd(configKey, _ => new Lazy<TileCppCompilation>(() =>
+        {
+            var compilation = _nameExpression is null
+                ? new TileCppCompilation(
+                    _compiler.Compile(_source, _sourceName, config, _headers, _additionalOptions), _kernelName)
+                : _compiler.CompileKernel(
+                    _source, _sourceName, _nameExpression, config, _headers, _additionalOptions);
+            if (compilation.TileIr.Length == 0)
+            {
+                throw new InvalidOperationException("NVRTC returned empty CUDA TileIR.");
+            }
+            return compilation;
+        }, LazyThreadSafetyMode.ExecutionAndPublication));
+        try
+        {
+            return lazy.Value;
+        }
+        catch
+        {
+            ((ICollection<KeyValuePair<string, Lazy<TileCppCompilation>>>)_compilations)
+                .Remove(new(configKey, lazy));
+            throw;
         }
     }
 
@@ -115,138 +168,16 @@ public sealed class TileCppKernel : IDisposable
             cuFuncGetName(out var namePointer, function).Ok();
             var name = Marshal.PtrToStringUTF8(namePointer);
             if (name is not null)
+            {
                 names.Add(name);
+            }
             if (name?.Contains(expectedName, StringComparison.Ordinal) is true)
+            {
                 return function;
+            }
         }
         throw new InvalidOperationException(
             $"CUDA Tile C++ kernel '{expectedName}' was not found in the driver-loaded TileIR module. Functions: {string.Join(", ", names)}");
-    }
-
-    /// <summary>Launches a CUDA Tile C++ kernel using pointers to argument storage.</summary>
-    /// <param name="config">Compile-time kernel configuration.</param>
-    /// <param name="grid">Tile-block grid dimensions.</param>
-    /// <param name="stream">CUDA stream on which to enqueue the launch.</param>
-    /// <param name="argumentPointers">Pointers to storage for each kernel argument.</param>
-    /// <seealso href="https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#launching-kernels" />
-    [SkipLocalsInit]
-    public unsafe void Launch(TileCppConfig config, TileCppGrid grid, CUstream stream,
-        ReadOnlySpan<IntPtr> argumentPointers)
-    {
-        var function = GetFunction(config);
-        fixed (IntPtr* parameters = argumentPointers)
-        {
-            cuLaunchKernel(function,
-                grid.X, grid.Y, grid.Z,
-                1, 1, 1,
-                0, stream,
-                (void**)parameters, null).Ok();
-        }
-    }
-
-    /// <summary>Launches a CUDA Tile C++ kernel with one unmanaged argument.</summary>
-    /// <seealso href="https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#launching-kernels" />
-    [SkipLocalsInit]
-    public void Launch<T1>(TileCppConfig config, TileCppGrid grid, CUstream stream, T1 arg1)
-        where T1 : unmanaged
-    {
-        var function = GetFunction(config);
-        cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, stream, arg1).Ok();
-    }
-
-    /// <summary>Launches a CUDA Tile C++ kernel with two unmanaged arguments.</summary>
-    /// <seealso href="https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#launching-kernels" />
-    public void Launch<T1, T2>(TileCppConfig config, TileCppGrid grid, CUstream stream, T1 arg1, T2 arg2)
-        where T1 : unmanaged
-        where T2 : unmanaged
-    {
-        var function = GetFunction(config);
-        cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, stream, arg1, arg2).Ok();
-    }
-
-    /// <summary>Launches a CUDA Tile C++ kernel with three unmanaged arguments.</summary>
-    /// <seealso href="https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#launching-kernels" />
-    public void Launch<T1, T2, T3>(TileCppConfig config, TileCppGrid grid, CUstream stream,
-        T1 arg1, T2 arg2, T3 arg3)
-        where T1 : unmanaged
-        where T2 : unmanaged
-        where T3 : unmanaged
-    {
-        var function = GetFunction(config);
-        cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, stream, arg1, arg2, arg3).Ok();
-    }
-
-    /// <summary>Launches a CUDA Tile C++ kernel with four unmanaged arguments.</summary>
-    /// <seealso href="https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#launching-kernels" />
-    public void Launch<T1, T2, T3, T4>(TileCppConfig config, TileCppGrid grid, CUstream stream,
-        T1 arg1, T2 arg2, T3 arg3, T4 arg4)
-        where T1 : unmanaged
-        where T2 : unmanaged
-        where T3 : unmanaged
-        where T4 : unmanaged
-    {
-        var function = GetFunction(config);
-        cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, stream, arg1, arg2, arg3, arg4).Ok();
-    }
-
-    /// <summary>Launches a CUDA Tile C++ kernel with five unmanaged arguments.</summary>
-    public void Launch<T1, T2, T3, T4, T5>(TileCppConfig config, TileCppGrid grid, CUstream stream,
-        T1 arg1, T2 arg2, T3 arg3, T4 arg4, T5 arg5)
-        where T1 : unmanaged
-        where T2 : unmanaged
-        where T3 : unmanaged
-        where T4 : unmanaged
-        where T5 : unmanaged
-    {
-        var function = GetFunction(config);
-        cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, stream, arg1, arg2, arg3, arg4, arg5).Ok();
-    }
-
-    /// <summary>Launches a CUDA Tile C++ kernel with six unmanaged arguments.</summary>
-    public void Launch<T1, T2, T3, T4, T5, T6>(TileCppConfig config, TileCppGrid grid, CUstream stream,
-        T1 arg1, T2 arg2, T3 arg3, T4 arg4, T5 arg5, T6 arg6)
-        where T1 : unmanaged
-        where T2 : unmanaged
-        where T3 : unmanaged
-        where T4 : unmanaged
-        where T5 : unmanaged
-        where T6 : unmanaged
-    {
-        var function = GetFunction(config);
-        cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, stream, arg1, arg2, arg3, arg4, arg5, arg6).Ok();
-    }
-
-    /// <summary>Launches a CUDA Tile C++ kernel with seven unmanaged arguments.</summary>
-    public void Launch<T1, T2, T3, T4, T5, T6, T7>(TileCppConfig config, TileCppGrid grid, CUstream stream,
-        T1 arg1, T2 arg2, T3 arg3, T4 arg4, T5 arg5, T6 arg6, T7 arg7)
-        where T1 : unmanaged
-        where T2 : unmanaged
-        where T3 : unmanaged
-        where T4 : unmanaged
-        where T5 : unmanaged
-        where T6 : unmanaged
-        where T7 : unmanaged
-    {
-        var function = GetFunction(config);
-        cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, stream,
-            arg1, arg2, arg3, arg4, arg5, arg6, arg7).Ok();
-    }
-
-    /// <summary>Launches a CUDA Tile C++ kernel with eight unmanaged arguments.</summary>
-    public void Launch<T1, T2, T3, T4, T5, T6, T7, T8>(TileCppConfig config, TileCppGrid grid, CUstream stream,
-        T1 arg1, T2 arg2, T3 arg3, T4 arg4, T5 arg5, T6 arg6, T7 arg7, T8 arg8)
-        where T1 : unmanaged
-        where T2 : unmanaged
-        where T3 : unmanaged
-        where T4 : unmanaged
-        where T5 : unmanaged
-        where T6 : unmanaged
-        where T7 : unmanaged
-        where T8 : unmanaged
-    {
-        var function = GetFunction(config);
-        cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, stream,
-            arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8).Ok();
     }
 
     /// <summary>Unloads all context-specific CUDA modules owned by this kernel.</summary>
@@ -256,13 +187,17 @@ public sealed class TileCppKernel : IDisposable
         lock (_lock)
         {
             if (_disposed)
+            {
                 return;
+            }
 
             foreach (var entry in _loadedKernels)
             {
                 cuCtxGetCurrent(out var previousContext).Ok();
                 if (previousContext != entry.Key.Context)
+                {
                     cuCtxSetCurrent(entry.Key.Context).Ok();
+                }
                 try
                 {
                     cuModuleUnload(entry.Value.Module).Ok();
@@ -270,7 +205,9 @@ public sealed class TileCppKernel : IDisposable
                 finally
                 {
                     if (previousContext != entry.Key.Context)
+                    {
                         cuCtxSetCurrent(previousContext).Ok();
+                    }
                 }
             }
 

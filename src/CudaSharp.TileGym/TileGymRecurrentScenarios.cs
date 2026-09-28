@@ -1,4 +1,5 @@
 ﻿using CudaSharp.TileGym;
+using static CudaSharp.nvcuda;
 
 namespace CudaSharp.Tester;
 
@@ -30,7 +31,9 @@ static class TileGymRecurrentScenarios
 
         void Launch(TileCppKernel kernel, TileCppConfig config, TileCppGrid grid)
         {
-            kernel.Launch(config, grid, runtime.Stream, x.Pointer, y.Pointer);
+            var function = kernel.GetFunction(config);
+            cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream,
+                x.Pointer, y.Pointer).Ok();
         }
 
         var expected = new float[n];
@@ -127,10 +130,12 @@ static class TileGymRecurrentScenarios
                 (IntPtr)(&vd0)
             };
 
-            kernel.Launch(Config, new(1, 1), runtime.Stream, new(args, 14));
+            var function = kernel.GetFunction(Config);
+            cuLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, runtime.Stream,
+                (void**)args, null).Ok();
         }
 
-        var timing = TileGymKernel.Measure(runtime, Launch);
+        var timing = TileGymKernel.MeasurePhases(runtime, kernel, Config, Launch);
         var expected = Reference(hq, hk, hv, hg, hb, t, kd, vd, scale, out var state);
 
         TileGymKernel.Validate(output.CopyToHost(), expected, name, 2e-3f, 2e-3f);
@@ -224,7 +229,9 @@ static class TileGymRecurrentScenarios
                 (IntPtr)(&vd0)
             };
 
-            intra.Launch(Config, new(1, chunks), runtime.Stream, new(args, 17));
+            var function = intra.GetFunction(Config);
+            cuLaunchKernel(function, 1, chunks, 1, 1, 1, 1, 0, runtime.Stream,
+                (void**)args, null).Ok();
         }
 
         void Inter()
@@ -260,11 +267,13 @@ static class TileGymRecurrentScenarios
                 (IntPtr)(&vd0)
             };
 
-            inter.Launch(Config, new(1, 1), runtime.Stream, new(args, 13));
+            var function = inter.GetFunction(Config);
+            cuLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, runtime.Stream,
+                (void**)args, null).Ok();
         }
 
-        var intraTiming = TileGymKernel.Measure(runtime, Intra);
-        var interTiming = TileGymKernel.Measure(runtime, Inter);
+        var intraTiming = TileGymKernel.MeasurePhases(runtime, intra, Config, Intra);
+        var interTiming = TileGymKernel.MeasurePhases(runtime, inter, Config, Inter);
         var expected = Reference(hq, hk, hv, hg, hb, t, kd, vd, scale, out var state);
 
         TileGymKernel.Validate(output.CopyToHost(), expected, "chunk_gated_delta_rule_inter_kernel", 3e-3f, 3e-3f);

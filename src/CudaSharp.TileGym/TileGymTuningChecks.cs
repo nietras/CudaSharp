@@ -206,7 +206,8 @@ static class TileGymTuningChecks
                 return new TileCppKernel(new TileCppCompiler(120, installBundledHeaders: false),
                     "", "check.cu", "check_kernel");
             },
-            static (p, candidate) => p.Grid(candidate), timer);
+            static (p, candidate) => p.Grid(candidate), timer,
+            compile: static (_, _) => { }, load: static (_, _) => { });
         void Launch(TileCppKernel _, TileCppConfig config, TileCppGrid grid)
         {
             Require(grid.X > 0, "Candidate grid.");
@@ -226,12 +227,27 @@ static class TileGymTuningChecks
         Require(creations == 2 && launches > measurements, "Only successful kernels are created and launched.");
         Require(validations == 2, "Each valid candidate is checked once, including cached winner.");
         Require(first.CandidateCount == 3, "Report tracks candidate count.");
+        Require(first.CompileMilliseconds is >= 0 && first.LoadMilliseconds is >= 0 &&
+            first.FirstLaunchMilliseconds is >= 0, "Tuning retains compilation, load, and first launch times.");
         var report = new TileGymReport();
         TileGymKernel.Report(report, "matmul", "check_kernel", "128x128", 1024,
-            (0d, 1d), first);
+            new TileGymTiming(0d, 1d), first);
         Require(report.Results[0].Status == "Passed (searched)" &&
             report.Results[0].Diagnostic?.Contains("3 candidates offered", StringComparison.Ordinal) == true,
             "Search report does not claim every candidate passed.");
+        Require(report.Results[0].CompileMilliseconds == first.CompileMilliseconds &&
+            report.Results[0].LoadMilliseconds == first.LoadMilliseconds &&
+            report.Results[0].FirstLaunchMilliseconds == first.FirstLaunchMilliseconds,
+            "Tuned phase timings are included in reports.");
+        TileGymKernel.Report(report, "activation", "phase_kernel", "1024", "fixed", 1024,
+            new TileGymPhaseTiming(2, 3, 4, 5, 6));
+        Require(report.Results[1].LoadMilliseconds == 3 &&
+            report.Results[1].FirstLaunchMilliseconds == 4 &&
+            report.Results[1].HostMilliseconds == 5 &&
+            report.Results[1].KernelMilliseconds == 6, "Separate phase timings are retained.");
+        Require(report.ToCsv().Contains("2\",\"3\",\"4\",\"\",\"0\",\"5\",\"6", StringComparison.Ordinal) &&
+            report.ToMarkdown().Contains("| Load ms | First launch ms | First use ms | Tune ms | Host ms | Kernel ms |", StringComparison.Ordinal),
+            "Phase timings appear in CSV and Markdown reports.");
     }
 
     static void Require(bool condition, string description)

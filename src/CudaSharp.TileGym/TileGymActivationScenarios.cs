@@ -1,4 +1,5 @@
 ﻿using CudaSharp.TileGym;
+using static CudaSharp.nvcuda;
 
 namespace CudaSharp.Tester;
 
@@ -53,8 +54,9 @@ static class TileGymActivationScenarios
             var lo = lower;
             var hi = upper;
             byte training = 0;
-            kernel.Launch(config, grid, runtime.Stream,
-                input.Pointer, output.Pointer, n, a, lo, hi, training);
+            var function = kernel.GetFunction(config);
+            cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream,
+                input.Pointer, output.Pointer, n, a, lo, hi, training).Ok();
         }
         var expected = Array.ConvertAll(host, x => ReluReference(x, operation, alpha, lower, upper, false));
         var tuned = TileGymTuning.Tune(runtime, problem, TileGymElementwiseCandidates.For(elementCount),
@@ -89,8 +91,9 @@ static class TileGymActivationScenarios
             var lo = lower;
             var hi = upper;
             byte training = 0;
-            kernel.Launch(config, grid, runtime.Stream,
-                dy.Pointer, x.Pointer, dx.Pointer, n, a, lo, hi, training);
+            var function = kernel.GetFunction(config);
+            cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream,
+                dy.Pointer, x.Pointer, dx.Pointer, n, a, lo, hi, training).Ok();
         }
         var expected = Array.ConvertAll(hx, value => ReluReference(value, operation, alpha, lower, upper, true));
         var tuned = TileGymTuning.Tune(runtime, problem, TileGymElementwiseCandidates.For(count),
@@ -119,13 +122,16 @@ static class TileGymActivationScenarios
         void Launch(TileCppKernel kernel, TileCppConfig config, TileCppGrid grid)
         {
             var n = count;
+            var function = kernel.GetFunction(config);
             if (backward)
             {
-                kernel.Launch(config, grid, runtime.Stream, dy!.Pointer, x.Pointer, output.Pointer, n);
+                cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream,
+                    dy!.Pointer, x.Pointer, output.Pointer, n).Ok();
             }
             else
             {
-                kernel.Launch(config, grid, runtime.Stream, x.Pointer, output.Pointer, n);
+                cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream,
+                    x.Pointer, output.Pointer, n).Ok();
             }
         }
         var expected = Array.ConvertAll(hx, value => backward ? GeluDerivative(value) : Gelu(value));
@@ -159,14 +165,16 @@ static class TileGymActivationScenarios
             var xs = hidden * 2;
             var ys = hidden;
             var elements = rows * hidden;
+            var function = kernel.GetFunction(config);
             if (backward)
             {
-                kernel.Launch(config, grid, runtime.Stream,
-                    output.Pointer, dy!.Pointer, x.Pointer, n, xs, ys, elements);
+                cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream,
+                    output.Pointer, dy!.Pointer, x.Pointer, n, xs, ys, elements).Ok();
             }
             else
             {
-                kernel.Launch(config, grid, runtime.Stream, x.Pointer, output.Pointer, n, xs, ys, elements);
+                cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream,
+                    x.Pointer, output.Pointer, n, xs, ys, elements).Ok();
             }
         }
         var expected = new float[output.Length];
@@ -210,20 +218,23 @@ static class TileGymActivationScenarios
         var host = Values(input.Length);
         input.CopyFrom(host);
         grad?.CopyFrom(Ones(grad.Length));
-        void Launch()
+        var grid = new TileCppGrid((uint)rows);
+        void Launch(CUfunction function)
         {
             var stride = hidden * 2;
             var h = hidden;
             if (backward)
             {
-                kernel.Launch(Config, new((uint)rows), runtime.Stream, grad!.Pointer, input.Pointer, output.Pointer, stride, h);
+                cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream,
+                    grad!.Pointer, input.Pointer, output.Pointer, stride, h).Ok();
             }
             else
             {
-                kernel.Launch(Config, new((uint)rows), runtime.Stream, input.Pointer, output.Pointer, stride, h);
+                cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream,
+                    input.Pointer, output.Pointer, stride, h).Ok();
             }
         }
-        var timing = TileGymKernel.Measure(runtime, Launch);
+        var timing = TileGymKernel.MeasurePhases(runtime, kernel, Config, Launch);
         var expected = SiluReference(host, rows, hidden, backward);
         TileGymKernel.Validate(output.CopyToHost(), expected, name, 4e-4f, 4e-4f);
         TileGymKernel.Report(report, "fused", name, $"{rows}x{hidden * 2}", $"float,BLOCK_SIZE={hidden}",
@@ -241,9 +252,11 @@ static class TileGymActivationScenarios
         input.CopyFrom(host);
         void Launch()
         {
-            kernel.Launch(Config, new((uint)rows), runtime.Stream, input.Pointer, output.Pointer);
+            var function = kernel.GetFunction(Config);
+            cuLaunchKernel(function, (uint)rows, 1, 1, 1, 1, 1, 0, runtime.Stream,
+                input.Pointer, output.Pointer).Ok();
         }
-        var timing = TileGymKernel.Measure(runtime, Launch);
+        var timing = TileGymKernel.MeasurePhases(runtime, kernel, Config, Launch);
         TileGymKernel.Validate(output.CopyToHost(), SiluReference(host, rows, hidden, false), "silu_and_mul_kernel_row_wise", 4e-4f, 4e-4f);
         TileGymKernel.Report(
             report,
@@ -275,17 +288,19 @@ static class TileGymActivationScenarios
         {
             var stride = columns;
             var cols = columns;
+            var function = kernel.GetFunction(Config);
             if (backward)
             {
-                kernel.Launch(Config, new((uint)rows), runtime.Stream,
-                    dc!.Pointer, a.Pointer, b.Pointer, c.Pointer, second!.Pointer, stride, cols);
+                cuLaunchKernel(function, (uint)rows, 1, 1, 1, 1, 1, 0, runtime.Stream,
+                    dc!.Pointer, a.Pointer, b.Pointer, c.Pointer, second!.Pointer, stride, cols).Ok();
             }
             else
             {
-                kernel.Launch(Config, new((uint)rows), runtime.Stream, a.Pointer, b.Pointer, c.Pointer, cols, stride);
+                cuLaunchKernel(function, (uint)rows, 1, 1, 1, 1, 1, 0, runtime.Stream,
+                    a.Pointer, b.Pointer, c.Pointer, cols, stride).Ok();
             }
         }
-        var timing = TileGymKernel.Measure(runtime, Launch);
+        var timing = TileGymKernel.MeasurePhases(runtime, kernel, Config, Launch);
         var expected = new float[c.Length];
         var expectedSecond = backward ? new float[c.Length] : null;
         for (var i = 0; i < expected.Length; i++)
@@ -323,9 +338,11 @@ static class TileGymActivationScenarios
         b.CopyFrom(hb);
         void Launch()
         {
-            kernel.Launch(Config, new((uint)rows, 1), runtime.Stream, a.Pointer, b.Pointer, c.Pointer);
+            var function = kernel.GetFunction(Config);
+            cuLaunchKernel(function, (uint)rows, 1, 1, 1, 1, 1, 0, runtime.Stream,
+                a.Pointer, b.Pointer, c.Pointer).Ok();
         }
-        var timing = TileGymKernel.Measure(runtime, Launch);
+        var timing = TileGymKernel.MeasurePhases(runtime, kernel, Config, Launch);
         var expected = new float[c.Length];
         for (var i = 0; i < expected.Length; i++)
         {

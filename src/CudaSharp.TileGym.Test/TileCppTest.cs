@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
+using System.Threading.Tasks;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using static CudaSharp.nvcuda;
 using static CudaSharp.nvrtc;
@@ -26,6 +27,16 @@ public class TileCppTest
         Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => CreateConfig(64, occupancy: 33));
         Assert.ThrowsExactly<ArgumentOutOfRangeException>(() =>
             new TileCppConfig([], numWorkerWarps: 5));
+    }
+
+    [TestMethod]
+    public void TileCppTest_CompileRejectsNullAndDisposedKernel()
+    {
+        var kernel = new TileCppKernel(new TileCppCompiler(120, installBundledHeaders: false),
+            string.Empty, "test.cu", "test_kernel");
+        Assert.ThrowsExactly<ArgumentNullException>(() => kernel.Compile(null!));
+        kernel.Dispose();
+        Assert.ThrowsExactly<ObjectDisposedException>(() => kernel.Compile(new TileCppConfig([])));
     }
 
     [TestMethod]
@@ -202,8 +213,20 @@ public class TileCppTest
                     const float*, float*, int, float, float, float, bool);
                 """;
             var compiler = new TileCppCompiler(device.GetArchitecture());
+            compiler.PrepareBundledHeaders();
+            var config = new TileCppConfig([]);
             var compilation = compiler.CompileKernel(source, "relu_without_used.cu",
-                "&relu_activation_fwd_kernel<float, 64, 0>", new TileCppConfig([]), [header]);
+                "&relu_activation_fwd_kernel<float, 64, 0>", config, [header]);
+            using var kernel = new TileCppKernel(compiler, source, "relu_without_used.cu",
+                "relu_activation_fwd_kernel", [header], nameExpression: "&relu_activation_fwd_kernel<float, 64, 0>");
+            Assert.ThrowsExactly<InvalidOperationException>(() => kernel.LoadFunction(config));
+            var otherConfig = new TileCppConfig([new("VARIANT", "1")]);
+            Parallel.Invoke(() => kernel.Compile(config), () => kernel.Compile(otherConfig),
+                () => kernel.Compile(config));
+            var loadedFunction = kernel.LoadFunction(config);
+            Assert.AreNotEqual(default, kernel.LoadFunction(otherConfig));
+            Assert.AreEqual(loadedFunction, kernel.GetFunction(config));
+            Assert.ThrowsExactly<InvalidOperationException>(() => kernel.LoadFunction(new TileCppConfig([new("VARIANT", "2")])));
 
             cuModuleLoadData(out var module, compilation.TileIr).Ok();
             try
@@ -228,7 +251,7 @@ public class TileCppTest
                         float alpha = 0, lower = 0, upper = 0;
                         byte training = 0;
                         var args = stackalloc void*[] { &px, &py, &length, &alpha, &lower, &upper, &training };
-                        cuLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, default, args, null).Ok();
+                        cuLaunchKernel(loadedFunction, 1, 1, 1, 1, 1, 1, 0, default, args, null).Ok();
                         var result = new float[count];
                         fixed (float* pointer = result)
                             cuMemcpyDtoH_v2((IntPtr)pointer, y, count * sizeof(float)).Ok();

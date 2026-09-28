@@ -77,13 +77,16 @@ static class TileGymNormalizationScenarios
             var pr = rstd.Pointer.Value;
             var eps = .00001f;
             var shift = 0f;
+            var function = selectedKernel.GetFunction(config);
             if (persistent)
             {
-                selectedKernel.Launch(config, grid, runtime.Stream, px, py, pw, pb, pm, pr);
+                cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream,
+                    px, py, pw, pb, pm, pr).Ok();
             }
             else
             {
-                selectedKernel.Launch(config, grid, runtime.Stream, px, py, pw, pb, pm, pr, eps, shift);
+                cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream,
+                    px, py, pw, pb, pm, pr, eps, shift).Ok();
             }
         }
 
@@ -105,7 +108,7 @@ static class TileGymNormalizationScenarios
             using (kernel)
             {
                 void LaunchLegacy() => Launch(kernel!, Config, new TileCppGrid(rows));
-                var timing = TileGymKernel.Measure(runtime, LaunchLegacy);
+                var timing = TileGymKernel.MeasurePhases(runtime, kernel!, Config, LaunchLegacy);
                 TileGymKernel.Validate(y.CopyToHost(), expected, name, 8e-4f, 8e-4f);
                 TileGymKernel.Report(report, "normalization", name, $"{rows}x{columns}",
                     templates, x.ByteLength + y.ByteLength + w.ByteLength + b.ByteLength, timing);
@@ -131,11 +134,12 @@ static class TileGymNormalizationScenarios
         void Launch()
         {
             var stride = columns;
-            kernel.Launch(Config, grid, runtime.Stream,
-                x.Pointer, w.Pointer, y.Pointer, rstd.Pointer, stride);
+            var function = kernel.GetFunction(Config);
+            cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream,
+                x.Pointer, w.Pointer, y.Pointer, rstd.Pointer, stride).Ok();
         }
 
-        var timing = TileGymKernel.Measure(runtime, Launch);
+        var timing = TileGymKernel.MeasurePhases(runtime, kernel, Config, Launch);
         TileGymKernel.Validate(y.CopyToHost(), RmsNorm(hx, hw, rows, columns), name, 8e-4f, 8e-4f);
         TileGymKernel.Report(report, "normalization", name, $"{rows}x{columns}", templates, x.ByteLength + y.ByteLength + w.ByteLength, timing);
     }
@@ -164,11 +168,12 @@ static class TileGymNormalizationScenarios
         void Launch()
         {
             var eps = .00001f;
-            kernel.Launch(Config, new(rows), runtime.Stream,
-                x.Pointer, w.Pointer, y.Pointer, r.Pointer, eps);
+            var function = kernel.GetFunction(Config);
+            cuLaunchKernel(function, rows, 1, 1, 1, 1, 1, 0, runtime.Stream,
+                x.Pointer, w.Pointer, y.Pointer, r.Pointer, eps).Ok();
         }
 
-        var timing = TileGymKernel.Measure(runtime, Launch);
+        var timing = TileGymKernel.MeasurePhases(runtime, kernel, Config, Launch);
         TileGymKernel.Validate(y.CopyToHost(), RmsNorm(hx, hw, rows, columns), name, 8e-4f, 8e-4f);
         TileGymKernel.Report(
             report,
@@ -200,7 +205,9 @@ static class TileGymNormalizationScenarios
 
         void Launch(TileCppKernel kernel, TileCppConfig config, TileCppGrid grid)
         {
-            kernel.Launch(config, grid, runtime.Stream, x.Pointer, y.Pointer, w.Pointer, r.Pointer);
+            var function = kernel.GetFunction(config);
+            cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream,
+                x.Pointer, y.Pointer, w.Pointer, r.Pointer).Ok();
         }
 
         var expected = RmsNorm(hx, hw, rows, columns);
@@ -248,11 +255,12 @@ static class TileGymNormalizationScenarios
         {
             var stride = columns;
             var n = columns;
-            kernel.Launch(Config, new(rows), runtime.Stream,
-                dx.Pointer, dy.Pointer, x.Pointer, w.Pointer, r.Pointer, temp.Pointer, stride, n);
+            var function = kernel.GetFunction(Config);
+            cuLaunchKernel(function, rows, 1, 1, 1, 1, 1, 0, runtime.Stream,
+                dx.Pointer, dy.Pointer, x.Pointer, w.Pointer, r.Pointer, temp.Pointer, stride, n).Ok();
         }
 
-        var timing = TileGymKernel.Measure(runtime, Launch);
+        var timing = TileGymKernel.MeasurePhases(runtime, kernel, Config, Launch);
         var expected = new float[dx.Length];
         for (var row = 0; row < rows; row++)
         {

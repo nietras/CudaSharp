@@ -57,10 +57,11 @@ static class TileGymRopeSoftmaxScenarios
 
         void Launch()
         {
-            kernel.Launch(Config, new(batch * sequence), runtime.Stream,
-                q.Pointer, k.Pointer, cos.Pointer, sin.Pointer);
+            var function = kernel.GetFunction(Config);
+            cuLaunchKernel(function, batch * sequence, 1, 1, 1, 1, 1, 0, runtime.Stream,
+                q.Pointer, k.Pointer, cos.Pointer, sin.Pointer).Ok();
         }
-        var timing = TileGymKernel.Measure(runtime, Launch);
+        var timing = TileGymKernel.MeasurePhases(runtime, kernel, Config, Launch);
         q.CopyFrom(hq);
         k.CopyFrom(hk);
         Launch();
@@ -113,19 +114,21 @@ static class TileGymRopeSoftmaxScenarios
             var nrows = rows;
             var ncols = columns;
             var programs = rows;
+            var function = kernel.GetFunction(config);
             if (backward)
             {
-                kernel.Launch(config, grid, runtime.Stream,
-                    po, pi, pdy, stride, stride, stride, ncols);
+                cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream,
+                    po, pi, pdy, stride, stride, stride, ncols).Ok();
             }
             else if (online)
             {
-                kernel.Launch(config, grid, runtime.Stream, po, pi, stride, stride, ncols);
+                cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream,
+                    po, pi, stride, stride, ncols).Ok();
             }
             else
             {
-                kernel.Launch(config, grid, runtime.Stream,
-                    po, pi, stride, stride, nrows, ncols, programs);
+                cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream,
+                    po, pi, stride, stride, nrows, ncols, programs).Ok();
             }
         }
         float[] expected;

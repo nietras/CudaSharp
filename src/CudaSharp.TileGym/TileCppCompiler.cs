@@ -2,6 +2,7 @@
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Threading;
 using static CudaSharp.nvrtc;
 
 namespace CudaSharp.TileGym;
@@ -42,6 +43,7 @@ public sealed record TileCppCompilation(byte[] TileIr, string EntryPoint);
 public sealed class TileCppCompiler
 {
     readonly string? _bundledHeadersPath;
+    readonly Lazy<bool> _headersInstalled;
 
     /// <summary>Creates a CUDA Tile C++ compiler for a target GPU architecture.</summary>
     /// <param name="architecture">Target SM architecture encoded as major times ten plus minor.</param>
@@ -55,16 +57,32 @@ public sealed class TileCppCompiler
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(architecture);
         if (!installBundledHeaders && bundledHeadersPath is not null)
+        {
             throw new ArgumentException("A bundled-header path requires bundled-header installation.", nameof(bundledHeadersPath));
+        }
 
         Architecture = architecture;
         _bundledHeadersPath = installBundledHeaders
             ? bundledHeadersPath ?? GetDefaultBundledHeadersPath()
             : null;
+        _headersInstalled = new Lazy<bool>(() =>
+        {
+            if (_bundledHeadersPath is not null)
+            {
+                InstallBundledHeaders(_bundledHeadersPath);
+            }
+            return true;
+        }, LazyThreadSafetyMode.ExecutionAndPublication);
     }
 
     /// <summary>Gets the target SM architecture encoded as major times ten plus minor.</summary>
     public int Architecture { get; }
+
+    /// <summary>Installs bundled CUDA headers before starting concurrent compilations.</summary>
+    public void PrepareBundledHeaders()
+    {
+        _ = _headersInstalled.Value;
+    }
 
     /// <summary>Compiles CUDA Tile C++ source to TileIR using NVRTC 13.3 or later.</summary>
     /// <param name="source">CUDA Tile C++ source.</param>
@@ -147,8 +165,10 @@ public sealed class TileCppCompiler
             var options = CreateNvrtcOptions(config, additionalOptions);
             var result = nvrtcCompileProgram(program, options.Length, options);
             if (result != nvrtcResult.NVRTC_SUCCESS)
+            {
                 throw new CudaException<nvrtcResult>(result,
                     $"NVRTC CUDA Tile C++ compilation failed with {result.ToStringFast()}:\n{nvrtcGetProgramLogString(program)}");
+            }
 
             return new TileCppCompilation(nvrtcGetTileIR(program), nvrtcGetLoweredNameString(program, nameExpression));
         }
@@ -160,8 +180,7 @@ public sealed class TileCppCompiler
 
     string[] CreateNvrtcOptions(TileCppConfig config, IReadOnlyList<string>? additionalOptions)
     {
-        if (_bundledHeadersPath is not null)
-            InstallBundledHeaders(_bundledHeadersPath);
+        PrepareBundledHeaders();
 
         var options = new List<string>(4 + config.Parameters.Count + (additionalOptions?.Count ?? 0))
         {
@@ -175,9 +194,13 @@ public sealed class TileCppCompiler
             options.Add($"--include-path={Path.Combine(_bundledHeadersPath, "cccl")}");
         }
         foreach (var parameter in config.Parameters)
+        {
             options.Add($"-D{parameter.Key}={parameter.Value}");
+        }
         if (additionalOptions is not null)
+        {
             options.AddRange(additionalOptions);
+        }
         return [.. options];
     }
 

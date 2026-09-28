@@ -1,4 +1,5 @@
 ﻿using CudaSharp.TileGym;
+using static CudaSharp.nvcuda;
 
 namespace CudaSharp.Tester;
 
@@ -43,11 +44,12 @@ static class TileGymMlaScenarios
 
         void Launch()
         {
-            kernel.Launch(Config, new(1, 1), runtime.Stream,
-                q.Pointer, qpe.Pointer, k.Pointer, kpe.Pointer, v.Pointer, o.Pointer, scale);
+            var function = kernel.GetFunction(Config);
+            cuLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, runtime.Stream,
+                q.Pointer, qpe.Pointer, k.Pointer, kpe.Pointer, v.Pointer, o.Pointer, scale).Ok();
         }
 
-        var timing = TileGymKernel.Measure(runtime, Launch);
+        var timing = TileGymKernel.MeasurePhases(runtime, kernel, Config, Launch);
 
         TileGymKernel.Validate(o.CopyToHost(), Mla(hq, hqp, hk, hkp, hv, s, d, kd, scale, true), name, 3e-3f, 3e-3f);
         TileGymKernel.Report(report, "mla", name, $"B=1,H=1,S={s},D={d},KPE={kd}", "TILE_M=64,TILE_N=64", q.ByteLength + qpe.ByteLength + k.ByteLength + kpe.ByteLength + v.ByteLength + o.ByteLength, timing);
@@ -110,10 +112,12 @@ static class TileGymMlaScenarios
                 (IntPtr)(&os), (IntPtr)(&b), (IntPtr)(&h), (IntPtr)(&seq)
             };
 
-            kernel.Launch(Config, new(1, 1), runtime.Stream, new(args, transpose ? 19 : 20));
+            var function = kernel.GetFunction(Config);
+            cuLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, runtime.Stream,
+                (void**)args, null).Ok();
         }
 
-        var timing = TileGymKernel.Measure(runtime, Launch);
+        var timing = TileGymKernel.MeasurePhases(runtime, kernel, Config, Launch);
 
         TileGymKernel.Validate(o.CopyToHost(), Mla(hq, hqp, hkv, hkp, hkv, 1, d, kd, scale, false), name, 3e-3f, 3e-3f);
         TileGymKernel.Report(report, "mla", name, $"B=1,H={heads},S={s},D={d},KPE={kd}", "BLOCK_H=1,BLOCK_N=64", q.ByteLength + qpe.ByteLength + kv.ByteLength + kpe.ByteLength + o.ByteLength + l.ByteLength, timing);
@@ -148,11 +152,12 @@ static class TileGymMlaScenarios
 
         void Launch()
         {
-            kernel.Launch(Config, new(1, 1, 1), runtime.Stream,
-                q.Pointer, qpe.Pointer, kv.Pointer, kv.Pointer, kpe.Pointer, o.Pointer, l.Pointer, scale);
+            var function = kernel.GetFunction(Config);
+            cuLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, runtime.Stream,
+                q.Pointer, qpe.Pointer, kv.Pointer, kv.Pointer, kpe.Pointer, o.Pointer, l.Pointer, scale).Ok();
         }
 
-        var timing = TileGymKernel.Measure(runtime, Launch);
+        var timing = TileGymKernel.MeasurePhases(runtime, kernel, Config, Launch);
 
         TileGymKernel.Validate(o.CopyToHost(), Mla(hq, hqp, hkv, hkp, hkv, 1, d, kd, scale, false), name, 3e-3f, 3e-3f);
         TileGymKernel.Report(report, "mla-split", name, $"B=1,H=1,S={s},D={d},KPE={kd}", "TILE_H=16,TILE_N=128,SPLITS=1", q.ByteLength + qpe.ByteLength + kv.ByteLength + kpe.ByteLength + o.ByteLength + l.ByteLength, timing);
@@ -179,11 +184,12 @@ static class TileGymMlaScenarios
 
         void Launch()
         {
-            kernel.Launch(Config, new(1, 1, 1), runtime.Stream,
-                input.Pointer, lse.Pointer, output.Pointer);
+            var function = kernel.GetFunction(Config);
+            cuLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, runtime.Stream,
+                input.Pointer, lse.Pointer, output.Pointer).Ok();
         }
 
-        var timing = TileGymKernel.Measure(runtime, Launch);
+        var timing = TileGymKernel.MeasurePhases(runtime, kernel, Config, Launch);
         var expected = new float[d];
         var max = Math.Max(hl[0], hl[1]);
         var a = MathF.Pow(2, hl[0] - max);

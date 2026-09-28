@@ -51,7 +51,9 @@ static class TileGymMatrixScenarios
 
         void Launch(TileCppKernel kernel, TileCppConfig config, TileCppGrid grid)
         {
-            kernel.Launch(config, grid, runtime.Stream, a.Pointer, b.Pointer, c.Pointer);
+            var function = kernel.GetFunction(config);
+            cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream,
+                a.Pointer, b.Pointer, c.Pointer).Ok();
         }
 
         var expected = skipValidation ? null : Gemm(ha, hb, m, n, k);
@@ -102,9 +104,11 @@ static class TileGymMatrixScenarios
 
         void Launch(TileCppKernel kernel, TileCppConfig config, TileCppGrid grid)
         {
+            var function = kernel.GetFunction(config);
             if (persistent)
             {
-                kernel.Launch(config, grid, runtime.Stream, a.Pointer, b.Pointer, c.Pointer);
+                cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream,
+                    a.Pointer, b.Pointer, c.Pointer).Ok();
             }
             else
             {
@@ -112,8 +116,8 @@ static class TileGymMatrixScenarios
                 var mm = m;
                 var nn = n;
                 var kk = k;
-                kernel.Launch(config, grid, runtime.Stream,
-                    a.Pointer, b.Pointer, c.Pointer, q, mm, nn, kk);
+                cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream,
+                    a.Pointer, b.Pointer, c.Pointer, q, mm, nn, kk).Ok();
             }
         }
 

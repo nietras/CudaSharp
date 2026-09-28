@@ -59,43 +59,52 @@ static class TileGymMoeScenarios
 
         void Stage1()
         {
-            s1.Launch(Config, new(experts), runtime.Stream,
-                top.Pointer, counts.Pointer, numel, tokensPerThread);
+            var function = s1.GetFunction(Config);
+            cuLaunchKernel(function, experts, 1, 1, 1, 1, 1, 0, runtime.Stream,
+                top.Pointer, counts.Pointer, numel, tokensPerThread).Ok();
         }
 
         void Stage2()
         {
-            s2.Launch(Config, new(experts), runtime.Stream, counts.Pointer);
+            var function = s2.GetFunction(Config);
+            cuLaunchKernel(function, experts, 1, 1, 1, 1, 1, 0, runtime.Stream, counts.Pointer).Ok();
         }
 
         void Stage3()
         {
-            s3.Launch(Config, new(1), runtime.Stream,
-                total.Pointer, max.Pointer, counts.Pointer, cumsum.Pointer);
+            var function = s3.GetFunction(Config);
+            cuLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, runtime.Stream,
+                total.Pointer, max.Pointer, counts.Pointer, cumsum.Pointer).Ok();
         }
 
         void Stage4()
         {
-            s4.Launch(Config, new(experts), runtime.Stream,
-                top.Pointer, sorted.Pointer, expertIds.Pointer, counts.Pointer, cumsum.Pointer, numel, tokensPerThread);
+            var function = s4.GetFunction(Config);
+            cuLaunchKernel(function, experts, 1, 1, 1, 1, 1, 0, runtime.Stream,
+                top.Pointer, sorted.Pointer, expertIds.Pointer, counts.Pointer, cumsum.Pointer, numel, tokensPerThread).Ok();
         }
 
-        var t1 = TileGymKernel.Measure(runtime, () => { counts.Clear(); Stage1(); });
+        void ResetAndStage1()
+        {
+            counts.Clear();
+            Stage1();
+        }
+        var t1 = TileGymKernel.MeasurePhases(runtime, s1, Config, ResetAndStage1);
         counts.Clear();
         Stage1();
         cuStreamSynchronize(runtime.Stream).Ok();
-        var t2 = TileGymKernel.Measure(runtime, Stage2);
+        var t2 = TileGymKernel.MeasurePhases(runtime, s2, Config, Stage2);
         counts.Clear();
         Stage1();
         Stage2();
         cuStreamSynchronize(runtime.Stream).Ok();
-        var t3 = TileGymKernel.Measure(runtime, Stage3);
+        var t3 = TileGymKernel.MeasurePhases(runtime, s3, Config, Stage3);
         counts.Clear();
         Stage1();
         Stage2();
         Stage3();
         cuStreamSynchronize(runtime.Stream).Ok();
-        var t4 = TileGymKernel.MeasureOnce(runtime, () => s4.GetFunction(Config), Stage4);
+        var t4 = TileGymKernel.MeasureOncePhases(runtime, s4, Config, Stage4);
 
         var cs = cumsum.CopyToHost();
         if (!cs.AsSpan().SequenceEqual([0, 4, 8, 12, 16]))
@@ -203,10 +212,12 @@ static class TileGymMoeScenarios
                 (IntPtr)(&nil), (IntPtr)(&pw), (IntPtr)(&ps), (IntPtr)(&pe),
                 (IntPtr)(&pp), (IntPtr)(&valid)
             };
-            kernel.Launch(Config, new(1), runtime.Stream, new(args, 10));
+            var function = kernel.GetFunction(Config);
+            cuLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, runtime.Stream,
+                (void**)args, null).Ok();
         }
 
-        var timing = TileGymKernel.Measure(runtime, Launch);
+        var timing = TileGymKernel.MeasurePhases(runtime, kernel, Config, Launch);
         var expected = new float[m * n];
         for (var row = 0; row < m; row++)
         {
@@ -298,6 +309,7 @@ static class TileGymMoeScenarios
             var groupN = 16;
             var groupK = 16;
             var topK = 1;
+            var function = kernel.GetFunction(Config);
 
             if (fc1)
             {
@@ -315,7 +327,8 @@ static class TileGymMoeScenarios
                     (IntPtr)(&strideB2se), (IntPtr)(&strideB2sk), (IntPtr)(&strideB2sn),
                     (IntPtr)(&groupN), (IntPtr)(&groupK), (IntPtr)(&topK)
                 };
-                kernel.Launch(Config, new(1), runtime.Stream, new(args, 37));
+                cuLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, runtime.Stream,
+                    (void**)args, null).Ok();
             }
             else
             {
@@ -331,11 +344,12 @@ static class TileGymMoeScenarios
                     (IntPtr)(&strideB1sn), (IntPtr)(&groupN), (IntPtr)(&groupK),
                     (IntPtr)(&topK)
                 };
-                kernel.Launch(Config, new(1), runtime.Stream, new(args, 29));
+                cuLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, runtime.Stream,
+                    (void**)args, null).Ok();
             }
         }
 
-        var timing = TileGymKernel.Measure(runtime, Launch);
+        var timing = TileGymKernel.MeasurePhases(runtime, kernel, Config, Launch);
         TileGymKernel.Validate(c.CopyToHost(), new float[c.Length], name);
         TileGymKernel.Report(
             report,

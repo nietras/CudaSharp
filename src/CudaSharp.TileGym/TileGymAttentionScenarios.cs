@@ -57,13 +57,16 @@ static class TileGymAttentionScenarios
             var pl = lse?.Pointer.Value ?? IntPtr.Zero;
             var scale = Scale;
             var cap = 0f;
+            var function = kernel.GetFunction(config);
             if (gemma)
             {
-                kernel.Launch(config, grid, runtime.Stream, pq, pk, pv, po, scale, cap);
+                cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream,
+                    pq, pk, pv, po, scale, cap).Ok();
             }
             else
             {
-                kernel.Launch(config, grid, runtime.Stream, pq, pk, pv, po, pl, scale);
+                cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream,
+                    pq, pk, pv, po, pl, scale).Ok();
             }
         }
 
@@ -124,10 +127,12 @@ static class TileGymAttentionScenarios
                 (IntPtr)(&z), (IntPtr)(&h), (IntPtr)(&nq), (IntPtr)(&nk),
                 (IntPtr)(&bandwidth)
             };
-            kernel.Launch(Config, new(1, 1), runtime.Stream, new(args, 13));
+            var function = kernel.GetFunction(Config);
+            cuLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, runtime.Stream,
+                (void**)args, null).Ok();
         }
 
-        var timing = TileGymKernel.Measure(runtime, Launch);
+        var timing = TileGymKernel.MeasurePhases(runtime, kernel, Config, Launch);
         TileGymKernel.Validate(output.CopyToHost(), Attention(hq, hk, hv, Sequence, Sequence, Dimension, Scale, true), name, 2e-3f, 2e-3f);
         TileGymKernel.Report(report, "attention", name, $"B=1,H=1,S={Sequence},D={Dimension}", "float,BLOCK_M=64,BLOCK_N=64", q.ByteLength + k.ByteLength + v.ByteLength + output.ByteLength, timing);
     }
@@ -168,23 +173,25 @@ static class TileGymAttentionScenarios
             var sinkp = sinks.Pointer.Value;
             var scale = Scale;
             var cap = 0f;
+            var function = kernel.GetFunction(Config);
             if (sink)
             {
-                kernel.Launch(Config, new(1, 1, 1), runtime.Stream,
-                    pq, pk, pv, sinkp, po, pl, ps, scale);
+                cuLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, runtime.Stream,
+                    pq, pk, pv, sinkp, po, pl, ps, scale).Ok();
             }
             else if (gemma)
             {
-                kernel.Launch(Config, new(1, 1, 1), runtime.Stream,
-                    pq, pk, pv, po, pl, scale, cap);
+                cuLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, runtime.Stream,
+                    pq, pk, pv, po, pl, scale, cap).Ok();
             }
             else
             {
-                kernel.Launch(Config, new(1, 1, 1), runtime.Stream, pq, pk, pv, po, pl, scale);
+                cuLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, runtime.Stream,
+                    pq, pk, pv, po, pl, scale).Ok();
             }
         }
 
-        var timing = TileGymKernel.Measure(runtime, Launch);
+        var timing = TileGymKernel.MeasurePhases(runtime, kernel, Config, Launch);
         TileGymKernel.Validate(output.CopyToHost(), Attention(hq, hk, hv, 1, Sequence, Dimension, Scale, false), name, 2e-3f, 2e-3f);
         TileGymKernel.Report(report, "decode", name, $"B=1,H=1,S={Sequence},D={Dimension}", templates, q.ByteLength + k.ByteLength + v.ByteLength + output.ByteLength + lse.ByteLength, timing);
     }
@@ -212,8 +219,9 @@ static class TileGymAttentionScenarios
         void Launch(TileCppKernel kernel, TileCppConfig config, TileCppGrid grid)
         {
             var scale = Scale;
-            kernel.Launch(config, grid, runtime.Stream,
-                o.Pointer, d.Pointer, l.Pointer, delta.Pointer, minusL.Pointer, scale);
+            var function = kernel.GetFunction(config);
+            cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream,
+                o.Pointer, d.Pointer, l.Pointer, delta.Pointer, minusL.Pointer, scale).Ok();
         }
 
         var ed = new float[Sequence];
@@ -283,14 +291,16 @@ static class TileGymAttentionScenarios
 
         void Forward()
         {
-            forward.Launch(Config, new(1, 1), runtime.Stream,
-                q.Pointer, k.Pointer, v.Pointer, o.Pointer, l.Pointer, Scale);
+            var function = forward.GetFunction(Config);
+            cuLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, runtime.Stream,
+                q.Pointer, k.Pointer, v.Pointer, o.Pointer, l.Pointer, Scale).Ok();
         }
 
         void Preprocess()
         {
-            preprocess.Launch(Config, new(1, 1), runtime.Stream,
-                o.Pointer, dout.Pointer, l.Pointer, delta.Pointer, ml.Pointer, Scale);
+            var function = preprocess.GetFunction(Config);
+            cuLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, runtime.Stream,
+                o.Pointer, dout.Pointer, l.Pointer, delta.Pointer, ml.Pointer, Scale).Ok();
         }
 
         Forward();
@@ -316,7 +326,9 @@ static class TileGymAttentionScenarios
                 (IntPtr)(&pml), (IntPtr)(&pdel), (IntPtr)(&pdq), (IntPtr)(&pdk),
                 (IntPtr)(&pdv), (IntPtr)(&scale)
             };
-            kernel.Launch(config, grid, runtime.Stream, new(args, 10));
+            var function = kernel.GetFunction(config);
+            cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream,
+                (void**)args, null).Ok();
         }
 
         static void Cpu(float[] q, float[] k, float[] v, float[] dO, out float[] dQ, out float[] dK, out float[] dV)

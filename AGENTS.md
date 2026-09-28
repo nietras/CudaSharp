@@ -40,6 +40,7 @@
 
 * **Adhere to .editorconfig:** Strictly follow the formatting rules defined in the `.editorconfig` file.
 * **Control-Flow Braces:** Always use braces for C# `if`, `else`, `for`, `foreach`, `while`, and `do` bodies, including single-statement bodies, in all new or modified code.
+* **No Nested Method Calls:** Never pass a method call directly as an argument to another method call. Assign the intermediate result to a local variable on a separate line so each call can be debugged independently (for example, assign `kernel.GetFunction(config)` before calling `cuLaunchKernel`). Chained calls such as `cuLaunchKernel(...).Ok()` are allowed.
 * **Clean Formatting:** Avoid adding unnecessary empty lines and ensure proper indentation.
 * **Struct Definitions:** Define `struct` types with multi-line bodies; avoid one-line `struct` declarations.
 * **Method Declarations:** Keep declaration line lengths around 100-120 characters and split long signatures across multiple lines.

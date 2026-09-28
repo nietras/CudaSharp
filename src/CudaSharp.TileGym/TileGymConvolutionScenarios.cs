@@ -1,4 +1,5 @@
 ﻿using CudaSharp.TileGym;
+using static CudaSharp.nvcuda;
 
 namespace CudaSharp.Tester;
 
@@ -237,18 +238,21 @@ static class TileGymConvolutionScenarios
 
         void Launch()
         {
+            var grid = problem.MmaGrid();
+            var function = kernel.GetFunction(Config);
             if (hasBias)
             {
-                kernel.Launch(Config, problem.MmaGrid(), runtime.Stream,
-                    input.Pointer, weights.Pointer, bias.Pointer, modelBias.Pointer, output.Pointer);
+                cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream,
+                    input.Pointer, weights.Pointer, bias.Pointer, modelBias.Pointer, output.Pointer).Ok();
             }
             else
             {
-                kernel.Launch(Config, problem.MmaGrid(), runtime.Stream, input.Pointer, weights.Pointer, output.Pointer);
+                cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream,
+                    input.Pointer, weights.Pointer, output.Pointer).Ok();
             }
         }
 
-        var timing = TileGymKernel.Measure(runtime, Launch);
+        var timing = TileGymKernel.MeasurePhases(runtime, kernel, Config, Launch);
         ValidateMmaOutput(output.CopyToHost(), expected, bfloat16, name);
         TileGymKernel.Report(report, "convolution", name,
             $"N={problem.N},Ci={problem.Ci},Co={problem.Co},out={problem.Od}x{problem.Oh}x{problem.Ow},groups={problem.Groups}",
@@ -281,18 +285,21 @@ static class TileGymConvolutionScenarios
 
         void Launch()
         {
+            var grid = problem.Grid(block);
+            var function = kernel.GetFunction(Config);
             if (hasBias)
             {
-                kernel.Launch(Config, problem.Grid(block), runtime.Stream,
-                    input.Pointer, weights.Pointer, bias.Pointer, modelBias.Pointer, output.Pointer);
+                cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream,
+                    input.Pointer, weights.Pointer, bias.Pointer, modelBias.Pointer, output.Pointer).Ok();
             }
             else
             {
-                kernel.Launch(Config, problem.Grid(block), runtime.Stream, input.Pointer, weights.Pointer, output.Pointer);
+                cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream,
+                    input.Pointer, weights.Pointer, output.Pointer).Ok();
             }
         }
 
-        var timing = TileGymKernel.Measure(runtime, Launch);
+        var timing = TileGymKernel.MeasurePhases(runtime, kernel, Config, Launch);
         TileGymKernel.Validate(output.CopyToHost(), expected, problem.Kernel, 1e-4f, 1e-4f);
         TileGymKernel.Report(report, "convolution", problem.Kernel,
             $"N={problem.N},Ci={problem.Ci},Co={problem.Co},in={problem.D}x{problem.H}x{problem.W},out={problem.Od}x{problem.Oh}x{problem.Ow},groups={problem.Groups}",
