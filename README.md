@@ -511,6 +511,9 @@ namespace CudaSharp
         [System.Runtime.InteropServices.LibraryImport("nvcuda")]
         public static unsafe CudaSharp.nvcuda.CUresult cuLaunchKernel(CudaSharp.nvcuda.CUfunction f, uint gridDimX, uint gridDimY, uint gridDimZ, uint blockDimX, uint blockDimY, uint blockDimZ, uint sharedMemBytes, CudaSharp.nvcuda.CUstream hStream, void** kernelParams, void** extra) { }
         [System.Runtime.CompilerServices.SkipLocalsInit]
+        public static CudaSharp.nvcuda.CUresult cuLaunchKernel<T1>(CudaSharp.nvcuda.CUfunction function, uint gridDimX, uint gridDimY, uint gridDimZ, uint blockDimX, uint blockDimY, uint blockDimZ, uint sharedMemBytes, CudaSharp.nvcuda.CUstream stream, T1 arg1)
+            where T1 :  unmanaged { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
         public static CudaSharp.nvcuda.CUresult cuLaunchKernel<T1, T2>(CudaSharp.nvcuda.CUfunction function, uint gridDimX, uint gridDimY, uint gridDimZ, uint blockDimX, uint blockDimY, uint blockDimZ, uint sharedMemBytes, CudaSharp.nvcuda.CUstream stream, T1 arg1, T2 arg2)
             where T1 :  unmanaged
             where T2 :  unmanaged { }
