@@ -1,5 +1,4 @@
-﻿using System;
-using CudaSharp.Tile;
+﻿using CudaSharp.Tile;
 
 namespace CudaSharp.Tester;
 
@@ -63,55 +62,55 @@ sealed record TileGymConvolutionProblem(
         var ciGroup = Ci / Groups;
         var coGroup = Co / Groups;
         for (var n = 0; n < N; n++)
-        for (var co = 0; co < Co; co++)
-        for (var od = 0; od < Od; od++)
-        for (var oh = 0; oh < Oh; oh++)
-        for (var ow = 0; ow < Ow; ow++)
-        {
-            float sum = 0;
-            for (var c = 0; c < ciGroup; c++)
-            for (var kd = 0; kd < Kd; kd++)
-            for (var kh = 0; kh < Kh; kh++)
-            for (var kw = 0; kw < Kw; kw++)
-            {
-                var z = od * Sd - Pd + kd * Dd;
-                var y = oh * Sh - Ph + kh * Dh;
-                var x = ow * Sw - Pw + kw * Dw;
-                if (Transposed)
-                {
-                    z = od + Pd - kd * Dd;
-                    y = oh + Ph - kh * Dh;
-                    x = ow + Pw - kw * Dw;
-                    if (z % Sd != 0 || y % Sh != 0 || x % Sw != 0)
-                    {
-                        continue;
-                    }
-                    z /= Sd;
-                    y /= Sh;
-                    x /= Sw;
-                }
-                if (z < 0 || z >= D || y < 0 || y >= H || x < 0 || x >= W)
-                {
-                    continue;
-                }
-                var ic = (co / coGroup) * ciGroup + c;
-                var weightIndex = ((((co * ciGroup + c) * Kd + kd) * Kh + kh) * Kw + kw);
-                sum += input[((((n * Ci + ic) * D + z) * H + y) * W + x)] * weights[weightIndex];
-            }
-            if (Kind is TileGymConvolutionKind.Forward2D or TileGymConvolutionKind.Transpose2D)
-            {
-                sum += convBias[co];
-            }
-            if (Kind is TileGymConvolutionKind.Forward2D or TileGymConvolutionKind.Forward3D)
-            {
-                sum = Math.Max(sum, 0);
-            }
-            if (Kind is TileGymConvolutionKind.Forward2D or TileGymConvolutionKind.Transpose2D)
-            {
-                sum += modelBias[co];
-            }
-            output[((((n * Co + co) * Od + od) * Oh + oh) * Ow + ow)] = sum;
-        }
+            for (var co = 0; co < Co; co++)
+                for (var od = 0; od < Od; od++)
+                    for (var oh = 0; oh < Oh; oh++)
+                        for (var ow = 0; ow < Ow; ow++)
+                        {
+                            float sum = 0;
+                            for (var c = 0; c < ciGroup; c++)
+                                for (var kd = 0; kd < Kd; kd++)
+                                    for (var kh = 0; kh < Kh; kh++)
+                                        for (var kw = 0; kw < Kw; kw++)
+                                        {
+                                            var z = od * Sd - Pd + kd * Dd;
+                                            var y = oh * Sh - Ph + kh * Dh;
+                                            var x = ow * Sw - Pw + kw * Dw;
+                                            if (Transposed)
+                                            {
+                                                z = od + Pd - kd * Dd;
+                                                y = oh + Ph - kh * Dh;
+                                                x = ow + Pw - kw * Dw;
+                                                if (z % Sd != 0 || y % Sh != 0 || x % Sw != 0)
+                                                {
+                                                    continue;
+                                                }
+                                                z /= Sd;
+                                                y /= Sh;
+                                                x /= Sw;
+                                            }
+                                            if (z < 0 || z >= D || y < 0 || y >= H || x < 0 || x >= W)
+                                            {
+                                                continue;
+                                            }
+                                            var ic = (co / coGroup) * ciGroup + c;
+                                            var weightIndex = ((((co * ciGroup + c) * Kd + kd) * Kh + kh) * Kw + kw);
+                                            sum += input[((((n * Ci + ic) * D + z) * H + y) * W + x)] * weights[weightIndex];
+                                        }
+                            if (Kind is TileGymConvolutionKind.Forward2D or TileGymConvolutionKind.Transpose2D)
+                            {
+                                sum += convBias[co];
+                            }
+                            if (Kind is TileGymConvolutionKind.Forward2D or TileGymConvolutionKind.Forward3D)
+                            {
+                                sum = Math.Max(sum, 0);
+                            }
+                            if (Kind is TileGymConvolutionKind.Forward2D or TileGymConvolutionKind.Transpose2D)
+                            {
+                                sum += modelBias[co];
+                            }
+                            output[((((n * Co + co) * Od + od) * Oh + oh) * Ow + ow)] = sum;
+                        }
         return output;
     }
 }

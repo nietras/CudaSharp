@@ -1,7 +1,7 @@
-﻿using Microsoft.VisualStudio.TestTools.UnitTesting;
-using System;
+﻿using System;
 using System.Runtime.InteropServices;
 using System.Text;
+using Microsoft.VisualStudio.TestTools.UnitTesting;
 using static CudaSharp.nvcuda;
 
 namespace CudaSharp.Test;

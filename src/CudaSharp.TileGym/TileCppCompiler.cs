@@ -2,7 +2,6 @@
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
-using static CudaSharp.nvcuda;
 using static CudaSharp.nvrtc;
 
 namespace CudaSharp.Tile;

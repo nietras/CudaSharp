@@ -1,5 +1,4 @@
-﻿using System;
-using CudaSharp.Tile;
+﻿using CudaSharp.Tile;
 using static CudaSharp.nvcuda;
 
 namespace CudaSharp.Tester;
