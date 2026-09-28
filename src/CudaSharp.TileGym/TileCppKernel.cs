@@ -216,6 +216,39 @@ public sealed class TileCppKernel : IDisposable
         cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, stream, arg1, arg2, arg3, arg4, arg5, arg6).Ok();
     }
 
+    /// <summary>Launches a CUDA Tile C++ kernel with seven unmanaged arguments.</summary>
+    public void Launch<T1, T2, T3, T4, T5, T6, T7>(TileCppConfig config, TileCppGrid grid, CUstream stream,
+        T1 arg1, T2 arg2, T3 arg3, T4 arg4, T5 arg5, T6 arg6, T7 arg7)
+        where T1 : unmanaged
+        where T2 : unmanaged
+        where T3 : unmanaged
+        where T4 : unmanaged
+        where T5 : unmanaged
+        where T6 : unmanaged
+        where T7 : unmanaged
+    {
+        var function = GetFunction(config);
+        cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, stream,
+            arg1, arg2, arg3, arg4, arg5, arg6, arg7).Ok();
+    }
+
+    /// <summary>Launches a CUDA Tile C++ kernel with eight unmanaged arguments.</summary>
+    public void Launch<T1, T2, T3, T4, T5, T6, T7, T8>(TileCppConfig config, TileCppGrid grid, CUstream stream,
+        T1 arg1, T2 arg2, T3 arg3, T4 arg4, T5 arg5, T6 arg6, T7 arg7, T8 arg8)
+        where T1 : unmanaged
+        where T2 : unmanaged
+        where T3 : unmanaged
+        where T4 : unmanaged
+        where T5 : unmanaged
+        where T6 : unmanaged
+        where T7 : unmanaged
+        where T8 : unmanaged
+    {
+        var function = GetFunction(config);
+        cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, stream,
+            arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8).Ok();
+    }
+
     /// <summary>Unloads all context-specific CUDA modules owned by this kernel.</summary>
     /// <seealso href="https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__MODULE.html" />
     public void Dispose()

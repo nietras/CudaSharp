@@ -76,15 +76,8 @@ static class TileGymMoeScenarios
 
         void Stage4()
         {
-            var pt = top.Pointer.Value;
-            var ps = sorted.Pointer.Value;
-            var pe = expertIds.Pointer.Value;
-            var pc = counts.Pointer.Value;
-            var pcs = cumsum.Pointer.Value;
-            var n = numel;
-            var per = tokensPerThread;
-            var args = stackalloc IntPtr[] { (IntPtr)(&pt), (IntPtr)(&ps), (IntPtr)(&pe), (IntPtr)(&pc), (IntPtr)(&pcs), (IntPtr)(&n), (IntPtr)(&per) };
-            s4.Launch(Config, new(experts), runtime.Stream, new(args, 7));
+            s4.Launch(Config, new(experts), runtime.Stream,
+                top.Pointer, sorted.Pointer, expertIds.Pointer, counts.Pointer, cumsum.Pointer, numel, tokensPerThread);
         }
 
         var t1 = TileGymKernel.Measure(runtime, () => { counts.Clear(); Stage1(); });

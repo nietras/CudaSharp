@@ -170,17 +170,13 @@ static class TileGymAttentionScenarios
             var cap = 0f;
             if (sink)
             {
-                var args = stackalloc IntPtr[]
-                {
-                    (IntPtr)(&pq), (IntPtr)(&pk), (IntPtr)(&pv), (IntPtr)(&sinkp),
-                    (IntPtr)(&po), (IntPtr)(&pl), (IntPtr)(&ps), (IntPtr)(&scale)
-                };
-                kernel.Launch(Config, new(1, 1, 1), runtime.Stream, new(args, 8));
+                kernel.Launch(Config, new(1, 1, 1), runtime.Stream,
+                    pq, pk, pv, sinkp, po, pl, ps, scale);
             }
             else if (gemma)
             {
-                var args = stackalloc IntPtr[] { (IntPtr)(&pq), (IntPtr)(&pk), (IntPtr)(&pv), (IntPtr)(&po), (IntPtr)(&pl), (IntPtr)(&scale), (IntPtr)(&cap) };
-                kernel.Launch(Config, new(1, 1, 1), runtime.Stream, new(args, 7));
+                kernel.Launch(Config, new(1, 1, 1), runtime.Stream,
+                    pq, pk, pv, po, pl, scale, cap);
             }
             else
             {

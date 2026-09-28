@@ -102,9 +102,6 @@ static class TileGymMatrixScenarios
 
         void Launch(TileCppKernel kernel, TileCppConfig config, TileCppGrid grid)
         {
-            var pa = a.Pointer.Value;
-            var pb = b.Pointer.Value;
-            var pc = c.Pointer.Value;
             if (persistent)
             {
                 kernel.Launch(config, grid, runtime.Stream, a.Pointer, b.Pointer, c.Pointer);
@@ -115,12 +112,8 @@ static class TileGymMatrixScenarios
                 var mm = m;
                 var nn = n;
                 var kk = k;
-                var args = stackalloc IntPtr[]
-                {
-                    (IntPtr)(&pa), (IntPtr)(&pb), (IntPtr)(&pc), (IntPtr)(&q),
-                    (IntPtr)(&mm), (IntPtr)(&nn), (IntPtr)(&kk)
-                };
-                kernel.Launch(config, grid, runtime.Stream, new(args, 7));
+                kernel.Launch(config, grid, runtime.Stream,
+                    a.Pointer, b.Pointer, c.Pointer, q, mm, nn, kk);
             }
         }
 

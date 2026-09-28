@@ -83,18 +83,7 @@ static class TileGymNormalizationScenarios
             }
             else
             {
-                var args = stackalloc IntPtr[]
-                {
-                    (IntPtr)(&px),
-                    (IntPtr)(&py),
-                    (IntPtr)(&pw),
-                    (IntPtr)(&pb),
-                    (IntPtr)(&pm),
-                    (IntPtr)(&pr),
-                    (IntPtr)(&eps),
-                    (IntPtr)(&shift)
-                };
-                selectedKernel.Launch(config, grid, runtime.Stream, new(args, 8));
+                selectedKernel.Launch(config, grid, runtime.Stream, px, py, pw, pb, pm, pr, eps, shift);
             }
         }
 
@@ -257,26 +246,10 @@ static class TileGymNormalizationScenarios
 
         void Launch()
         {
-            var pdx = dx.Pointer.Value;
-            var pdy = dy.Pointer.Value;
-            var px = x.Pointer.Value;
-            var pw = w.Pointer.Value;
-            var pr = r.Pointer.Value;
-            var pt = temp.Pointer.Value;
             var stride = columns;
             var n = columns;
-            var args = stackalloc IntPtr[]
-            {
-                (IntPtr)(&pdx),
-                (IntPtr)(&pdy),
-                (IntPtr)(&px),
-                (IntPtr)(&pw),
-                (IntPtr)(&pr),
-                (IntPtr)(&pt),
-                (IntPtr)(&stride),
-                (IntPtr)(&n)
-            };
-            kernel.Launch(Config, new(rows), runtime.Stream, new(args, 8));
+            kernel.Launch(Config, new(rows), runtime.Stream,
+                dx.Pointer, dy.Pointer, x.Pointer, w.Pointer, r.Pointer, temp.Pointer, stride, n);
         }
 
         var timing = TileGymKernel.Measure(runtime, Launch);

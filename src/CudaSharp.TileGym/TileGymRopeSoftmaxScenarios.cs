@@ -115,12 +115,8 @@ static class TileGymRopeSoftmaxScenarios
             var programs = rows;
             if (backward)
             {
-                var args = stackalloc IntPtr[]
-                {
-                    (IntPtr)(&po), (IntPtr)(&pi), (IntPtr)(&pdy), (IntPtr)(&stride),
-                    (IntPtr)(&stride), (IntPtr)(&stride), (IntPtr)(&ncols)
-                };
-                kernel.Launch(config, grid, runtime.Stream, new(args, 7));
+                kernel.Launch(config, grid, runtime.Stream,
+                    po, pi, pdy, stride, stride, stride, ncols);
             }
             else if (online)
             {
@@ -128,12 +124,8 @@ static class TileGymRopeSoftmaxScenarios
             }
             else
             {
-                var args = stackalloc IntPtr[]
-                {
-                    (IntPtr)(&po), (IntPtr)(&pi), (IntPtr)(&stride), (IntPtr)(&stride),
-                    (IntPtr)(&nrows), (IntPtr)(&ncols), (IntPtr)(&programs)
-                };
-                kernel.Launch(config, grid, runtime.Stream, new(args, 7));
+                kernel.Launch(config, grid, runtime.Stream,
+                    po, pi, stride, stride, nrows, ncols, programs);
             }
         }
         float[] expected;

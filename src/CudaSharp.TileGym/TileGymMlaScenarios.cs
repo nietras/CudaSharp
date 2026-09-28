@@ -43,17 +43,8 @@ static class TileGymMlaScenarios
 
         void Launch()
         {
-            var pq = q.Pointer.Value;
-            var pqp = qpe.Pointer.Value;
-            var pk = k.Pointer.Value;
-            var pkp = kpe.Pointer.Value;
-            var pv = v.Pointer.Value;
-            var po = o.Pointer.Value;
-            var sc = scale;
-
-            var args = stackalloc IntPtr[] { (IntPtr)(&pq), (IntPtr)(&pqp), (IntPtr)(&pk), (IntPtr)(&pkp), (IntPtr)(&pv), (IntPtr)(&po), (IntPtr)(&sc) };
-
-            kernel.Launch(Config, new(1, 1), runtime.Stream, new(args, 7));
+            kernel.Launch(Config, new(1, 1), runtime.Stream,
+                q.Pointer, qpe.Pointer, k.Pointer, kpe.Pointer, v.Pointer, o.Pointer, scale);
         }
 
         var timing = TileGymKernel.Measure(runtime, Launch);
@@ -157,22 +148,8 @@ static class TileGymMlaScenarios
 
         void Launch()
         {
-            var pq = q.Pointer.Value;
-            var pqp = qpe.Pointer.Value;
-            var pk = kv.Pointer.Value;
-            var pv = kv.Pointer.Value;
-            var pkp = kpe.Pointer.Value;
-            var po = o.Pointer.Value;
-            var pl = l.Pointer.Value;
-            var sc = scale;
-
-            var args = stackalloc IntPtr[]
-            {
-                (IntPtr)(&pq), (IntPtr)(&pqp), (IntPtr)(&pk), (IntPtr)(&pv),
-                (IntPtr)(&pkp), (IntPtr)(&po), (IntPtr)(&pl), (IntPtr)(&sc)
-            };
-
-            kernel.Launch(Config, new(1, 1, 1), runtime.Stream, new(args, 8));
+            kernel.Launch(Config, new(1, 1, 1), runtime.Stream,
+                q.Pointer, qpe.Pointer, kv.Pointer, kv.Pointer, kpe.Pointer, o.Pointer, l.Pointer, scale);
         }
 
         var timing = TileGymKernel.Measure(runtime, Launch);
