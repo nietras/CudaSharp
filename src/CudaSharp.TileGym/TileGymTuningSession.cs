@@ -1,7 +1,7 @@
 ﻿using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
-using CudaSharp.Tile;
+using CudaSharp.TileGym;
 using static CudaSharp.nvcuda;
 
 namespace CudaSharp.Tester;

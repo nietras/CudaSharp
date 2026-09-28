@@ -1,6 +1,6 @@
 ﻿using System.Collections.Generic;
 using System.Linq;
-using CudaSharp.Tile;
+using CudaSharp.TileGym;
 
 namespace CudaSharp.Tester;
 

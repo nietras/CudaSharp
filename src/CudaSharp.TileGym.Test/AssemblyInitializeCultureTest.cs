@@ -4,7 +4,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 [assembly: Parallelize]
 
-namespace CudaSharp.Test;
+namespace CudaSharp.TileGym.Test;
 
 [TestClass]
 public static class AssemblyInitializeCultureTest

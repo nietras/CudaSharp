@@ -1,5 +1,5 @@
 ﻿using System.Collections.Generic;
-using CudaSharp.Tile;
+using CudaSharp.TileGym;
 
 namespace CudaSharp.Tester;
 

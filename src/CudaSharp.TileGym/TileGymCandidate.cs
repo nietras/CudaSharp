@@ -2,7 +2,7 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Linq;
-using CudaSharp.Tile;
+using CudaSharp.TileGym;
 
 namespace CudaSharp.Tester;
 

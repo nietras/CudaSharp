@@ -1,6 +1,6 @@
 ﻿using System.Diagnostics;
 using System.IO;
-using CudaSharp.Tile;
+using CudaSharp.TileGym;
 using static CudaSharp.nvcuda;
 
 namespace CudaSharp.Tester;

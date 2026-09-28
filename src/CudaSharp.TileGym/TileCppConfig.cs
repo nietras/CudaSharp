@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
 
-namespace CudaSharp.Tile;
+namespace CudaSharp.TileGym;
 
 /// <summary>Describes one CUDA Tile C++ kernel compilation configuration.</summary>
 /// <remarks>

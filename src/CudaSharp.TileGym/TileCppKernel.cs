@@ -5,7 +5,7 @@ using System.Runtime.InteropServices;
 using System.Threading;
 using static CudaSharp.nvcuda;
 
-namespace CudaSharp.Tile;
+namespace CudaSharp.TileGym;
 
 /// <summary>Compiles, caches, loads, and launches variants of a CUDA Tile C++ kernel.</summary>
 /// <remarks>

@@ -3,7 +3,7 @@ using System.Linq;
 using System.Threading;
 using static CudaSharp.nvcuda;
 
-namespace CudaSharp.Tile;
+namespace CudaSharp.TileGym;
 
 /// <summary>Specifies CUDA Tile C++ benchmark time budgets.</summary>
 /// <seealso href="https://docs.nvidia.com/cuda/cutile-python/performance.html" />

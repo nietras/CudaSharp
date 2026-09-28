@@ -4,12 +4,11 @@ using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
-using CudaSharp.Tile;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using static CudaSharp.nvcuda;
 using static CudaSharp.nvrtc;
 
-namespace CudaSharp.Test;
+namespace CudaSharp.TileGym.Test;
 
 [TestClass]
 public class TileCppTest

@@ -4,7 +4,7 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using static CudaSharp.nvrtc;
 
-namespace CudaSharp.Tile;
+namespace CudaSharp.TileGym;
 
 /// <summary>Contains a CUDA Tile C++ virtual header supplied to NVRTC.</summary>
 /// <seealso href="https://docs.nvidia.com/cuda/nvrtc/index.html#group__compilation" />

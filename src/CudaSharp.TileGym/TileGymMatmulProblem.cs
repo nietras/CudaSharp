@@ -1,4 +1,4 @@
-﻿using CudaSharp.Tile;
+﻿using CudaSharp.TileGym;
 
 namespace CudaSharp.Tester;
 
