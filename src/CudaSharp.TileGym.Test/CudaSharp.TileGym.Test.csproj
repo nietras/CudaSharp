@@ -10,13 +10,12 @@
   <ItemGroup>
     <ProjectReference Include="..\CudaSharp\CudaSharp.csproj" />
     <ProjectReference Include="..\CudaSharp.TileGym\CudaSharp.TileGym.csproj" />
-    <Content Include="..\..\src-tilecpp\**\*.cuh" Link="src-tilecpp\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
-  
+
   <ItemGroup>
     <AssemblyAttribute Include="System.Diagnostics.CodeAnalysis.ExcludeFromCodeCoverageAttribute" />
   </ItemGroup>
-  
+
   <ItemGroup>
     <PackageReference Include="coverlet.collector" Version="10.0.1">
       <PrivateAssets>all</PrivateAssets>
