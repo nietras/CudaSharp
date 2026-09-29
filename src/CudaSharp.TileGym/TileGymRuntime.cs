@@ -19,10 +19,8 @@ sealed record TileGymRun(TileGymKernel Kernel, TileGymSelection Selection, doubl
 
 sealed class TileGymRuntime : IDisposable
 {
-    const int HostIterations = 10;
-
     readonly TileGymTuner _tuner;
-    readonly ITileCppTimer _timer = new CudaEventTileCppTimer();
+    readonly CudaEventTileCppTimer _timer = new();
 
     public TileGymRuntime(int deviceOrdinal)
     {
@@ -164,8 +162,8 @@ sealed class TileGymRuntime : IDisposable
 
     (double Kernel, double Host) Measure(Action launch)
     {
-        var kernel = _timer.Measure(launch, Stream, new TileCppTimingOptions());
-        return (kernel, MeasureHost(launch, HostIterations));
+        var measurement = _timer.MeasureWithHost(launch, Stream, new TileCppTimingOptions());
+        return (measurement.KernelMilliseconds, measurement.HostMilliseconds);
     }
 
     (double Kernel, double Host) MeasureFixed(Action launch, int warmupCount, int iterationCount)
@@ -181,6 +179,7 @@ sealed class TileGymRuntime : IDisposable
         cuEventCreate(out var end, 0).Ok();
         try
         {
+            var host = Stopwatch.StartNew();
             cuEventRecord(start, Stream).Ok();
             for (var i = 0; i < iterationCount; i++)
             {
@@ -188,27 +187,15 @@ sealed class TileGymRuntime : IDisposable
             }
             cuEventRecord(end, Stream).Ok();
             cuEventSynchronize(end).Ok();
+            host.Stop();
             cuEventElapsedTime(out var milliseconds, start, end).Ok();
-            return (milliseconds / iterationCount, MeasureHost(launch, iterationCount));
+            return (milliseconds / iterationCount, host.Elapsed.TotalMilliseconds / iterationCount);
         }
         finally
         {
             cuEventDestroy(start).Ok();
             cuEventDestroy(end).Ok();
         }
-    }
-
-    double MeasureHost(Action launch, int iterations)
-    {
-        Synchronize();
-        var watch = Stopwatch.StartNew();
-        for (var i = 0; i < iterations; i++)
-        {
-            launch();
-        }
-        Synchronize();
-        watch.Stop();
-        return watch.Elapsed.TotalMilliseconds / iterations;
     }
 
     public void Dispose()

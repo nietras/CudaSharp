@@ -1,4 +1,5 @@
 ﻿using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -47,6 +48,12 @@ public interface ITileCppTimer
     float Measure(Action launch, CUstream stream, TileCppTimingOptions options);
 }
 
+/// <summary>Kernel and host timings from one measurement.</summary>
+/// <param name="KernelMilliseconds">Representative device execution time per launch.</param>
+/// <param name="HostMilliseconds">Mean host wall time per launch over the back-to-back warmup launches.</param>
+/// <seealso href="https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__EVENT.html" />
+public readonly record struct TileCppMeasurement(float KernelMilliseconds, double HostMilliseconds);
+
 /// <summary>Measures CUDA Tile C++ launches with per-invocation CUDA event pairs.</summary>
 /// <seealso href="https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__EVENT.html" />
 public sealed class CudaEventTileCppTimer : ITileCppTimer
@@ -55,7 +62,19 @@ public sealed class CudaEventTileCppTimer : ITileCppTimer
     public void Synchronize(CUstream stream) => cuStreamSynchronize(stream).Ok();
 
     /// <inheritdoc />
-    public float Measure(Action launch, CUstream stream, TileCppTimingOptions options)
+    public float Measure(Action launch, CUstream stream, TileCppTimingOptions options) =>
+        MeasureWithHost(launch, stream, options).KernelMilliseconds;
+
+    /// <summary>
+    /// Measures device time with per-launch CUDA event pairs and host wall time over the warmup launches, so both
+    /// come from one measurement without extra launches.
+    /// </summary>
+    /// <param name="launch">Callback that enqueues one kernel launch.</param>
+    /// <param name="stream">CUDA stream used by the callback.</param>
+    /// <param name="options">Warmup and measurement budgets.</param>
+    /// <returns>Device and host time per launch in milliseconds.</returns>
+    /// <seealso href="https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__EVENT.html" />
+    public TileCppMeasurement MeasureWithHost(Action launch, CUstream stream, TileCppTimingOptions options)
     {
         ArgumentNullException.ThrowIfNull(launch);
         ArgumentNullException.ThrowIfNull(options);
@@ -67,9 +86,14 @@ public sealed class CudaEventTileCppTimer : ITileCppTimer
         var warmupCount = Math.Max(1, (int)(options.WarmupMilliseconds / Math.Max(estimate, 0.001f)));
         var repeatCount = Math.Max(10, (int)(options.MeasurementMilliseconds / Math.Max(estimate, 0.001f)));
 
+        var host = Stopwatch.StartNew();
         for (var i = 0; i < warmupCount; i++)
+        {
             launch();
+        }
         Synchronize(stream);
+        host.Stop();
+        var hostMilliseconds = host.Elapsed.TotalMilliseconds / warmupCount;
 
         var starts = new CUevent[repeatCount];
         var ends = new CUevent[repeatCount];
@@ -98,7 +122,7 @@ public sealed class CudaEventTileCppTimer : ITileCppTimer
                 first = 0;
                 length = times.Length;
             }
-            return times[first + length / 2];
+            return new(times[first + length / 2], hostMilliseconds);
         }
         finally
         {
