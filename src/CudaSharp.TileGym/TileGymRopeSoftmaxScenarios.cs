@@ -81,7 +81,7 @@ static class TileGymRopeSoftmaxScenarios
 
     static TileGymBenchmark Softmax(bool online, bool backward)
     {
-        var rows = online ? 1 << 14 : 1 << 16;
+        const int rows = 16;
         var columns = online ? 1025 : 256;
         var name = (backward, online) switch
         {

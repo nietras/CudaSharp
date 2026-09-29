@@ -54,12 +54,14 @@ public sealed class TileCppKernel : IDisposable
     }
 
     /// <summary>Compiles a configuration to TileIR without requiring a CUDA context or loading a module.</summary>
-    public void Compile(TileCppConfig config)
+    /// <returns>The TileIR size in bytes.</returns>
+    public int Compile(TileCppConfig config)
     {
         ArgumentNullException.ThrowIfNull(config);
         ObjectDisposedException.ThrowIf(_disposed, this);
-        GetOrCompile(config, GetConfigKey(config));
+        var compilation = GetOrCompile(config, GetConfigKey(config));
         ObjectDisposedException.ThrowIf(_disposed, this);
+        return compilation.TileIr.Length;
     }
 
     /// <summary>Loads a previously compiled configuration in the current CUDA context.</summary>

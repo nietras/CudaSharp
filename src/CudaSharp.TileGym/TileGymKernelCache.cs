@@ -1,8 +1,10 @@
 ﻿using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Threading.Tasks;
 using CudaSharp.TileGym;
 using static CudaSharp.nvcuda;
@@ -11,14 +13,81 @@ namespace CudaSharp.Tester;
 
 /// <summary>Result of compiling (NVRTC) and loading (driver JIT) one kernel specialization.</summary>
 sealed record TileGymCompiledKernel(TileGymKernelSpec Spec, CUfunction Function,
-    double CompileMilliseconds, double LoadMilliseconds, Exception? Error = null);
+    double CompileMilliseconds, double LoadMilliseconds, Exception? Error = null,
+    long CompileStartTimestamp = 0, long LoadStartTimestamp = 0, int TileIrBytes = 0);
 
-readonly record struct TileGymPrecompileSummary(int Kernels, int Failed, double WallMilliseconds,
-    double CompileMilliseconds, double LoadMilliseconds)
+/// <summary>Per-kernel compile and load timings for one <see cref="TileGymKernelCache.Prepare" /> call.</summary>
+sealed record TileGymPrecompileSummary(IReadOnlyList<TileGymCompiledKernel> Results, long StartTimestamp,
+    double CompileWallMilliseconds, double LoadWallMilliseconds, int CompileParallelism, int LoadParallelism,
+    double CpuMilliseconds, long PeakWorkingSetBytes)
 {
+    public int Failed => Results.Count(static c => c.Error is not null);
+    public double CompileMilliseconds => Results.Sum(static c => c.CompileMilliseconds);
+    public double LoadMilliseconds => Results.Sum(static c => c.LoadMilliseconds);
+    public double WallMilliseconds => CompileWallMilliseconds + LoadWallMilliseconds;
+
     public override string ToString() =>
-        $"Precompiled {Kernels} kernels ({Failed} failed) in {WallMilliseconds / 1000:F1} s " +
-        $"(sum compile {CompileMilliseconds / 1000:F1} s, sum load {LoadMilliseconds / 1000:F1} s)";
+        $"Precompiled {Results.Count} kernels ({Failed} failed) in {WallMilliseconds / 1000:F1} s: " +
+        $"compile {CompileWallMilliseconds / 1000:F1} s wall ({CompileMilliseconds / 1000:F1} s sum, " +
+        $"parallelism {CompileParallelism}), load {LoadWallMilliseconds / 1000:F1} s wall " +
+        $"({LoadMilliseconds / 1000:F1} s sum, parallelism {LoadParallelism}), " +
+        $"CPU {CpuMilliseconds / 1000:F1} s, peak working set {PeakWorkingSetBytes / (1024 * 1024)} MB";
+
+    public void Write(string directory)
+    {
+        Directory.CreateDirectory(directory);
+        var csv = new StringBuilder("Kernel,Header,TemplateArguments,TileIrBytes,CompileStartMilliseconds," +
+            "CompileMilliseconds,LoadStartMilliseconds,LoadMilliseconds,TotalMilliseconds,Error\n");
+        var markdown = new StringBuilder();
+        markdown.AppendLine("# CudaSharp TileGym precompile").AppendLine().AppendLine(ToString()).AppendLine();
+        markdown.AppendLine("| Kernel | Template arguments | TileIR bytes | Compile start ms | Compile ms | " +
+            "Load start ms | Load ms | Total ms | Error |");
+        markdown.AppendLine("|---|---|---:|---:|---:|---:|---:|---:|---|");
+        foreach (var row in Rows())
+        {
+            var error = row.Result.Error?.Message.ReplaceLineEndings(" ") ?? string.Empty;
+            string[] fields =
+            [
+                row.Result.Spec.Name, row.Result.Spec.Header, row.Result.Spec.TemplateArguments,
+                row.Result.TileIrBytes.ToString(CultureInfo.InvariantCulture),
+                Format(row.CompileStart), Format(row.Result.CompileMilliseconds), Format(row.LoadStart),
+                Format(row.Result.LoadMilliseconds), Format(row.Total), error
+            ];
+            csv.AppendJoin(',', fields.Select(static f => $"\"{f.Replace("\"", "\"\"")}\"")).Append('\n');
+            markdown.Append("| ").AppendJoin(" | ", fields.Select(static f => f.Replace("|", "\\|"))).AppendLine(" |");
+        }
+        File.WriteAllText(Path.Combine(directory, "tilegym-precompile.csv"), csv.ToString());
+        File.WriteAllText(Path.Combine(directory, "tilegym-precompile.md"), markdown.ToString());
+    }
+
+    /// <summary>Writes per-kernel compile and load times, slowest first.</summary>
+    public void WriteTo(TextWriter writer)
+    {
+        ArgumentNullException.ThrowIfNull(writer);
+        writer.WriteLine(ToString());
+        writer.WriteLine($"{"TileIR B",10} {"Compile ms",10} {"Load ms",10} {"Load start",10}  Kernel");
+        foreach (var row in Rows())
+        {
+            var failed = row.Result.Error is null ? "" : "  FAILED";
+            writer.WriteLine($"{row.Result.TileIrBytes,10} {row.Result.CompileMilliseconds,10:F0} " +
+                $"{row.Result.LoadMilliseconds,10:F0} {row.LoadStart,10:F0}  {row.Result.Spec}{failed}");
+        }
+    }
+
+    Row[] Rows() => Results
+        .Select(r => new Row(r, Elapsed(r.CompileStartTimestamp), Elapsed(r.LoadStartTimestamp)))
+        .OrderByDescending(static r => r.Total)
+        .ToArray();
+
+    double Elapsed(long timestamp) =>
+        timestamp == 0 ? 0 : Stopwatch.GetElapsedTime(StartTimestamp, timestamp).TotalMilliseconds;
+
+    static string Format(double value) => value.ToString("0.###", CultureInfo.InvariantCulture);
+
+    readonly record struct Row(TileGymCompiledKernel Result, double CompileStart, double LoadStart)
+    {
+        public double Total => Result.CompileMilliseconds + Result.LoadMilliseconds;
+    }
 }
 
 /// <summary>
@@ -52,18 +121,37 @@ sealed class TileGymKernelCache : IDisposable
         _context = context;
     }
 
-    /// <summary>Compiles and loads all distinct specializations in parallel; failures are recorded, not thrown.</summary>
-    public TileGymPrecompileSummary Prepare(IEnumerable<TileGymKernelSpec> specs)
+    /// <summary>
+    /// Compiles all distinct specializations with NVRTC in parallel, then loads them in the driver with at most
+    /// <paramref name="loadParallelism" /> concurrent loads. Failures are recorded, not thrown.
+    /// </summary>
+    public TileGymPrecompileSummary Prepare(IEnumerable<TileGymKernelSpec> specs, int loadParallelism)
     {
         ArgumentNullException.ThrowIfNull(specs);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(loadParallelism);
         var distinct = specs.Distinct().ToArray();
         _compiler.PrepareBundledHeaders();
-        var watch = Stopwatch.StartNew();
+        using var process = Process.GetCurrentProcess();
+        var cpuStart = process.TotalProcessorTime;
+        var start = Stopwatch.GetTimestamp();
+        var compileParallelism = Environment.ProcessorCount;
+        var pending = new Pending[distinct.Length];
+        var compileOptions = new ParallelOptions { MaxDegreeOfParallelism = compileParallelism };
+        Parallel.For(0, distinct.Length, compileOptions, i => pending[i] = Compile(distinct[i]));
+        var compileWall = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
+        var loadStart = Stopwatch.GetTimestamp();
         var compiled = new TileGymCompiledKernel[distinct.Length];
-        Parallel.For(0, distinct.Length, i => compiled[i] = Get(distinct[i]));
-        watch.Stop();
-        return new(compiled.Length, compiled.Count(static c => c.Error is not null), watch.Elapsed.TotalMilliseconds,
-            compiled.Sum(static c => c.CompileMilliseconds), compiled.Sum(static c => c.LoadMilliseconds));
+        var loadOptions = new ParallelOptions { MaxDegreeOfParallelism = loadParallelism };
+        Parallel.For(0, distinct.Length, loadOptions, i =>
+        {
+            var result = Load(pending[i]);
+            compiled[i] = _kernels.GetOrAdd(result.Spec, new Lazy<TileGymCompiledKernel>(result)).Value;
+        });
+        var loadWall = Stopwatch.GetElapsedTime(loadStart).TotalMilliseconds;
+        process.Refresh();
+        var cpu = (process.TotalProcessorTime - cpuStart).TotalMilliseconds;
+        return new(compiled, start, compileWall, loadWall, compileParallelism, loadParallelism, cpu,
+            process.PeakWorkingSet64);
     }
 
     /// <summary>Gets a compiled specialization, building it on demand if it was not prepared.</summary>
@@ -76,25 +164,52 @@ sealed class TileGymKernelCache : IDisposable
 
     TileGymCompiledKernel Build(TileGymKernelSpec spec)
     {
-        // Module loading is per context and the context is current per thread, so set it on worker threads.
-        cuCtxSetCurrent(_context).Ok();
-        var compile = 0d;
-        var watch = Stopwatch.StartNew();
+        var pending = Compile(spec);
+        return Load(pending);
+    }
+
+    Pending Compile(TileGymKernelSpec spec)
+    {
+        var start = Stopwatch.GetTimestamp();
         try
         {
             var kernel = Create(spec);
             _loaded.Add(kernel);
-            kernel.Compile(Config);
-            compile = watch.Elapsed.TotalMilliseconds;
-            watch.Restart();
-            var function = kernel.LoadFunction(Config);
-            return new(spec, function, compile, watch.Elapsed.TotalMilliseconds);
+            var bytes = kernel.Compile(Config);
+            return new(spec, kernel, Stopwatch.GetElapsedTime(start).TotalMilliseconds, start, null, bytes);
         }
         catch (Exception ex)
         {
-            return new(spec, default, compile, 0, ex);
+            return new(spec, null, Stopwatch.GetElapsedTime(start).TotalMilliseconds, start, ex);
         }
     }
+
+    TileGymCompiledKernel Load(Pending pending)
+    {
+        if (pending.Kernel is null)
+        {
+            return new(pending.Spec, default, pending.CompileMilliseconds, 0, pending.Error, pending.Start);
+        }
+        var start = Stopwatch.GetTimestamp();
+        try
+        {
+            // Module loading is per context and the context is current per thread, so set it on worker threads.
+            cuCtxSetCurrent(_context).Ok();
+            var function = pending.Kernel.LoadFunction(Config);
+            var load = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
+            return new(pending.Spec, function, pending.CompileMilliseconds, load, null, pending.Start, start,
+                pending.TileIrBytes);
+        }
+        catch (Exception ex)
+        {
+            var load = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
+            return new(pending.Spec, default, pending.CompileMilliseconds, load, ex, pending.Start, start,
+                pending.TileIrBytes);
+        }
+    }
+
+    readonly record struct Pending(TileGymKernelSpec Spec, TileCppKernel? Kernel, double CompileMilliseconds,
+        long Start, Exception? Error, int TileIrBytes = 0);
 
     TileCppKernel Create(TileGymKernelSpec spec)
     {

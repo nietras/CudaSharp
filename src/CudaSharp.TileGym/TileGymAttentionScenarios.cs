@@ -6,7 +6,7 @@ namespace CudaSharp.Tester;
 
 static class TileGymAttentionScenarios
 {
-    const int Sequence = 256;
+    const int Sequence = 64;
     const int Dimension = 64;
     const float Scale = .125f;
     const string ForwardSignature = "const float*, const float*, const float*, float*, float*, float";

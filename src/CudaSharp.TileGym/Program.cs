@@ -10,6 +10,8 @@ string? filter = null;
 var list = false;
 var tuningChecks = false;
 var enableAutotuning = true;
+// The driver serializes cuModuleLoadData (TileIR JIT); concurrent loads only add contention and memory.
+var loadParallelism = 1;
 for (var i = 0; i < args.Length; i++)
 {
     var hasValue = i + 1 < args.Length;
@@ -30,6 +32,7 @@ for (var i = 0; i < args.Length; i++)
         case "--list": list = true; break;
         case "--tuning-checks": tuningChecks = true; break;
         case "--no-autotune": enableAutotuning = false; break;
+        case "--load-parallelism" when hasValue: loadParallelism = int.Parse(args[++i]); break;
     }
 }
 options = options with { Matmul = matmul };
@@ -59,8 +62,9 @@ if (benchmarks.Length == 0)
     throw new ArgumentException($"No TileGym scenario family matches '{filter}'.", nameof(filter));
 }
 
-var precompile = runtime.Precompile(benchmarks);
-Console.WriteLine(precompile);
+var precompile = runtime.Precompile(benchmarks, loadParallelism);
+precompile.WriteTo(Console.Out);
+precompile.Write(output);
 var report = new TileGymReport();
 foreach (var benchmark in benchmarks)
 {

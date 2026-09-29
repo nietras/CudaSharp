@@ -66,12 +66,12 @@ sealed class TileGymRuntime : IDisposable
         return EnableAutotuning ? kernel.Variants : [kernel.Variants[0]];
     }
 
-    /// <summary>Compiles and loads, in parallel, every variant used by the benchmarks before any launch.</summary>
-    public TileGymPrecompileSummary Precompile(IEnumerable<TileGymBenchmark> benchmarks)
+    /// <summary>Compiles in parallel, then loads, every variant used by the benchmarks before any launch.</summary>
+    public TileGymPrecompileSummary Precompile(IEnumerable<TileGymBenchmark> benchmarks, int loadParallelism)
     {
         ArgumentNullException.ThrowIfNull(benchmarks);
         var specs = benchmarks.SelectMany(static b => b.Kernels).SelectMany(GetVariants).Select(static v => v.Spec);
-        return Kernels.Prepare(specs);
+        return Kernels.Prepare(specs, loadParallelism);
     }
 
     /// <summary>Launches a fixed (single variant) kernel, for example to produce inputs for another kernel.</summary>
