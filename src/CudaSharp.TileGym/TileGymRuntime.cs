@@ -19,6 +19,8 @@ sealed record TileGymRun(TileGymKernel Kernel, TileGymSelection Selection, doubl
 
 sealed class TileGymRuntime : IDisposable
 {
+    const int HostIterations = 10;
+
     readonly TileGymTuner _tuner;
     readonly ITileCppTimer _timer = new CudaEventTileCppTimer();
 
@@ -163,7 +165,7 @@ sealed class TileGymRuntime : IDisposable
     (double Kernel, double Host) Measure(Action launch)
     {
         var kernel = _timer.Measure(launch, Stream, new TileCppTimingOptions());
-        return (kernel, MeasureHost(launch, 100));
+        return (kernel, MeasureHost(launch, HostIterations));
     }
 
     (double Kernel, double Host) MeasureFixed(Action launch, int warmupCount, int iterationCount)
