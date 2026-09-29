@@ -3,7 +3,7 @@ using CudaSharp.TileGym;
 
 namespace CudaSharp.Tester;
 
-readonly record struct TileGymPersistentRmsNormProblem(int Rows, int Columns, int SmCount)
+readonly record struct TileGymPersistentRmsNormProblem(int Rows, int Columns, int SmCount) : ITileGymProblem
 {
     public string TemplateArguments(TileGymCandidate candidate)
     {

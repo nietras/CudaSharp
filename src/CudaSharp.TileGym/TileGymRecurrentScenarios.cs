@@ -1,285 +1,222 @@
-﻿using CudaSharp.TileGym;
+﻿using System.Collections.Generic;
+using CudaSharp.TileGym;
 using static CudaSharp.nvcuda;
 
 namespace CudaSharp.Tester;
 
 static class TileGymRecurrentScenarios
 {
-    static readonly TileCppConfig Config = new([]);
+    const int T = 8, Kd = 16, Vd = 16;
+    const float Scale = .25f;
+    const string Shape = "B=1,T=8,H=1,K=16,V=16";
 
-    public static void RunAll(TileGymRuntime runtime, TileGymReport report)
+    public static IEnumerable<TileGymBenchmark> Create(TileGymRuntime runtime, TileGymOptions options)
     {
-        RunDropout(runtime, report);
-        RunRecurrent(runtime, report);
-        RunChunk(runtime, report);
+        yield return Dropout();
+        yield return Recurrent();
+        yield return Chunk();
     }
 
-    static unsafe void RunDropout(TileGymRuntime runtime, TileGymReport report)
+    static TileGymBenchmark Dropout()
     {
         const int n = 4096;
         const float probability = .25f;
         const uint seed = 2654435761;
         const string name = "seeded_dropout_kernel";
-
         var problem = new TileGymDropoutProblem(n, probability, seed);
-        using var x = runtime.Allocate<float>(n);
-        using var y = runtime.Allocate<float>(n);
-
-        var hx = new float[n];
-        Array.Fill(hx, 1f);
-        x.CopyFrom(hx);
-
-        void Launch(TileCppKernel kernel, TileCppConfig config, TileCppGrid grid)
+        var candidates = TileGymDropoutCandidates.For();
+        var kernel = TileGymKernel.Tuned("dropout.cuh", name, "const float*, float*", problem, candidates);
+        return new(kernel, (runtime, report) =>
         {
-            var function = kernel.GetFunction(config);
-            cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream,
-                x.Pointer, y.Pointer).Ok();
-        }
-
-        var expected = new float[n];
-        for (var i = 0; i < n; i++)
-        {
-            var combined = unchecked((int)((uint)i * 1103515245u + seed));
-            var hash = combined ^ (combined >> 16);
-            hash ^= hash << 8;
-            hash ^= hash >> 4;
-            var random = (hash & 0x7fffffff) / 2147483647f;
-            expected[i] = random > probability ? 1f / (1f - probability) : 0f;
-        }
-
-        var tuned = TileGymTuning.Tune(runtime, problem, TileGymDropoutCandidates.For(),
-            "dropout.cuh", name, "const float*, float*",
-            static (p, candidate) => p.TemplateArguments(candidate),
-            static (p, candidate) => p.Grid(candidate), Launch,
-            validate: _ => TileGymKernel.Validate(y.CopyToHost(), expected, name, 1e-6f, 1e-6f));
-        void LaunchSelected() => Launch(tuned.Kernel, tuned.Candidate.CompilerConfig, tuned.Grid);
-        var timing = TileGymKernel.Measure(runtime, LaunchSelected);
-        TileGymKernel.Validate(y.CopyToHost(), expected, name, 1e-6f, 1e-6f);
-        TileGymKernel.Report(report, "dropout", name, $"{n},p={probability},seed=1",
-            x.ByteLength + y.ByteLength, timing, tuned);
+            using var x = runtime.Allocate<float>(n);
+            using var y = runtime.Allocate<float>(n);
+            var hx = new float[n];
+            Array.Fill(hx, 1f);
+            x.CopyFrom(hx);
+            void Launch(CUfunction function, TileCppGrid grid) =>
+                cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream,
+                    x.Pointer, y.Pointer).Ok();
+            var expected = new float[n];
+            for (var i = 0; i < n; i++)
+            {
+                var combined = unchecked((int)((uint)i * 1103515245u + seed));
+                var hash = combined ^ (combined >> 16);
+                hash ^= hash << 8;
+                hash ^= hash >> 4;
+                var random = (hash & 0x7fffffff) / 2147483647f;
+                expected[i] = random > probability ? 1f / (1f - probability) : 0f;
+            }
+            var run = runtime.Run(kernel, Launch, () => y.Validate(expected, name, 1e-6f, 1e-6f));
+            report.Add("dropout", $"{n},p={probability},seed=1", x.ByteLength + y.ByteLength, run);
+        });
     }
 
-    static unsafe void RunRecurrent(TileGymRuntime runtime, TileGymReport report)
+    static unsafe TileGymBenchmark Recurrent()
     {
-        const int t = 8, kd = 16, vd = 16;
-        const float scale = .25f;
         const string name = "recurrent_gated_delta_rule_fwd_kernel";
-
-        using var kernel = TileGymKernel.Create(
-            runtime.Compiler, "recurrent_gated_delta_rule.cuh", name,
-            $"float, float, float, {kd}, {vd}, false, true, false",
+        var kernel = TileGymKernel.Fixed("recurrent_gated_delta_rule.cuh", name,
+            $"float, float, float, {Kd}, {Vd}, false, true, false",
             "const float*, const float*, const float*, const float*, const float*, float*, " +
-            "const float*, float*, float, int, int, int, int, int");
-        using var q = runtime.Allocate<float>(t * kd);
-        using var k = runtime.Allocate<float>(q.Length);
-        using var v = runtime.Allocate<float>(t * vd);
-        using var g = runtime.Allocate<float>(t);
-        using var beta = runtime.Allocate<float>(t);
-        using var output = runtime.Allocate<float>(t * vd);
-        using var final = runtime.Allocate<float>(kd * vd);
-
-        var hq = Values(q.Length, .03f);
-        var hk = Values(k.Length, .025f);
-        var hv = Values(v.Length, .04f);
-        var hg = new float[t];
-        var hb = new float[t];
-        for (var i = 0; i < t; i++)
+            "const float*, float*, float, int, int, int, int, int",
+            new TileCppGrid(1), "float,OUTPUT_FINAL_STATE=true");
+        return new(kernel, (runtime, report) =>
         {
-            hg[i] = -.05f;
-            hb[i] = .6f;
-        }
-
-        q.CopyFrom(hq);
-        k.CopyFrom(hk);
-        v.CopyFrom(hv);
-        g.CopyFrom(hg);
-        beta.CopyFrom(hb);
-
-        void Launch()
-        {
-            var pq = q.Pointer.Value;
-            var pk = k.Pointer.Value;
-            var pv = v.Pointer.Value;
-            var pg = g.Pointer.Value;
-            var pb = beta.Pointer.Value;
-            var po = output.Pointer.Value;
-            var init = IntPtr.Zero;
-            var pf = final.Pointer.Value;
-            var sc = scale;
-            var b = 1;
-            var seq = t;
-            var h = 1;
-            var kd0 = kd;
-            var vd0 = vd;
-
-            var args = stackalloc IntPtr[]
+            using var inputs = new Inputs(runtime);
+            using var output = runtime.Allocate<float>(T * Vd);
+            using var final = runtime.Allocate<float>(Kd * Vd);
+            void Launch(CUfunction function, TileCppGrid grid)
             {
-                (IntPtr)(&pq),
-                (IntPtr)(&pk),
-                (IntPtr)(&pv),
-                (IntPtr)(&pg),
-                (IntPtr)(&pb),
-                (IntPtr)(&po),
-                (IntPtr)(&init),
-                (IntPtr)(&pf),
-                (IntPtr)(&sc),
-                (IntPtr)(&b),
-                (IntPtr)(&seq),
-                (IntPtr)(&h),
-                (IntPtr)(&kd0),
-                (IntPtr)(&vd0)
-            };
-
-            var function = kernel.GetFunction(Config);
-            cuLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, runtime.Stream,
-                (void**)args, null).Ok();
-        }
-
-        var timing = TileGymKernel.MeasurePhases(runtime, kernel, Config, Launch);
-        var expected = Reference(hq, hk, hv, hg, hb, t, kd, vd, scale, out var state);
-
-        TileGymKernel.Validate(output.CopyToHost(), expected, name, 2e-3f, 2e-3f);
-        TileGymKernel.Validate(final.CopyToHost(), state, name, 2e-3f, 2e-3f);
-        TileGymKernel.Report(report, "recurrent", name, $"B=1,T={t},H=1,K={kd},V={vd}", "float,OUTPUT_FINAL_STATE=true", q.ByteLength + k.ByteLength + v.ByteLength + g.ByteLength + beta.ByteLength + output.ByteLength + final.ByteLength, timing);
+                var pq = inputs.Q.Pointer;
+                var pk = inputs.K.Pointer;
+                var pv = inputs.V.Pointer;
+                var pg = inputs.G.Pointer;
+                var pb = inputs.Beta.Pointer;
+                var po = output.Pointer;
+                var init = IntPtr.Zero;
+                var pf = final.Pointer;
+                var sc = Scale;
+                var b = 1;
+                var seq = T;
+                var h = 1;
+                var kd = Kd;
+                var vd = Vd;
+                var args = stackalloc void*[] { &pq, &pk, &pv, &pg, &pb, &po, &init, &pf, &sc, &b, &seq, &h, &kd, &vd };
+                cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream, args, null).Ok();
+            }
+            void Validate()
+            {
+                output.Validate(inputs.Expected, name, 2e-3f, 2e-3f);
+                final.Validate(inputs.ExpectedState, name, 2e-3f, 2e-3f);
+            }
+            var run = runtime.Run(kernel, Launch, Validate);
+            report.Add("recurrent", Shape, inputs.ByteLength + output.ByteLength + final.ByteLength, run);
+        });
     }
 
-    static unsafe void RunChunk(TileGymRuntime runtime, TileGymReport report)
+    static unsafe TileGymBenchmark Chunk()
     {
-        const int t = 8, chunk = 4, chunks = 2, kd = 16, vd = 16;
-        const float scale = .25f;
-
-        using var intra = TileGymKernel.Create(
-            runtime.Compiler, "chunk_gated_delta_rule.cuh", "chunk_gated_delta_rule_intra_kernel",
-            $"float, float, float, {chunk}, {kd}, false, 1",
+        const int chunk = 4, chunks = 2;
+        const string interName = "chunk_gated_delta_rule_inter_kernel";
+        var label = $"CHUNK={chunk}";
+        var intra = TileGymKernel.Fixed("chunk_gated_delta_rule.cuh", "chunk_gated_delta_rule_intra_kernel",
+            $"float, float, float, {chunk}, {Kd}, false, 1",
             "const float*, const float*, const float*, const float*, const float*, float*, " +
-            "float*, float*, float*, float*, float, int, int, int, int, int, int");
-        using var inter = TileGymKernel.Create(
-            runtime.Compiler, "chunk_gated_delta_rule.cuh", "chunk_gated_delta_rule_inter_kernel",
-            $"float, {chunk}, {kd}, {vd}, false, true, 1",
+            "float*, float*, float*, float*, float, int, int, int, int, int, int",
+            new TileCppGrid(1, chunks), label);
+        var inter = TileGymKernel.Fixed("chunk_gated_delta_rule.cuh", interName,
+            $"float, {chunk}, {Kd}, {Vd}, false, true, 1",
             "const float*, const float*, const float*, const float*, const float*, float*, " +
-            "const float*, float*, int, int, int, int, int");
-        using var q = runtime.Allocate<float>(t * kd);
-        using var k = runtime.Allocate<float>(q.Length);
-        using var v = runtime.Allocate<float>(t * vd);
-        using var beta = runtime.Allocate<float>(t);
-        using var g = runtime.Allocate<float>(t);
-        using var qo = runtime.Allocate<float>(t * kd);
-        using var ko = runtime.Allocate<float>(t * kd);
-        using var vc = runtime.Allocate<float>(t * vd);
-        using var kc = runtime.Allocate<float>(t * kd);
-        using var gc = runtime.Allocate<float>(t);
-        using var output = runtime.Allocate<float>(t * vd);
-        using var final = runtime.Allocate<float>(kd * vd);
-
-        var hq = Values(q.Length, .03f);
-        var hk = Values(k.Length, .025f);
-        var hv = Values(v.Length, .04f);
-        var hg = new float[t];
-        var hb = new float[t];
-        for (var i = 0; i < t; i++)
+            "const float*, float*, int, int, int, int, int",
+            new TileCppGrid(1), label);
+        return new([intra, inter], (runtime, report) =>
         {
-            hg[i] = -.05f;
-            hb[i] = .6f;
-        }
-
-        q.CopyFrom(hq);
-        k.CopyFrom(hk);
-        v.CopyFrom(hv);
-        g.CopyFrom(hg);
-        beta.CopyFrom(hb);
-
-        void Intra()
-        {
-            var pq = q.Pointer.Value;
-            var pk = k.Pointer.Value;
-            var pv = v.Pointer.Value;
-            var pb = beta.Pointer.Value;
-            var pg = g.Pointer.Value;
-            var pqo = qo.Pointer.Value;
-            var pko = ko.Pointer.Value;
-            var pvc = vc.Pointer.Value;
-            var pkc = kc.Pointer.Value;
-            var pgc = gc.Pointer.Value;
-            var sc = scale;
-            var b = 1;
-            var seq = t;
-            var h = 1;
-            var nc = chunks;
-            var kd0 = kd;
-            var vd0 = vd;
-
-            var args = stackalloc IntPtr[]
+            using var inputs = new Inputs(runtime);
+            using var qo = runtime.Allocate<float>(T * Kd);
+            using var ko = runtime.Allocate<float>(T * Kd);
+            using var vc = runtime.Allocate<float>(T * Vd);
+            using var kc = runtime.Allocate<float>(T * Kd);
+            using var gc = runtime.Allocate<float>(T);
+            using var output = runtime.Allocate<float>(T * Vd);
+            using var final = runtime.Allocate<float>(Kd * Vd);
+            void Intra(CUfunction function, TileCppGrid grid)
             {
-                (IntPtr)(&pq),
-                (IntPtr)(&pk),
-                (IntPtr)(&pv),
-                (IntPtr)(&pb),
-                (IntPtr)(&pg),
-                (IntPtr)(&pqo),
-                (IntPtr)(&pko),
-                (IntPtr)(&pvc),
-                (IntPtr)(&pkc),
-                (IntPtr)(&pgc),
-                (IntPtr)(&sc),
-                (IntPtr)(&b),
-                (IntPtr)(&seq),
-                (IntPtr)(&h),
-                (IntPtr)(&nc),
-                (IntPtr)(&kd0),
-                (IntPtr)(&vd0)
-            };
-
-            var function = intra.GetFunction(Config);
-            cuLaunchKernel(function, 1, chunks, 1, 1, 1, 1, 0, runtime.Stream,
-                (void**)args, null).Ok();
-        }
-
-        void Inter()
-        {
-            var pqo = qo.Pointer.Value;
-            var pko = ko.Pointer.Value;
-            var pvc = vc.Pointer.Value;
-            var pkc = kc.Pointer.Value;
-            var pgc = gc.Pointer.Value;
-            var po = output.Pointer.Value;
-            var init = IntPtr.Zero;
-            var pf = final.Pointer.Value;
-            var b = 1;
-            var nc = chunks;
-            var h = 1;
-            var kd0 = kd;
-            var vd0 = vd;
-
-            var args = stackalloc IntPtr[]
+                var pq = inputs.Q.Pointer;
+                var pk = inputs.K.Pointer;
+                var pv = inputs.V.Pointer;
+                var pb = inputs.Beta.Pointer;
+                var pg = inputs.G.Pointer;
+                var pqo = qo.Pointer;
+                var pko = ko.Pointer;
+                var pvc = vc.Pointer;
+                var pkc = kc.Pointer;
+                var pgc = gc.Pointer;
+                var sc = Scale;
+                var b = 1;
+                var seq = T;
+                var h = 1;
+                var nc = chunks;
+                var kd = Kd;
+                var vd = Vd;
+                var args = stackalloc void*[]
+                {
+                    &pq, &pk, &pv, &pb, &pg, &pqo, &pko, &pvc, &pkc, &pgc, &sc, &b, &seq, &h, &nc, &kd, &vd
+                };
+                cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream, args, null).Ok();
+            }
+            void Inter(CUfunction function, TileCppGrid grid)
             {
-                (IntPtr)(&pqo),
-                (IntPtr)(&pko),
-                (IntPtr)(&pvc),
-                (IntPtr)(&pkc),
-                (IntPtr)(&pgc),
-                (IntPtr)(&po),
-                (IntPtr)(&init),
-                (IntPtr)(&pf),
-                (IntPtr)(&b),
-                (IntPtr)(&nc),
-                (IntPtr)(&h),
-                (IntPtr)(&kd0),
-                (IntPtr)(&vd0)
-            };
+                var pqo = qo.Pointer;
+                var pko = ko.Pointer;
+                var pvc = vc.Pointer;
+                var pkc = kc.Pointer;
+                var pgc = gc.Pointer;
+                var po = output.Pointer;
+                var init = IntPtr.Zero;
+                var pf = final.Pointer;
+                var b = 1;
+                var nc = chunks;
+                var h = 1;
+                var kd = Kd;
+                var vd = Vd;
+                var args = stackalloc void*[] { &pqo, &pko, &pvc, &pkc, &pgc, &po, &init, &pf, &b, &nc, &h, &kd, &vd };
+                cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream, args, null).Ok();
+            }
+            var chunked = qo.ByteLength + ko.ByteLength + vc.ByteLength + kc.ByteLength + gc.ByteLength;
+            var intraRun = runtime.Run(intra, Intra);
+            report.Add("recurrent", Shape,
+                inputs.Q.ByteLength + inputs.K.ByteLength + inputs.V.ByteLength + chunked, intraRun);
+            void Validate()
+            {
+                output.Validate(inputs.Expected, interName, 3e-3f, 3e-3f);
+                final.Validate(inputs.ExpectedState, interName, 3e-3f, 3e-3f);
+            }
+            var interRun = runtime.Run(inter, Inter, Validate);
+            report.Add("recurrent", Shape, chunked + output.ByteLength + final.ByteLength, interRun);
+        });
+    }
 
-            var function = inter.GetFunction(Config);
-            cuLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, runtime.Stream,
-                (void**)args, null).Ok();
+    sealed class Inputs : IDisposable
+    {
+        public Inputs(TileGymRuntime runtime)
+        {
+            Q = runtime.Allocate<float>(T * Kd);
+            K = runtime.Allocate<float>(Q.Length);
+            V = runtime.Allocate<float>(T * Vd);
+            G = runtime.Allocate<float>(T);
+            Beta = runtime.Allocate<float>(T);
+            var hq = Values(Q.Length, .03f);
+            var hk = Values(K.Length, .025f);
+            var hv = Values(V.Length, .04f);
+            var hg = new float[T];
+            var hb = new float[T];
+            Array.Fill(hg, -.05f);
+            Array.Fill(hb, .6f);
+            Q.CopyFrom(hq);
+            K.CopyFrom(hk);
+            V.CopyFrom(hv);
+            G.CopyFrom(hg);
+            Beta.CopyFrom(hb);
+            Expected = Reference(hq, hk, hv, hg, hb, T, Kd, Vd, Scale, out var state);
+            ExpectedState = state;
         }
 
-        var intraTiming = TileGymKernel.MeasurePhases(runtime, intra, Config, Intra);
-        var interTiming = TileGymKernel.MeasurePhases(runtime, inter, Config, Inter);
-        var expected = Reference(hq, hk, hv, hg, hb, t, kd, vd, scale, out var state);
+        public CudaBuffer<float> Q { get; }
+        public CudaBuffer<float> K { get; }
+        public CudaBuffer<float> V { get; }
+        public CudaBuffer<float> G { get; }
+        public CudaBuffer<float> Beta { get; }
+        public float[] Expected { get; }
+        public float[] ExpectedState { get; }
+        public nuint ByteLength => Q.ByteLength + K.ByteLength + V.ByteLength + G.ByteLength + Beta.ByteLength;
 
-        TileGymKernel.Validate(output.CopyToHost(), expected, "chunk_gated_delta_rule_inter_kernel", 3e-3f, 3e-3f);
-        TileGymKernel.Validate(final.CopyToHost(), state, "chunk_gated_delta_rule_inter_kernel", 3e-3f, 3e-3f);
-        TileGymKernel.Report(report, "recurrent", "chunk_gated_delta_rule_intra_kernel", $"B=1,T={t},H=1,K={kd},V={vd}", $"CHUNK={chunk}", q.ByteLength + k.ByteLength + v.ByteLength + qo.ByteLength + ko.ByteLength + vc.ByteLength + kc.ByteLength + gc.ByteLength, intraTiming);
-        TileGymKernel.Report(report, "recurrent", "chunk_gated_delta_rule_inter_kernel", $"B=1,T={t},H=1,K={kd},V={vd}", $"CHUNK={chunk}", qo.ByteLength + ko.ByteLength + vc.ByteLength + kc.ByteLength + gc.ByteLength + output.ByteLength + final.ByteLength, interTiming);
+        public void Dispose()
+        {
+            Q.Dispose();
+            K.Dispose();
+            V.Dispose();
+            G.Dispose();
+            Beta.Dispose();
+        }
     }
 
     static float[] Reference(float[] q, float[] k, float[] v, float[] g, float[] beta, int t, int kd, int vd, float scale, out float[] state)

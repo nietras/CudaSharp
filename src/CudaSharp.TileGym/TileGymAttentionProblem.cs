@@ -12,7 +12,7 @@ enum TileGymAttentionKind
 }
 
 readonly record struct TileGymAttentionProblem(
-    TileGymAttentionKind Kind, int Sequence, int Dimension, bool Causal, int Architecture)
+    TileGymAttentionKind Kind, int Sequence, int Dimension, bool Causal, int Architecture) : ITileGymProblem
 {
     public string TemplateArguments(TileGymCandidate candidate)
     {

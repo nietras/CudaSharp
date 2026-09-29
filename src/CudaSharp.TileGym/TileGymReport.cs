@@ -20,8 +20,7 @@ sealed record TileGymResult(
     string? Diagnostic,
     double? HostMilliseconds = null,
     double? LoadMilliseconds = null,
-    double? FirstLaunchMilliseconds = null,
-    double? FirstUseMilliseconds = null);
+    double? FirstLaunchMilliseconds = null);
 
 sealed class TileGymReport
 {
@@ -29,6 +28,27 @@ sealed class TileGymReport
 
     public IReadOnlyList<TileGymResult> Results => _results;
     public void Add(TileGymResult result) => _results.Add(result);
+
+    public void Add(string family, string shape, nuint bytes, TileGymRun run)
+    {
+        ArgumentNullException.ThrowIfNull(run);
+        var selection = run.Selection;
+        var searched = selection.Candidates > 1;
+        string? diagnostic = null;
+        if (searched || selection.Rejections.Count > 0)
+        {
+            diagnostic = $"{selection.Candidates} candidates, {selection.Rejections.Count} rejected.";
+            if (selection.Rejections.Count > 0)
+            {
+                diagnostic += $" First rejection: {selection.Rejections[0]}";
+            }
+        }
+        Add(new TileGymResult(family, run.Kernel.Name, shape, selection.Variant.Label,
+            searched ? "Passed (searched)" : "Passed",
+            selection.Compiled.CompileMilliseconds, selection.TuneMilliseconds, run.KernelMilliseconds,
+            bytes / (run.KernelMilliseconds * 1_000_000.0), "GB/s", diagnostic, run.HostMilliseconds,
+            selection.Compiled.LoadMilliseconds, selection.FirstLaunchMilliseconds));
+    }
 
     public void Write(string directory)
     {
@@ -43,8 +63,8 @@ sealed class TileGymReport
         text.AppendLine("# CudaSharp TileGym performance");
         text.AppendLine();
         text.AppendLine(
-            "| Family | Kernel | Shape | Configuration | Status | Compile ms | Load ms | First launch ms | First use ms | Tune ms | Host ms | Kernel ms | Throughput |");
-        text.AppendLine("|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|");
+            "| Family | Kernel | Shape | Configuration | Status | Compile ms | Load ms | First launch ms | Tune ms | Host ms | Kernel ms | Throughput |");
+        text.AppendLine("|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|");
         foreach (var result in _results)
         {
             text.Append("| ")
@@ -64,8 +84,6 @@ sealed class TileGymReport
                 .Append(" | ")
                 .Append(Format(result.FirstLaunchMilliseconds))
                 .Append(" | ")
-                .Append(Format(result.FirstUseMilliseconds))
-                .Append(" | ")
                 .Append(Format(result.TuneMilliseconds))
                 .Append(" | ")
                 .Append(Format(result.HostMilliseconds))
@@ -83,7 +101,9 @@ sealed class TileGymReport
     public string ToCsv()
     {
         var text = new StringBuilder(
-            "Family,Kernel,Shape,Configuration,Status,CompileMilliseconds,LoadMilliseconds,FirstLaunchMilliseconds,FirstUseMilliseconds,TuneMilliseconds,HostMilliseconds,KernelMilliseconds,Throughput,ThroughputUnit,Diagnostic\n");
+            "Family,Kernel,Shape,Configuration,Status,CompileMilliseconds,LoadMilliseconds," +
+            "FirstLaunchMilliseconds,TuneMilliseconds,HostMilliseconds,KernelMilliseconds,Throughput," +
+            "ThroughputUnit,Diagnostic\n");
         foreach (var result in _results)
         {
             text.AppendLine(
@@ -97,7 +117,6 @@ sealed class TileGymReport
                     Format(result.CompileMilliseconds),
                     Format(result.LoadMilliseconds),
                     Format(result.FirstLaunchMilliseconds),
-                    Format(result.FirstUseMilliseconds),
                     Format(result.TuneMilliseconds),
                     Format(result.HostMilliseconds),
                     Format(result.KernelMilliseconds),

@@ -2,7 +2,7 @@
 
 namespace CudaSharp.Tester;
 
-readonly record struct TileGymDropoutProblem(int Count, float Probability, uint Seed)
+readonly record struct TileGymDropoutProblem(int Count, float Probability, uint Seed) : ITileGymProblem
 {
     public string TemplateArguments(TileGymCandidate candidate) =>
         FormattableString.Invariant($"float, {candidate["BlockSize"]}, {Count}, {Probability:R}f, {Seed}u");

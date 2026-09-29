@@ -1,23 +1,22 @@
-﻿using CudaSharp.TileGym;
+﻿using System.Collections.Generic;
+using CudaSharp.TileGym;
 using static CudaSharp.nvcuda;
 
 namespace CudaSharp.Tester;
 
 static class TileGymRopeSoftmaxScenarios
 {
-    static readonly TileCppConfig Config = new([]);
-
-    public static void RunAll(TileGymRuntime runtime, TileGymReport report)
+    public static IEnumerable<TileGymBenchmark> Create(TileGymRuntime runtime, TileGymOptions options)
     {
-        RunRope(runtime, report, false);
-        RunRope(runtime, report, true);
-        RunSoftmax(runtime, report, false, false);
-        RunSoftmax(runtime, report, false, true);
-        RunSoftmax(runtime, report, true, false);
-        RunSoftmax(runtime, report, true, true);
+        yield return Rope(backward: false);
+        yield return Rope(backward: true);
+        yield return Softmax(online: false, backward: false);
+        yield return Softmax(online: false, backward: true);
+        yield return Softmax(online: true, backward: false);
+        yield return Softmax(online: true, backward: true);
     }
 
-    static unsafe void RunRope(TileGymRuntime runtime, TileGymReport report, bool backward)
+    static TileGymBenchmark Rope(bool backward)
     {
         const int batch = 1;
         const int qHeads = 2;
@@ -26,143 +25,132 @@ static class TileGymRopeSoftmaxScenarios
         const int head = 64;
         const int half = 32;
         var name = backward ? "rope_backward_kernel" : "rope_kernel";
-        var templates = $"float, float, float, {batch}, {qHeads}, {kHeads}, {qHeads}, {kHeads}, {half}, {half}, {head}, 1, {sequence}";
+        var templates = $"float, float, float, {batch}, {qHeads}, {kHeads}, {qHeads}, {kHeads}, {half}, {half}, " +
+            $"{head}, 1, {sequence}";
         if (!backward)
-            templates += $", {qHeads * sequence * head}, {sequence * head}, {head}, {kHeads * sequence * head}, {sequence * head}, {head}";
-        using var kernel = TileGymKernel.Create(runtime.Compiler, "rope.cuh", name, templates, "float*, float*, const float*, const float*");
-        using var q = runtime.Allocate<float>(batch * qHeads * sequence * head);
-        using var k = runtime.Allocate<float>(batch * kHeads * sequence * head);
-        using var cos = runtime.Allocate<float>(sequence * 2 * half);
-        using var sin = runtime.Allocate<float>(sequence * 2 * half);
-        var hq = Values(q.Length);
-        var hk = Values(k.Length);
-        var hc = new float[cos.Length];
-        var hs = new float[sin.Length];
-        for (var s = 0; s < sequence; s++)
         {
-            for (var p = 0; p < 2; p++)
+            templates += $", {qHeads * sequence * head}, {sequence * head}, {head}, " +
+                $"{kHeads * sequence * head}, {sequence * head}, {head}";
+        }
+        var kernel = TileGymKernel.Fixed("rope.cuh", name, templates, "float*, float*, const float*, const float*",
+            new TileCppGrid(batch * sequence));
+        return new(kernel, (runtime, report) =>
+        {
+            using var q = runtime.Allocate<float>(batch * qHeads * sequence * head);
+            using var k = runtime.Allocate<float>(batch * kHeads * sequence * head);
+            using var cos = runtime.Allocate<float>(sequence * 2 * half);
+            using var sin = runtime.Allocate<float>(sequence * 2 * half);
+            var hq = Values(q.Length);
+            var hk = Values(k.Length);
+            var hc = new float[cos.Length];
+            var hs = new float[sin.Length];
+            for (var s = 0; s < sequence; s++)
             {
-                for (var d = 0; d < half; d++)
+                for (var p = 0; p < 2; p++)
                 {
-                    var angle = (s + 1) * (d + 1) / 1024f;
-                    hc[(s * 2 + p) * half + d] = MathF.Cos(angle);
-                    hs[(s * 2 + p) * half + d] = MathF.Sin(angle);
+                    for (var d = 0; d < half; d++)
+                    {
+                        var angle = (s + 1) * (d + 1) / 1024f;
+                        hc[(s * 2 + p) * half + d] = MathF.Cos(angle);
+                        hs[(s * 2 + p) * half + d] = MathF.Sin(angle);
+                    }
                 }
             }
-        }
-        q.CopyFrom(hq);
-        k.CopyFrom(hk);
-        cos.CopyFrom(hc);
-        sin.CopyFrom(hs);
-
-        void Launch()
-        {
-            var function = kernel.GetFunction(Config);
-            cuLaunchKernel(function, batch * sequence, 1, 1, 1, 1, 1, 0, runtime.Stream,
-                q.Pointer, k.Pointer, cos.Pointer, sin.Pointer).Ok();
-        }
-        var timing = TileGymKernel.MeasurePhases(runtime, kernel, Config, Launch);
-        q.CopyFrom(hq);
-        k.CopyFrom(hk);
-        Launch();
-        cuStreamSynchronize(runtime.Stream).Ok();
-        var eq = Rotate(hq, hc, hs, qHeads, sequence, head, backward);
-        var ek = Rotate(hk, hc, hs, kHeads, sequence, head, backward);
-        TileGymKernel.Validate(q.CopyToHost(), eq, name, 5e-4f, 5e-4f);
-        TileGymKernel.Validate(k.CopyToHost(), ek, name, 5e-4f, 5e-4f);
-        TileGymKernel.Report(
-            report, "rope", name,
-            $"B={batch},QH={qHeads},KH={kHeads},S={sequence},D={head}", templates,
-            q.ByteLength + k.ByteLength + cos.ByteLength + sin.ByteLength,
-            timing);
+            cos.CopyFrom(hc);
+            sin.CopyFrom(hs);
+            void Reset()
+            {
+                q.CopyFrom(hq);
+                k.CopyFrom(hk);
+            }
+            void Launch(CUfunction function, TileCppGrid grid) =>
+                cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream,
+                    q.Pointer, k.Pointer, cos.Pointer, sin.Pointer).Ok();
+            var eq = Rotate(hq, hc, hs, qHeads, sequence, head, backward);
+            var ek = Rotate(hk, hc, hs, kHeads, sequence, head, backward);
+            void Validate()
+            {
+                q.Validate(eq, name, 5e-4f, 5e-4f);
+                k.Validate(ek, name, 5e-4f, 5e-4f);
+            }
+            var run = runtime.Run(kernel, Launch, Validate, Reset);
+            report.Add("rope", $"B={batch},QH={qHeads},KH={kHeads},S={sequence},D={head}",
+                q.ByteLength + k.ByteLength + cos.ByteLength + sin.ByteLength, run);
+        });
     }
 
-    static unsafe void RunSoftmax(TileGymRuntime runtime, TileGymReport report, bool online, bool backward)
+    static TileGymBenchmark Softmax(bool online, bool backward)
     {
         const int rows = 4;
         var columns = online ? 1025 : 256;
-        var block = online ? 256 : 256;
-        var name = backward ? (online ? "online_softmax_kernel_backward" : "softmax_kernel_backward") : (online ? "online_softmax_kernel" : "softmax_kernel");
+        var name = (backward, online) switch
+        {
+            (true, true) => "online_softmax_kernel_backward",
+            (true, false) => "softmax_kernel_backward",
+            (false, true) => "online_softmax_kernel",
+            (false, false) => "softmax_kernel",
+        };
         var signature = backward
             ? "float*, const float*, const float*, int, int, int, int"
             : online
                 ? "float*, const float*, int, int, int"
                 : "float*, const float*, int, int, int, int, int";
         var problem = new TileGymSoftmaxProblem(rows, columns, online, backward);
-        using var input = runtime.Allocate<float>(rows * columns);
-        using var output = runtime.Allocate<float>(input.Length);
-        using var dy = backward ? runtime.Allocate<float>(input.Length) : null;
-        var hi = Values(input.Length);
-        var probabilities = Softmax(hi, rows, columns);
-        if (backward)
+        var candidates = TileGymSoftmaxCandidates.For(problem);
+        var kernel = TileGymKernel.Tuned("softmax.cuh", name, signature, problem, candidates);
+        return new(kernel, (runtime, report) =>
         {
-            input.CopyFrom(probabilities);
-            var hdy = Values(dy!.Length);
-            dy.CopyFrom(hdy);
-        }
-        else
-        {
-            input.CopyFrom(hi);
-        }
-
-        void Launch(TileCppKernel kernel, TileCppConfig config, TileCppGrid grid)
-        {
-            var po = output.Pointer.Value;
-            var pi = input.Pointer.Value;
-            var pdy = dy?.Pointer.Value ?? IntPtr.Zero;
-            var stride = columns;
-            var nrows = rows;
-            var ncols = columns;
-            var programs = rows;
-            var function = kernel.GetFunction(config);
-            if (backward)
+            using var input = runtime.Allocate<float>(rows * columns);
+            using var output = runtime.Allocate<float>(input.Length);
+            using var dy = backward ? runtime.Allocate<float>(input.Length) : null;
+            var hi = Values(input.Length);
+            var probabilities = Softmax(hi, rows, columns);
+            var expected = probabilities;
+            if (dy is not null)
             {
-                cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream,
-                    po, pi, pdy, stride, stride, stride, ncols).Ok();
-            }
-            else if (online)
-            {
-                cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream,
-                    po, pi, stride, stride, ncols).Ok();
+                input.CopyFrom(probabilities);
+                var hdy = Values(dy.Length);
+                dy.CopyFrom(hdy);
+                expected = new float[input.Length];
+                for (var r = 0; r < rows; r++)
+                {
+                    var dot = 0f;
+                    for (var c = 0; c < columns; c++)
+                    {
+                        dot += probabilities[r * columns + c] * hdy[r * columns + c];
+                    }
+                    for (var c = 0; c < columns; c++)
+                    {
+                        expected[r * columns + c] = probabilities[r * columns + c] * (hdy[r * columns + c] - dot);
+                    }
+                }
             }
             else
             {
-                cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream,
-                    po, pi, stride, stride, nrows, ncols, programs).Ok();
+                input.CopyFrom(hi);
             }
-        }
-        float[] expected;
-        if (backward)
-        {
-            var hdy = dy!.CopyToHost();
-            expected = new float[input.Length];
-            for (var r = 0; r < rows; r++)
+            void Launch(CUfunction function, TileCppGrid grid)
             {
-                var dot = 0f;
-                for (var c = 0; c < columns; c++)
+                if (dy is not null)
                 {
-                    dot += probabilities[r * columns + c] * hdy[r * columns + c];
+                    cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream,
+                        output.Pointer, input.Pointer, dy.Pointer, columns, columns, columns, columns).Ok();
                 }
-                for (var c = 0; c < columns; c++)
+                else if (online)
                 {
-                    expected[r * columns + c] = probabilities[r * columns + c] * (hdy[r * columns + c] - dot);
+                    cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream,
+                        output.Pointer, input.Pointer, columns, columns, columns).Ok();
+                }
+                else
+                {
+                    cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream,
+                        output.Pointer, input.Pointer, columns, columns, rows, columns, rows).Ok();
                 }
             }
-        }
-        else
-        {
-            expected = probabilities;
-        }
-        var tuned = TileGymTuning.Tune(runtime, problem, TileGymSoftmaxCandidates.For(problem),
-            "softmax.cuh", name, signature,
-            static (p, candidate) => p.TemplateArguments(candidate),
-            static (p, candidate) => p.Grid(candidate), Launch,
-            validate: _ => TileGymKernel.Validate(output.CopyToHost(), expected, name, 8e-4f, 8e-4f));
-        void LaunchSelected() => Launch(tuned.Kernel, tuned.Candidate.CompilerConfig, tuned.Grid);
-        var timing = TileGymKernel.Measure(runtime, LaunchSelected);
-        TileGymKernel.Validate(output.CopyToHost(), expected, name, 8e-4f, 8e-4f);
-        TileGymKernel.Report(report, "softmax", name, $"{rows}x{columns}",
-            input.ByteLength + output.ByteLength + (dy?.ByteLength ?? 0), timing, tuned);
+            var run = runtime.Run(kernel, Launch, () => output.Validate(expected, name, 8e-4f, 8e-4f));
+            report.Add("softmax", $"{rows}x{columns}",
+                input.ByteLength + output.ByteLength + (dy?.ByteLength ?? 0), run);
+        });
     }
 
     static float[] Rotate(float[] x, float[] cos, float[] sin, int heads, int sequence, int head, bool backward)

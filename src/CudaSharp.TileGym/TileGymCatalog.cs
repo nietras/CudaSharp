@@ -3,21 +3,23 @@ using System.Linq;
 
 namespace CudaSharp.Tester;
 
-sealed record TileGymScenario(string Family, Action<TileGymRuntime, TileGymReport> Run);
+delegate IEnumerable<TileGymBenchmark> TileGymBenchmarkFactory(TileGymRuntime runtime, TileGymOptions options);
+
+sealed record TileGymScenario(string Family, TileGymBenchmarkFactory Create);
 
 static class TileGymCatalog
 {
     public static IReadOnlyList<TileGymScenario> Scenarios { get; } =
     [
-        new TileGymScenario("activation", static (runtime, report) => TileGymActivationScenarios.RunAll(runtime, report, 1 << 20)),
-        new TileGymScenario("normalization", TileGymNormalizationScenarios.RunAll),
-        new TileGymScenario("rope-softmax", TileGymRopeSoftmaxScenarios.RunAll),
-        new TileGymScenario("attention-decode", TileGymAttentionScenarios.RunAll),
-        new TileGymScenario("mla-splitk", TileGymMlaScenarios.RunAll),
-        new TileGymScenario("recurrent-dropout", TileGymRecurrentScenarios.RunAll),
-        new TileGymScenario("moe-alignment", TileGymMoeScenarios.RunAll),
-        new TileGymScenario("matmul-bmm", TileGymMatrixScenarios.RunAll),
-        new TileGymScenario("convolution", TileGymConvolutionScenarios.RunAll),
+        new("activation", TileGymActivationScenarios.Create),
+        new("normalization", TileGymNormalizationScenarios.Create),
+        new("rope-softmax", TileGymRopeSoftmaxScenarios.Create),
+        new("attention-decode", TileGymAttentionScenarios.Create),
+        new("mla-splitk", TileGymMlaScenarios.Create),
+        new("recurrent-dropout", TileGymRecurrentScenarios.Create),
+        new("moe-alignment", TileGymMoeScenarios.Create),
+        new("matmul-bmm", TileGymMatrixScenarios.Create),
+        new("convolution", TileGymConvolutionScenarios.Create),
     ];
 
     public static IEnumerable<TileGymScenario> Select(string? filter)

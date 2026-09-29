@@ -32,7 +32,7 @@ static class TileGymTuningChecks
             "Override value.");
         VerifyFamilies();
         VerifyConvolutions();
-        VerifySession();
+        VerifyTuner();
     }
 
     static void VerifyFamilies()
@@ -185,68 +185,60 @@ static class TileGymTuningChecks
         }
     }
 
-    static void VerifySession()
+    static void VerifyTuner()
     {
-        var problem = new TileGymMatmulProblem(128, 128, 64, "float", false, false, false, 120, 80);
+        var problem = new TileGymMatmulProblem(128, 128, 64, "float", false, false, true, 120, 2);
         var rejected = TileGymMatmulCandidates.Create(64, 64, 32);
         var slow = TileGymMatmulCandidates.Create(64, 64, 64);
         var fast = TileGymMatmulCandidates.Create(128, 64, 64);
+        var invalid = TileGymMatmulCandidates.Create(128, 128, 64, numCtas: 4);
+        var kernel = TileGymKernel.Tuned("matmul.cuh", "check_kernel", "const float*, const float*, float*",
+            problem, [rejected, slow, invalid, fast]);
+        Require(kernel.Variants.Count == 3, "Candidates invalid for the problem are dropped when declared.");
+        var rejectedSpec = kernel.Variants[0].Spec;
+        var fastSpec = kernel.Variants[2].Spec;
+        var fastFunction = new CUfunction(2);
+        TileGymCompiledKernel Resolve(TileGymKernelSpec spec) => spec == rejectedSpec
+            ? new(spec, default, 1, 2, new InvalidOperationException("Rejected specialization."))
+            : new(spec, spec == fastSpec ? fastFunction : new CUfunction(1), 1, 2);
         var timer = new FakeTimer();
+        var tuner = new TileGymTuner(timer, default, Resolve);
         var launches = 0;
-        var creations = 0;
         var validations = 0;
-        using var session = new TileGymTuningSession<TileGymMatmulProblem>([rejected, slow, fast],
-            (_, candidate) =>
-            {
-                if (ReferenceEquals(candidate, rejected))
-                {
-                    throw new InvalidOperationException("Rejected specialization.");
-                }
-                creations++;
-                return new TileCppKernel(new TileCppCompiler(120, installBundledHeaders: false),
-                    "", "check.cu", "check_kernel");
-            },
-            static (p, candidate) => p.Grid(candidate), timer,
-            compile: static (_, _) => { }, load: static (_, _) => { });
-        void Launch(TileCppKernel _, TileCppConfig config, TileCppGrid grid)
+        void Launch(CUfunction function, TileCppGrid grid)
         {
             Require(grid.X > 0, "Candidate grid.");
             launches++;
-            timer.LastConfig = config;
+            timer.Fast = function == fastFunction;
         }
-        timer.FastConfig = fast.CompilerConfig;
-        var first = session.Tune(problem, default, Launch,
-            validate: _ => validations++);
-        var measurements = timer.MeasureCount;
-        var second = session.Tune(problem, default, Launch,
-            validate: _ => validations++);
-        Require(ReferenceEquals(first.Candidate, fast), "Fastest candidate selected.");
-        Require(second.CacheHit && !first.CacheHit, "Repeated tuning reuses winner.");
-        Require(second.TuneMilliseconds == 0 && timer.MeasureCount == measurements,
-            "Cached tuning does not benchmark again.");
-        Require(creations == 2 && launches > measurements, "Only successful kernels are created and launched.");
-        Require(validations == 2, "Each valid candidate is checked once, including cached winner.");
-        Require(first.CandidateCount == 3, "Report tracks candidate count.");
-        Require(first.CompileMilliseconds is >= 0 && first.LoadMilliseconds is >= 0 &&
-            first.FirstLaunchMilliseconds is >= 0, "Tuning retains compilation, load, and first launch times.");
+        var selection = tuner.Select(kernel.Name, kernel.Variants, Launch, () => validations++);
+        Require(selection.Variant.Spec == fastSpec, "Fastest candidate selected.");
+        Require(selection.Candidates == 3 && selection.Rejections.Count == 1, "Rejected candidates are tracked.");
+        Require(validations == 2 && timer.MeasureCount == 2 && launches == 4,
+            "Each loaded candidate is validated once and timed once.");
+        Require(selection.FirstLaunchMilliseconds >= 0 && selection.TuneMilliseconds >= 0, "Tuning times.");
+
+        var single = TileGymKernel.Fixed("matmul.cuh", "check_kernel", "fixed", "const float*", new TileCppGrid(1));
+        var measured = timer.MeasureCount;
+        var only = tuner.Select(single.Name, single.Variants, Launch);
+        Require(only.TuneMilliseconds == 0 && timer.MeasureCount == measured && only.Candidates == 1,
+            "A single variant is not timed during tuning.");
+
         var report = new TileGymReport();
-        TileGymKernel.Report(report, "matmul", "check_kernel", "128x128", 1024,
-            new TileGymTiming(0d, 1d), first);
+        report.Add("matmul", "128x128", 1024, new TileGymRun(kernel, selection, 1, .5));
         Require(report.Results[0].Status == "Passed (searched)" &&
-            report.Results[0].Diagnostic?.Contains("3 candidates offered", StringComparison.Ordinal) == true,
+            report.Results[0].Diagnostic?.StartsWith("3 candidates, 1 rejected.", StringComparison.Ordinal) == true,
             "Search report does not claim every candidate passed.");
-        Require(report.Results[0].CompileMilliseconds == first.CompileMilliseconds &&
-            report.Results[0].LoadMilliseconds == first.LoadMilliseconds &&
-            report.Results[0].FirstLaunchMilliseconds == first.FirstLaunchMilliseconds,
-            "Tuned phase timings are included in reports.");
-        TileGymKernel.Report(report, "activation", "phase_kernel", "1024", "fixed", 1024,
-            new TileGymPhaseTiming(2, 3, 4, 5, 6));
-        Require(report.Results[1].LoadMilliseconds == 3 &&
-            report.Results[1].FirstLaunchMilliseconds == 4 &&
-            report.Results[1].HostMilliseconds == 5 &&
-            report.Results[1].KernelMilliseconds == 6, "Separate phase timings are retained.");
-        Require(report.ToCsv().Contains("2\",\"3\",\"4\",\"\",\"0\",\"5\",\"6", StringComparison.Ordinal) &&
-            report.ToMarkdown().Contains("| Load ms | First launch ms | First use ms | Tune ms | Host ms | Kernel ms |", StringComparison.Ordinal),
+        Require(report.Results[0].CompileMilliseconds == 1 && report.Results[0].LoadMilliseconds == 2 &&
+            report.Results[0].FirstLaunchMilliseconds == selection.FirstLaunchMilliseconds &&
+            report.Results[0].HostMilliseconds == .5 && report.Results[0].KernelMilliseconds == 1,
+            "Phase timings are included in reports.");
+        report.Add("activation", "1024", 1024, new TileGymRun(single, only, 6, 5));
+        Require(report.Results[1].Status == "Passed" && report.Results[1].Diagnostic is null,
+            "Fixed kernels report plain status.");
+        Require(report.ToCsv().Contains("\"1\",\"2\",", StringComparison.Ordinal) &&
+            report.ToMarkdown().Contains("| Load ms | First launch ms | Tune ms | Host ms | Kernel ms |",
+                StringComparison.Ordinal),
             "Phase timings appear in CSV and Markdown reports.");
     }
 
@@ -260,15 +252,14 @@ static class TileGymTuningChecks
 
     sealed class FakeTimer : ITileCppTimer
     {
-        public TileCppConfig? FastConfig { get; set; }
-        public TileCppConfig? LastConfig { get; set; }
+        public bool Fast { get; set; }
         public int MeasureCount { get; private set; }
         public void Synchronize(CUstream stream) { }
         public float Measure(Action launch, CUstream stream, TileCppTimingOptions options)
         {
             launch();
             MeasureCount++;
-            return ReferenceEquals(LastConfig, FastConfig) ? 1 : 2;
+            return Fast ? 1 : 2;
         }
     }
 }

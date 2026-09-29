@@ -1,4 +1,5 @@
-﻿using CudaSharp.TileGym;
+﻿using System.Collections.Generic;
+using CudaSharp.TileGym;
 using static CudaSharp.nvcuda;
 
 namespace CudaSharp.Tester;
@@ -15,347 +16,324 @@ enum TileGymReluOperation
 
 static class TileGymActivationScenarios
 {
-    static readonly TileCppConfig Config = new([]);
+    const float Alpha = .5f, Lower = .125f, Upper = 1f / 3;
 
-    public static void RunAll(TileGymRuntime runtime, TileGymReport report, int elementCount = 1 << 20)
+    public static IEnumerable<TileGymBenchmark> Create(TileGymRuntime runtime, TileGymOptions options)
     {
-        var count = Math.Max(1024, elementCount);
+        var count = Math.Max(1024, options.Elements);
         foreach (var operation in Enum.GetValues<TileGymReluOperation>())
         {
-            RunRelu(runtime, report, count, operation);
-            RunReluBackward(runtime, report, count, operation);
+            yield return Relu(count, operation);
+            yield return ReluBackward(count, operation);
         }
-        RunGelu(runtime, report, count, backward: false);
-        RunGelu(runtime, report, count, backward: true);
-        RunGeglu(runtime, report, Math.Max(1, count / 512), 256, backward: false);
-        RunGeglu(runtime, report, Math.Max(1, count / 512), 256, backward: true);
-        RunSiluAndMul(runtime, report, Math.Max(1, count / 1024), 1024, backward: false);
-        RunSiluAndMul(runtime, report, Math.Max(1, count / 1024), 1024, backward: true);
-        RunSiluAndMulRowWise(runtime, report, Math.Max(1, count / 1024), 1024);
-        RunSwiglu(runtime, report, Math.Max(1, count / 1024), 1024, backward: false);
-        RunSwiglu(runtime, report, Math.Max(1, count / 1024), 1024, backward: true);
-        RunSwigluPersistent(runtime, report, 1, 1024);
+        yield return GeluActivation(count, backward: false);
+        yield return GeluActivation(count, backward: true);
+        var gegluRows = Math.Max(1, count / 512);
+        yield return Geglu(gegluRows, 256, backward: false);
+        yield return Geglu(gegluRows, 256, backward: true);
+        var rows = Math.Max(1, count / 1024);
+        yield return SiluAndMul(rows, 1024, backward: false);
+        yield return SiluAndMul(rows, 1024, backward: true);
+        yield return SiluAndMulRowWise(rows, 1024);
+        yield return Swiglu(rows, 1024, backward: false);
+        yield return Swiglu(rows, 1024, backward: true);
+        yield return SwigluPersistent(1, 1024);
     }
 
-    public static unsafe void RunRelu(TileGymRuntime runtime, TileGymReport report, int elementCount,
-        TileGymReluOperation operation)
+    static TileGymBenchmark Relu(int count, TileGymReluOperation operation)
     {
         const string name = "relu_activation_fwd_kernel";
-        var problem = new TileGymElementwiseProblem(elementCount, (int)operation);
-        const float alpha = .5f, lower = .125f, upper = 1f / 3;
-        using var input = runtime.Allocate<float>(elementCount);
-        using var output = runtime.Allocate<float>(elementCount);
-        var host = Values(elementCount);
-        input.CopyFrom(host);
-        void Launch(TileCppKernel kernel, TileCppConfig config, TileCppGrid grid)
+        var candidates = TileGymElementwiseCandidates.For(count);
+        var kernel = TileGymKernel.Tuned("activation/relu.cuh", name,
+            "const float*, float*, int, float, float, float, bool",
+            new TileGymElementwiseProblem(count, (int)operation), candidates);
+        return new(kernel, (runtime, report) =>
         {
-            var n = elementCount;
-            var a = alpha;
-            var lo = lower;
-            var hi = upper;
-            byte training = 0;
-            var function = kernel.GetFunction(config);
-            cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream,
-                input.Pointer, output.Pointer, n, a, lo, hi, training).Ok();
-        }
-        var expected = Array.ConvertAll(host, x => ReluReference(x, operation, alpha, lower, upper, false));
-        var tuned = TileGymTuning.Tune(runtime, problem, TileGymElementwiseCandidates.For(elementCount),
-            "activation/relu.cuh", name, "const float*, float*, int, float, float, float, bool",
-            static (p, candidate) => p.TemplateArguments(candidate),
-            static (p, candidate) => p.Grid(candidate), Launch,
-            validate: _ => TileGymKernel.Validate(output.CopyToHost(), expected, name, 2e-4f, 2e-4f));
-        void LaunchSelected() => Launch(tuned.Kernel, tuned.Candidate.CompilerConfig, tuned.Grid);
-        var timing = TileGymKernel.Measure(runtime, LaunchSelected);
-        TileGymKernel.Validate(output.CopyToHost(), expected, name, 2e-4f, 2e-4f);
-        TileGymKernel.Report(report, "activation", name, $"{elementCount},OP={(int)operation} ({operation})",
-            input.ByteLength + output.ByteLength, timing, tuned);
+            using var input = runtime.Allocate<float>(count);
+            using var output = runtime.Allocate<float>(count);
+            var host = Values(count);
+            input.CopyFrom(host);
+            var expected = Array.ConvertAll(host, x => ReluReference(x, operation, Alpha, Lower, Upper, false));
+            void Launch(CUfunction function, TileCppGrid grid)
+            {
+                byte training = 0;
+                cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream,
+                    input.Pointer, output.Pointer, count, Alpha, Lower, Upper, training).Ok();
+            }
+            var run = runtime.Run(kernel, Launch, () => output.Validate(expected, name, 2e-4f, 2e-4f));
+            report.Add("activation", $"{count},OP={(int)operation} ({operation})",
+                input.ByteLength + output.ByteLength, run);
+        });
     }
 
-    static unsafe void RunReluBackward(TileGymRuntime runtime, TileGymReport report, int count,
-        TileGymReluOperation operation)
+    static TileGymBenchmark ReluBackward(int count, TileGymReluOperation operation)
     {
         const string name = "relu_activation_bwd_kernel";
-        var problem = new TileGymElementwiseProblem(count, (int)operation);
-        const float alpha = .5f, lower = .125f, upper = 1f / 3;
-        using var dy = runtime.Allocate<float>(count);
-        using var x = runtime.Allocate<float>(count);
-        using var dx = runtime.Allocate<float>(count);
-        var hx = Values(count);
-        var hdy = Ones(count);
-        x.CopyFrom(hx);
-        dy.CopyFrom(hdy);
-        void Launch(TileCppKernel kernel, TileCppConfig config, TileCppGrid grid)
+        var candidates = TileGymElementwiseCandidates.For(count);
+        var kernel = TileGymKernel.Tuned("activation/relu.cuh", name,
+            "const float*, const float*, float*, int, float, float, float, bool",
+            new TileGymElementwiseProblem(count, (int)operation), candidates);
+        return new(kernel, (runtime, report) =>
         {
-            var n = count;
-            var a = alpha;
-            var lo = lower;
-            var hi = upper;
-            byte training = 0;
-            var function = kernel.GetFunction(config);
-            cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream,
-                dy.Pointer, x.Pointer, dx.Pointer, n, a, lo, hi, training).Ok();
-        }
-        var expected = Array.ConvertAll(hx, value => ReluReference(value, operation, alpha, lower, upper, true));
-        var tuned = TileGymTuning.Tune(runtime, problem, TileGymElementwiseCandidates.For(count),
-            "activation/relu.cuh", name, "const float*, const float*, float*, int, float, float, float, bool",
-            static (p, candidate) => p.TemplateArguments(candidate),
-            static (p, candidate) => p.Grid(candidate), Launch,
-            validate: _ => TileGymKernel.Validate(dx.CopyToHost(), expected, name, 2e-4f, 2e-4f));
-        void LaunchSelected() => Launch(tuned.Kernel, tuned.Candidate.CompilerConfig, tuned.Grid);
-        var timing = TileGymKernel.Measure(runtime, LaunchSelected);
-        TileGymKernel.Validate(dx.CopyToHost(), expected, name, 2e-4f, 2e-4f);
-        TileGymKernel.Report(report, "activation", name, $"{count},OP={(int)operation} ({operation})",
-            dy.ByteLength + x.ByteLength + dx.ByteLength, timing, tuned);
+            using var dy = runtime.Allocate<float>(count);
+            using var x = runtime.Allocate<float>(count);
+            using var dx = runtime.Allocate<float>(count);
+            var hx = Values(count);
+            var hdy = Ones(count);
+            x.CopyFrom(hx);
+            dy.CopyFrom(hdy);
+            var expected = Array.ConvertAll(hx, value => ReluReference(value, operation, Alpha, Lower, Upper, true));
+            void Launch(CUfunction function, TileCppGrid grid)
+            {
+                byte training = 0;
+                cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream,
+                    dy.Pointer, x.Pointer, dx.Pointer, count, Alpha, Lower, Upper, training).Ok();
+            }
+            var run = runtime.Run(kernel, Launch, () => dx.Validate(expected, name, 2e-4f, 2e-4f));
+            report.Add("activation", $"{count},OP={(int)operation} ({operation})",
+                dy.ByteLength + x.ByteLength + dx.ByteLength, run);
+        });
     }
 
-    static unsafe void RunGelu(TileGymRuntime runtime, TileGymReport report, int count, bool backward)
+    static TileGymBenchmark GeluActivation(int count, bool backward)
     {
         var name = backward ? "gelu_bwd_kernel" : "gelu_fwd_kernel";
         var signature = backward ? "const float*, const float*, float*, int" : "const float*, float*, int";
-        var problem = new TileGymElementwiseProblem(count, 0);
-        using var x = runtime.Allocate<float>(count);
-        using var output = runtime.Allocate<float>(count);
-        using var dy = backward ? runtime.Allocate<float>(count) : null;
-        var hx = Values(count);
-        x.CopyFrom(hx);
-        dy?.CopyFrom(Ones(count));
-        void Launch(TileCppKernel kernel, TileCppConfig config, TileCppGrid grid)
+        var candidates = TileGymElementwiseCandidates.For(count);
+        var kernel = TileGymKernel.Tuned("activation/gelu.cuh", name, signature,
+            new TileGymElementwiseProblem(count, 0), candidates);
+        return new(kernel, (runtime, report) =>
         {
-            var n = count;
-            var function = kernel.GetFunction(config);
-            if (backward)
+            using var x = runtime.Allocate<float>(count);
+            using var output = runtime.Allocate<float>(count);
+            using var dy = backward ? runtime.Allocate<float>(count) : null;
+            var hx = Values(count);
+            x.CopyFrom(hx);
+            if (dy is not null)
             {
-                cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream,
-                    dy!.Pointer, x.Pointer, output.Pointer, n).Ok();
+                var hdy = Ones(count);
+                dy.CopyFrom(hdy);
             }
-            else
+            void Launch(CUfunction function, TileCppGrid grid)
             {
-                cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream,
-                    x.Pointer, output.Pointer, n).Ok();
+                if (backward)
+                {
+                    cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream,
+                        dy!.Pointer, x.Pointer, output.Pointer, count).Ok();
+                }
+                else
+                {
+                    cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream,
+                        x.Pointer, output.Pointer, count).Ok();
+                }
             }
-        }
-        var expected = Array.ConvertAll(hx, value => backward ? GeluDerivative(value) : Gelu(value));
-        var tuned = TileGymTuning.Tune(runtime, problem, TileGymElementwiseCandidates.For(count),
-            "activation/gelu.cuh", name, signature,
-            static (p, candidate) => p.TemplateArguments(candidate),
-            static (p, candidate) => p.Grid(candidate), Launch,
-            validate: _ => TileGymKernel.Validate(output.CopyToHost(), expected, name, 4e-4f, 4e-4f));
-        void LaunchSelected() => Launch(tuned.Kernel, tuned.Candidate.CompilerConfig, tuned.Grid);
-        var timing = TileGymKernel.Measure(runtime, LaunchSelected);
-        TileGymKernel.Validate(output.CopyToHost(), expected, name, 4e-4f, 4e-4f);
-        var bytes = x.ByteLength + output.ByteLength + (dy?.ByteLength ?? 0);
-        TileGymKernel.Report(report, "activation", name, $"{count}", bytes, timing, tuned);
+            var expected = Array.ConvertAll(hx, value => backward ? GeluDerivative(value) : Gelu(value));
+            var run = runtime.Run(kernel, Launch, () => output.Validate(expected, name, 4e-4f, 4e-4f));
+            report.Add("activation", $"{count}", x.ByteLength + output.ByteLength + (dy?.ByteLength ?? 0), run);
+        });
     }
 
-    static unsafe void RunGeglu(TileGymRuntime runtime, TileGymReport report, int rows, int hidden, bool backward)
+    static TileGymBenchmark Geglu(int rows, int hidden, bool backward)
     {
         var name = backward ? "geglu_bwd_kernel" : "geglu_fwd_kernel";
         var signature = backward ? "float*, const float*, const float*, int, int, int, int" :
             "const float*, float*, int, int, int, int";
         var problem = new TileGymElementwiseProblem(rows * hidden, 0);
-        using var x = runtime.Allocate<float>(rows * hidden * 2);
-        using var output = runtime.Allocate<float>(backward ? rows * hidden * 2 : rows * hidden);
-        using var dy = backward ? runtime.Allocate<float>(rows * hidden) : null;
-        var hx = Values(x.Length);
-        x.CopyFrom(hx);
-        dy?.CopyFrom(Ones(dy.Length));
-        void Launch(TileCppKernel kernel, TileCppConfig config, TileCppGrid grid)
+        var candidates = TileGymElementwiseCandidates.For(problem.Count);
+        var kernel = TileGymKernel.Tuned("activation/geglu.cuh", name, signature, problem, candidates);
+        return new(kernel, (runtime, report) =>
         {
-            var n = hidden;
-            var xs = hidden * 2;
-            var ys = hidden;
-            var elements = rows * hidden;
-            var function = kernel.GetFunction(config);
-            if (backward)
+            using var x = runtime.Allocate<float>(rows * hidden * 2);
+            using var output = runtime.Allocate<float>(backward ? rows * hidden * 2 : rows * hidden);
+            using var dy = backward ? runtime.Allocate<float>(rows * hidden) : null;
+            var hx = Values(x.Length);
+            x.CopyFrom(hx);
+            if (dy is not null)
             {
-                cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream,
-                    output.Pointer, dy!.Pointer, x.Pointer, n, xs, ys, elements).Ok();
+                var hdy = Ones(dy.Length);
+                dy.CopyFrom(hdy);
             }
-            else
+            void Launch(CUfunction function, TileCppGrid grid)
             {
-                cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream,
-                    x.Pointer, output.Pointer, n, xs, ys, elements).Ok();
-            }
-        }
-        var expected = new float[output.Length];
-        for (var row = 0; row < rows; row++)
-        {
-            for (var col = 0; col < hidden; col++)
-            {
-                var a = hx[row * hidden * 2 + col];
-                var b = hx[row * hidden * 2 + hidden + col];
+                var elements = rows * hidden;
                 if (backward)
                 {
-                    expected[row * hidden * 2 + col] = Gelu(b);
-                    expected[row * hidden * 2 + hidden + col] = a * GeluDerivative(b);
+                    cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream,
+                        output.Pointer, dy!.Pointer, x.Pointer, hidden, hidden * 2, hidden, elements).Ok();
                 }
                 else
                 {
-                    expected[row * hidden + col] = a * Gelu(b);
+                    cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream,
+                        x.Pointer, output.Pointer, hidden, hidden * 2, hidden, elements).Ok();
                 }
             }
-        }
-        var tuned = TileGymTuning.Tune(runtime, problem, TileGymElementwiseCandidates.For(problem.Count),
-            "activation/geglu.cuh", name, signature,
-            static (p, candidate) => p.TemplateArguments(candidate),
-            static (p, candidate) => p.Grid(candidate), Launch,
-            validate: _ => TileGymKernel.Validate(output.CopyToHost(), expected, name, 5e-4f, 5e-4f));
-        void LaunchSelected() => Launch(tuned.Kernel, tuned.Candidate.CompilerConfig, tuned.Grid);
-        var timing = TileGymKernel.Measure(runtime, LaunchSelected);
-        TileGymKernel.Validate(output.CopyToHost(), expected, name, 5e-4f, 5e-4f);
-        TileGymKernel.Report(report, "activation", name, $"{rows}x{hidden * 2}",
-            x.ByteLength + output.ByteLength + (dy?.ByteLength ?? 0), timing, tuned);
+            var expected = new float[output.Length];
+            for (var row = 0; row < rows; row++)
+            {
+                for (var col = 0; col < hidden; col++)
+                {
+                    var a = hx[row * hidden * 2 + col];
+                    var b = hx[row * hidden * 2 + hidden + col];
+                    if (backward)
+                    {
+                        expected[row * hidden * 2 + col] = Gelu(b);
+                        expected[row * hidden * 2 + hidden + col] = a * GeluDerivative(b);
+                    }
+                    else
+                    {
+                        expected[row * hidden + col] = a * Gelu(b);
+                    }
+                }
+            }
+            var run = runtime.Run(kernel, Launch, () => output.Validate(expected, name, 5e-4f, 5e-4f));
+            report.Add("activation", $"{rows}x{hidden * 2}",
+                x.ByteLength + output.ByteLength + (dy?.ByteLength ?? 0), run);
+        });
     }
 
-    static unsafe void RunSiluAndMul(TileGymRuntime runtime, TileGymReport report, int rows, int hidden, bool backward)
+    static TileGymBenchmark SiluAndMul(int rows, int hidden, bool backward)
     {
         var name = backward ? "silu_and_mul_backward_kernel" : "silu_and_mul_kernel";
         var signature = backward ? "const float*, const float*, float*, int, int" : "const float*, float*, int, int";
-        using var kernel = TileGymKernel.Create(runtime.Compiler, "silu_and_mul.cuh", name, $"float, {hidden}", signature);
-        using var input = runtime.Allocate<float>(rows * hidden * 2);
-        using var output = runtime.Allocate<float>(backward ? input.Length : rows * hidden);
-        using var grad = backward ? runtime.Allocate<float>(rows * hidden) : null;
-        var host = Values(input.Length);
-        input.CopyFrom(host);
-        grad?.CopyFrom(Ones(grad.Length));
-        var grid = new TileCppGrid((uint)rows);
-        void Launch(CUfunction function)
+        var kernel = TileGymKernel.Fixed("silu_and_mul.cuh", name, $"float, {hidden}", signature,
+            new TileCppGrid((uint)rows), $"float,BLOCK_SIZE={hidden}");
+        return new(kernel, (runtime, report) =>
         {
-            var stride = hidden * 2;
-            var h = hidden;
-            if (backward)
+            using var input = runtime.Allocate<float>(rows * hidden * 2);
+            using var output = runtime.Allocate<float>(backward ? input.Length : rows * hidden);
+            using var grad = backward ? runtime.Allocate<float>(rows * hidden) : null;
+            var host = Values(input.Length);
+            input.CopyFrom(host);
+            if (grad is not null)
             {
-                cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream,
-                    grad!.Pointer, input.Pointer, output.Pointer, stride, h).Ok();
+                var hgrad = Ones(grad.Length);
+                grad.CopyFrom(hgrad);
             }
-            else
+            void Launch(CUfunction function, TileCppGrid grid)
             {
-                cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream,
-                    input.Pointer, output.Pointer, stride, h).Ok();
+                if (backward)
+                {
+                    cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream,
+                        grad!.Pointer, input.Pointer, output.Pointer, hidden * 2, hidden).Ok();
+                }
+                else
+                {
+                    cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream,
+                        input.Pointer, output.Pointer, hidden * 2, hidden).Ok();
+                }
             }
-        }
-        var timing = TileGymKernel.MeasurePhases(runtime, kernel, Config, Launch);
-        var expected = SiluReference(host, rows, hidden, backward);
-        TileGymKernel.Validate(output.CopyToHost(), expected, name, 4e-4f, 4e-4f);
-        TileGymKernel.Report(report, "fused", name, $"{rows}x{hidden * 2}", $"float,BLOCK_SIZE={hidden}",
-            input.ByteLength + output.ByteLength + (grad?.ByteLength ?? 0), timing);
+            var expected = SiluReference(host, rows, hidden, backward);
+            var run = runtime.Run(kernel, Launch, () => output.Validate(expected, name, 4e-4f, 4e-4f));
+            report.Add("fused", $"{rows}x{hidden * 2}",
+                input.ByteLength + output.ByteLength + (grad?.ByteLength ?? 0), run);
+        });
     }
 
-    static unsafe void RunSiluAndMulRowWise(TileGymRuntime runtime, TileGymReport report, int rows, int hidden)
+    static TileGymBenchmark SiluAndMulRowWise(int rows, int hidden)
     {
+        const string name = "silu_and_mul_kernel_row_wise";
         var n = hidden * 2;
-        using var kernel = TileGymKernel.Create(runtime.Compiler, "silu_and_mul.cuh", "silu_and_mul_kernel_row_wise",
-            $"float, {n}, {hidden}, {hidden}, {n}, {hidden}", "float*, float*");
-        using var input = runtime.Allocate<float>(rows * n);
-        using var output = runtime.Allocate<float>(rows * hidden);
-        var host = Values(input.Length);
-        input.CopyFrom(host);
-        void Launch()
+        var kernel = TileGymKernel.Fixed("silu_and_mul.cuh", name,
+            $"float, {n}, {hidden}, {hidden}, {n}, {hidden}", "float*, float*",
+            new TileCppGrid((uint)rows), $"float,N={n},HIDDEN_SIZE={hidden}");
+        return new(kernel, (runtime, report) =>
         {
-            var function = kernel.GetFunction(Config);
-            cuLaunchKernel(function, (uint)rows, 1, 1, 1, 1, 1, 0, runtime.Stream,
-                input.Pointer, output.Pointer).Ok();
-        }
-        var timing = TileGymKernel.MeasurePhases(runtime, kernel, Config, Launch);
-        TileGymKernel.Validate(output.CopyToHost(), SiluReference(host, rows, hidden, false), "silu_and_mul_kernel_row_wise", 4e-4f, 4e-4f);
-        TileGymKernel.Report(
-            report,
-            "fused",
-            "silu_and_mul_kernel_row_wise",
-            $"{rows}x{n}",
-            $"float,N={n},HIDDEN_SIZE={hidden}",
-            input.ByteLength + output.ByteLength,
-            timing);
+            using var input = runtime.Allocate<float>(rows * n);
+            using var output = runtime.Allocate<float>(rows * hidden);
+            var host = Values(input.Length);
+            input.CopyFrom(host);
+            void Launch(CUfunction function, TileCppGrid grid) =>
+                cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream,
+                    input.Pointer, output.Pointer).Ok();
+            var expected = SiluReference(host, rows, hidden, false);
+            var run = runtime.Run(kernel, Launch, () => output.Validate(expected, name, 4e-4f, 4e-4f));
+            report.Add("fused", $"{rows}x{n}", input.ByteLength + output.ByteLength, run);
+        });
     }
 
-    static unsafe void RunSwiglu(TileGymRuntime runtime, TileGymReport report, int rows, int columns, bool backward)
+    static TileGymBenchmark Swiglu(int rows, int columns, bool backward)
     {
         var name = backward ? "swiglu_backward_kernel" : "swiglu_forward_kernel_gather";
         var signature = backward ? "const float*, const float*, const float*, float*, float*, int, int" :
             "const float*, const float*, float*, int, int";
-        using var kernel = TileGymKernel.Create(runtime.Compiler, "swiglu.cuh", name, $"float, {columns}", signature);
-        using var a = runtime.Allocate<float>(rows * columns);
-        using var b = runtime.Allocate<float>(rows * columns);
-        using var c = runtime.Allocate<float>(rows * columns);
-        using var second = backward ? runtime.Allocate<float>(rows * columns) : null;
-        using var dc = backward ? runtime.Allocate<float>(rows * columns) : null;
-        var ha = Values(a.Length);
-        var hb = Array.ConvertAll(ha, static x => x * .75f + .25f);
-        a.CopyFrom(ha);
-        b.CopyFrom(hb);
-        dc?.CopyFrom(Ones(dc.Length));
-        void Launch()
+        var kernel = TileGymKernel.Fixed("swiglu.cuh", name, $"float, {columns}", signature,
+            new TileCppGrid((uint)rows), $"float,BLOCK_SIZE={columns}");
+        return new(kernel, (runtime, report) =>
         {
-            var stride = columns;
-            var cols = columns;
-            var function = kernel.GetFunction(Config);
-            if (backward)
+            using var a = runtime.Allocate<float>(rows * columns);
+            using var b = runtime.Allocate<float>(rows * columns);
+            using var c = runtime.Allocate<float>(rows * columns);
+            using var second = backward ? runtime.Allocate<float>(rows * columns) : null;
+            using var dc = backward ? runtime.Allocate<float>(rows * columns) : null;
+            var ha = Values(a.Length);
+            var hb = Array.ConvertAll(ha, static x => x * .75f + .25f);
+            a.CopyFrom(ha);
+            b.CopyFrom(hb);
+            if (dc is not null)
             {
-                cuLaunchKernel(function, (uint)rows, 1, 1, 1, 1, 1, 0, runtime.Stream,
-                    dc!.Pointer, a.Pointer, b.Pointer, c.Pointer, second!.Pointer, stride, cols).Ok();
+                var hdc = Ones(dc.Length);
+                dc.CopyFrom(hdc);
             }
-            else
+            void Launch(CUfunction function, TileCppGrid grid)
             {
-                cuLaunchKernel(function, (uint)rows, 1, 1, 1, 1, 1, 0, runtime.Stream,
-                    a.Pointer, b.Pointer, c.Pointer, cols, stride).Ok();
+                if (backward)
+                {
+                    cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream,
+                        dc!.Pointer, a.Pointer, b.Pointer, c.Pointer, second!.Pointer, columns, columns).Ok();
+                }
+                else
+                {
+                    cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream,
+                        a.Pointer, b.Pointer, c.Pointer, columns, columns).Ok();
+                }
             }
-        }
-        var timing = TileGymKernel.MeasurePhases(runtime, kernel, Config, Launch);
-        var expected = new float[c.Length];
-        var expectedSecond = backward ? new float[c.Length] : null;
-        for (var i = 0; i < expected.Length; i++)
-        {
-            var sig = Sigmoid(ha[i]);
-            var silu = ha[i] * sig;
-            expected[i] = backward ? hb[i] * (silu * (1 - sig) + sig) : silu * hb[i];
-            if (backward)
+            var expected = new float[c.Length];
+            var expectedSecond = new float[c.Length];
+            for (var i = 0; i < expected.Length; i++)
             {
-                expectedSecond![i] = silu;
+                var sig = Sigmoid(ha[i]);
+                var silu = ha[i] * sig;
+                expected[i] = backward ? hb[i] * (silu * (1 - sig) + sig) : silu * hb[i];
+                expectedSecond[i] = silu;
             }
-        }
-        TileGymKernel.Validate(c.CopyToHost(), expected, name, 4e-4f, 4e-4f);
-        if (backward)
-        {
-            TileGymKernel.Validate(second!.CopyToHost(), expectedSecond!, name, 4e-4f, 4e-4f);
-        }
-        TileGymKernel.Report(
-            report, "fused", name, $"{rows}x{columns}", $"float,BLOCK_SIZE={columns}",
-            a.ByteLength + b.ByteLength + c.ByteLength +
-            (second?.ByteLength ?? 0) + (dc?.ByteLength ?? 0),
-            timing);
+            void Validate()
+            {
+                c.Validate(expected, name, 4e-4f, 4e-4f);
+                second?.Validate(expectedSecond, name, 4e-4f, 4e-4f);
+            }
+            var run = runtime.Run(kernel, Launch, Validate);
+            report.Add("fused", $"{rows}x{columns}", a.ByteLength + b.ByteLength + c.ByteLength +
+                (second?.ByteLength ?? 0) + (dc?.ByteLength ?? 0), run);
+        });
     }
 
-    static unsafe void RunSwigluPersistent(TileGymRuntime runtime, TileGymReport report, int rows, int columns)
+    static TileGymBenchmark SwigluPersistent(int rows, int columns)
     {
-        using var kernel = TileGymKernel.Create(runtime.Compiler, "swiglu.cuh", "swiglu_forward_kernel_pv",
-            $"float, {rows}, {columns}, {columns}, 4", "float*, float*, float*");
-        using var a = runtime.Allocate<float>(rows * columns);
-        using var b = runtime.Allocate<float>(rows * columns);
-        using var c = runtime.Allocate<float>(rows * columns);
-        var ha = Values(a.Length);
-        var hb = Array.ConvertAll(ha, static x => x * .75f + .25f);
-        a.CopyFrom(ha);
-        b.CopyFrom(hb);
-        void Launch()
+        const string name = "swiglu_forward_kernel_pv";
+        var kernel = TileGymKernel.Fixed("swiglu.cuh", name, $"float, {rows}, {columns}, {columns}, 4",
+            "float*, float*, float*", new TileCppGrid((uint)rows), $"float,BLOCK_SIZE={columns},OCCUPANCY=4");
+        return new(kernel, (runtime, report) =>
         {
-            var function = kernel.GetFunction(Config);
-            cuLaunchKernel(function, (uint)rows, 1, 1, 1, 1, 1, 0, runtime.Stream,
-                a.Pointer, b.Pointer, c.Pointer).Ok();
-        }
-        var timing = TileGymKernel.MeasurePhases(runtime, kernel, Config, Launch);
-        var expected = new float[c.Length];
-        for (var i = 0; i < expected.Length; i++)
-        {
-            expected[i] = ha[i] * Sigmoid(ha[i]) * hb[i];
-        }
-        TileGymKernel.Validate(c.CopyToHost(), expected, "swiglu_forward_kernel_pv", 4e-4f, 4e-4f);
-        TileGymKernel.Report(
-            report, "fused", "swiglu_forward_kernel_pv", $"{rows}x{columns}",
-            $"float,BLOCK_SIZE={columns},OCCUPANCY=4",
-            a.ByteLength + b.ByteLength + c.ByteLength, timing);
+            using var a = runtime.Allocate<float>(rows * columns);
+            using var b = runtime.Allocate<float>(rows * columns);
+            using var c = runtime.Allocate<float>(rows * columns);
+            var ha = Values(a.Length);
+            var hb = Array.ConvertAll(ha, static x => x * .75f + .25f);
+            a.CopyFrom(ha);
+            b.CopyFrom(hb);
+            void Launch(CUfunction function, TileCppGrid grid) =>
+                cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream,
+                    a.Pointer, b.Pointer, c.Pointer).Ok();
+            var expected = new float[c.Length];
+            for (var i = 0; i < expected.Length; i++)
+            {
+                expected[i] = ha[i] * Sigmoid(ha[i]) * hb[i];
+            }
+            var run = runtime.Run(kernel, Launch, () => c.Validate(expected, name, 4e-4f, 4e-4f));
+            report.Add("fused", $"{rows}x{columns}", a.ByteLength + b.ByteLength + c.ByteLength, run);
+        });
     }
 
-    static TileCppGrid Grid(int count, int block) => new((uint)((count + block - 1) / block));
     static float[] Values(int count)
     {
         var values = new float[count];

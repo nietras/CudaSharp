@@ -4,7 +4,7 @@ namespace CudaSharp.Tester;
 
 readonly record struct TileGymMatmulProblem(
     int M, int N, int K, string ElementType, bool TransposeA, bool TransposeB,
-    bool Persistent, int Architecture, int SmCount)
+    bool Persistent, int Architecture, int SmCount) : ITileGymProblem
 {
     public string KernelName => Persistent ? "static_persistent_matmul_kernel" : "matmul_kernel";
     public string Header => Persistent ? "persistent_matmul.cuh" : "matmul.cuh";

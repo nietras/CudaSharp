@@ -3,7 +3,7 @@ using CudaSharp.TileGym;
 
 namespace CudaSharp.Tester;
 
-readonly record struct TileGymSoftmaxProblem(int Rows, int Columns, bool Online, bool Backward)
+readonly record struct TileGymSoftmaxProblem(int Rows, int Columns, bool Online, bool Backward) : ITileGymProblem
 {
     public string TemplateArguments(TileGymCandidate candidate) =>
         $"float, {candidate["BlockSize"]}{(!Online && !Backward ? ", 0" : "")}";

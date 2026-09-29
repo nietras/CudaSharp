@@ -1,4 +1,5 @@
-﻿using CudaSharp.TileGym;
+﻿using System.Collections.Generic;
+using CudaSharp.TileGym;
 using static CudaSharp.nvcuda;
 
 namespace CudaSharp.Tester;
@@ -118,8 +119,6 @@ sealed record TileGymConvolutionProblem(
 
 static class TileGymConvolutionScenarios
 {
-    static readonly TileCppConfig Config = new([]);
-
     internal static TileGymConvolutionProblem[] Problems =>
     [
         new(TileGymConvolutionKind.Forward2D, 1, 4, 6, 1, 5, 6, 1, 3, 2, 1, 2, 1, 0, 1, 1, 1, 2, 1, 2),
@@ -132,16 +131,16 @@ static class TileGymConvolutionScenarios
         new(TileGymConvolutionKind.Forward2D, 1, 16, 132, 1, 4, 4, 1, 3, 3,
             1, 1, 1, 0, 1, 1, 1, 1, 1, 2);
 
-    public static void RunAll(TileGymRuntime runtime, TileGymReport report)
+    public static IEnumerable<TileGymBenchmark> Create(TileGymRuntime runtime, TileGymOptions options)
     {
         foreach (var problem in Problems)
         {
-            Run(runtime, report, problem);
-            RunMma(runtime, report, problem, false);
-            RunMma(runtime, report, problem, true);
+            yield return Direct(problem);
+            yield return Mma(problem, bfloat16: false);
+            yield return Mma(problem, bfloat16: true);
         }
-        RunMma(runtime, report, MmaBoundaryProblem, false);
-        RunMma(runtime, report, MmaBoundaryProblem, true);
+        yield return Mma(MmaBoundaryProblem, bfloat16: false);
+        yield return Mma(MmaBoundaryProblem, bfloat16: true);
     }
 
     static float[] Values(int length, float scale)
@@ -193,8 +192,7 @@ static class TileGymConvolutionScenarios
         }
     }
 
-    static unsafe void RunMma(TileGymRuntime runtime, TileGymReport report,
-        TileGymConvolutionProblem problem, bool bfloat16)
+    static TileGymBenchmark Mma(TileGymConvolutionProblem problem, bool bfloat16)
     {
         var type = bfloat16 ? "__nv_bfloat16" : "__half";
         var name = problem.Kind switch
@@ -209,100 +207,98 @@ static class TileGymConvolutionScenarios
             ? $"const {type}*, const {type}*, const {type}*, const {type}*, {type}*"
             : $"const {type}*, const {type}*, {type}*";
         var dimensions = problem.TemplateArguments(128);
-        dimensions = dimensions[..dimensions.LastIndexOf(", ", StringComparison.Ordinal)];
-        using var kernel = TileGymKernel.Create(runtime.Compiler, problem.Header, name, $"{type}, {dimensions}", signature);
-        using var input = runtime.Allocate<ushort>(problem.InputLength);
-        using var weights = runtime.Allocate<ushort>(problem.WeightLength);
-        using var bias = runtime.Allocate<ushort>(problem.Co);
-        using var modelBias = runtime.Allocate<ushort>(problem.Co);
-        using var output = runtime.Allocate<ushort>(problem.OutputLength);
-
-        float[] Pack(CudaBuffer<ushort> buffer, float[] values)
+        var blockSeparator = dimensions.LastIndexOf(", ", StringComparison.Ordinal);
+        var grid = problem.MmaGrid();
+        var kernel = TileGymKernel.Fixed(problem.Header, name, $"{type}, {dimensions[..blockSeparator]}", signature,
+            grid, $"{(bfloat16 ? "bf16" : "fp16")},MMA=32x{problem.MmaTileN}x64");
+        return new(kernel, (runtime, report) =>
         {
-            var packed = new ushort[values.Length];
-            var rounded = new float[values.Length];
-            for (var i = 0; i < values.Length; i++)
+            using var input = runtime.Allocate<ushort>(problem.InputLength);
+            using var weights = runtime.Allocate<ushort>(problem.WeightLength);
+            using var bias = runtime.Allocate<ushort>(problem.Co);
+            using var modelBias = runtime.Allocate<ushort>(problem.Co);
+            using var output = runtime.Allocate<ushort>(problem.OutputLength);
+            float[] Pack(CudaBuffer<ushort> buffer, float scale)
             {
-                packed[i] = bfloat16 ? ToBfloat16(values[i]) : BitConverter.HalfToUInt16Bits((Half)values[i]);
-                rounded[i] = bfloat16 ? FromBfloat16(packed[i]) : (float)BitConverter.UInt16BitsToHalf(packed[i]);
+                var values = Values(buffer.Length, scale);
+                var packed = new ushort[values.Length];
+                var rounded = new float[values.Length];
+                for (var i = 0; i < values.Length; i++)
+                {
+                    packed[i] = bfloat16 ? ToBfloat16(values[i]) : BitConverter.HalfToUInt16Bits((Half)values[i]);
+                    rounded[i] = bfloat16 ? FromBfloat16(packed[i]) : (float)BitConverter.UInt16BitsToHalf(packed[i]);
+                }
+                buffer.CopyFrom(packed);
+                return rounded;
             }
-            buffer.CopyFrom(packed);
-            return rounded;
-        }
-
-        var hostInput = Pack(input, Values(input.Length, .05f));
-        var hostWeights = Pack(weights, Values(weights.Length, .04f));
-        var hostBias = Pack(bias, Values(bias.Length, .03f));
-        var hostModelBias = Pack(modelBias, Values(modelBias.Length, .02f));
-        var expected = problem.Reference(hostInput, hostWeights, hostBias, hostModelBias);
-
-        void Launch()
-        {
-            var grid = problem.MmaGrid();
-            var function = kernel.GetFunction(Config);
-            if (hasBias)
+            var hostInput = Pack(input, .05f);
+            var hostWeights = Pack(weights, .04f);
+            var hostBias = Pack(bias, .03f);
+            var hostModelBias = Pack(modelBias, .02f);
+            var expected = problem.Reference(hostInput, hostWeights, hostBias, hostModelBias);
+            void Launch(CUfunction function, TileCppGrid grid) =>
+                LaunchConvolution(runtime, function, grid, hasBias, input.Pointer, weights.Pointer,
+                    bias.Pointer, modelBias.Pointer, output.Pointer);
+            void Validate()
             {
-                cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream,
-                    input.Pointer, weights.Pointer, bias.Pointer, modelBias.Pointer, output.Pointer).Ok();
+                var actual = output.CopyToHost();
+                ValidateMmaOutput(actual, expected, bfloat16, name);
             }
-            else
-            {
-                cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream,
-                    input.Pointer, weights.Pointer, output.Pointer).Ok();
-            }
-        }
-
-        var timing = TileGymKernel.MeasurePhases(runtime, kernel, Config, Launch);
-        ValidateMmaOutput(output.CopyToHost(), expected, bfloat16, name);
-        TileGymKernel.Report(report, "convolution", name,
-            $"N={problem.N},Ci={problem.Ci},Co={problem.Co},out={problem.Od}x{problem.Oh}x{problem.Ow},groups={problem.Groups}",
-            $"{(bfloat16 ? "bf16" : "fp16")},MMA=32x{problem.MmaTileN}x64", input.ByteLength + weights.ByteLength + output.ByteLength, timing);
+            var run = runtime.Run(kernel, Launch, Validate);
+            report.Add("convolution", $"N={problem.N},Ci={problem.Ci},Co={problem.Co}," +
+                $"out={problem.Od}x{problem.Oh}x{problem.Ow},groups={problem.Groups}",
+                input.ByteLength + weights.ByteLength + output.ByteLength, run);
+        });
     }
 
-    static unsafe void Run(TileGymRuntime runtime, TileGymReport report, TileGymConvolutionProblem problem)
+    static TileGymBenchmark Direct(TileGymConvolutionProblem problem)
     {
         const int block = 128;
         var hasBias = !problem.ThreeDimensional;
         var signature = hasBias
             ? "const float*, const float*, const float*, const float*, float*"
             : "const float*, const float*, float*";
-        using var kernel = TileGymKernel.Create(runtime.Compiler, problem.Header, problem.Kernel,
-            problem.TemplateArguments(block), signature);
-        using var input = runtime.Allocate<float>(problem.InputLength);
-        using var weights = runtime.Allocate<float>(problem.WeightLength);
-        using var bias = runtime.Allocate<float>(problem.Co);
-        using var modelBias = runtime.Allocate<float>(problem.Co);
-        using var output = runtime.Allocate<float>(problem.OutputLength);
-        var hostInput = Values(input.Length, .05f);
-        var hostWeights = Values(weights.Length, .04f);
-        var hostBias = Values(bias.Length, .03f);
-        var hostModelBias = Values(modelBias.Length, .02f);
-        input.CopyFrom(hostInput);
-        weights.CopyFrom(hostWeights);
-        bias.CopyFrom(hostBias);
-        modelBias.CopyFrom(hostModelBias);
-        var expected = problem.Reference(hostInput, hostWeights, hostBias, hostModelBias);
-
-        void Launch()
+        var templates = problem.TemplateArguments(block);
+        var grid = problem.Grid(block);
+        var kernel = TileGymKernel.Fixed(problem.Header, problem.Kernel, templates, signature, grid, $"BLOCK={block}");
+        return new(kernel, (runtime, report) =>
         {
-            var grid = problem.Grid(block);
-            var function = kernel.GetFunction(Config);
-            if (hasBias)
-            {
-                cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream,
-                    input.Pointer, weights.Pointer, bias.Pointer, modelBias.Pointer, output.Pointer).Ok();
-            }
-            else
-            {
-                cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream,
-                    input.Pointer, weights.Pointer, output.Pointer).Ok();
-            }
-        }
+            using var input = runtime.Allocate<float>(problem.InputLength);
+            using var weights = runtime.Allocate<float>(problem.WeightLength);
+            using var bias = runtime.Allocate<float>(problem.Co);
+            using var modelBias = runtime.Allocate<float>(problem.Co);
+            using var output = runtime.Allocate<float>(problem.OutputLength);
+            var hostInput = Values(input.Length, .05f);
+            var hostWeights = Values(weights.Length, .04f);
+            var hostBias = Values(bias.Length, .03f);
+            var hostModelBias = Values(modelBias.Length, .02f);
+            input.CopyFrom(hostInput);
+            weights.CopyFrom(hostWeights);
+            bias.CopyFrom(hostBias);
+            modelBias.CopyFrom(hostModelBias);
+            var expected = problem.Reference(hostInput, hostWeights, hostBias, hostModelBias);
+            void Launch(CUfunction function, TileCppGrid grid) =>
+                LaunchConvolution(runtime, function, grid, hasBias, input.Pointer, weights.Pointer,
+                    bias.Pointer, modelBias.Pointer, output.Pointer);
+            var run = runtime.Run(kernel, Launch, () => output.Validate(expected, problem.Kernel, 1e-4f, 1e-4f));
+            report.Add("convolution", $"N={problem.N},Ci={problem.Ci},Co={problem.Co}," +
+                $"in={problem.D}x{problem.H}x{problem.W},out={problem.Od}x{problem.Oh}x{problem.Ow}," +
+                $"groups={problem.Groups}", input.ByteLength + weights.ByteLength + output.ByteLength, run);
+        });
+    }
 
-        var timing = TileGymKernel.MeasurePhases(runtime, kernel, Config, Launch);
-        TileGymKernel.Validate(output.CopyToHost(), expected, problem.Kernel, 1e-4f, 1e-4f);
-        TileGymKernel.Report(report, "convolution", problem.Kernel,
-            $"N={problem.N},Ci={problem.Ci},Co={problem.Co},in={problem.D}x{problem.H}x{problem.W},out={problem.Od}x{problem.Oh}x{problem.Ow},groups={problem.Groups}",
-            $"BLOCK={block}", input.ByteLength + weights.ByteLength + output.ByteLength, timing);
+    static void LaunchConvolution(TileGymRuntime runtime, CUfunction function, TileCppGrid grid, bool hasBias,
+        CUdeviceptr input, CUdeviceptr weights, CUdeviceptr bias, CUdeviceptr modelBias, CUdeviceptr output)
+    {
+        if (hasBias)
+        {
+            cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream,
+                input, weights, bias, modelBias, output).Ok();
+        }
+        else
+        {
+            cuLaunchKernel(function, grid.X, grid.Y, grid.Z, 1, 1, 1, 0, runtime.Stream,
+                input, weights, output).Ok();
+        }
     }
 }

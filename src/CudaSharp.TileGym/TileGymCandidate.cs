@@ -2,7 +2,6 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Linq;
-using CudaSharp.TileGym;
 
 namespace CudaSharp.Tester;
 
@@ -20,7 +19,7 @@ sealed class TileGymCandidate
     readonly IReadOnlyList<TileGymHyperparameter> _parameters;
     readonly IReadOnlyDictionary<string, string> _values;
 
-    public TileGymCandidate(IEnumerable<TileGymHyperparameter> parameters, TileCppConfig? compilerConfig = null)
+    public TileGymCandidate(IEnumerable<TileGymHyperparameter> parameters)
     {
         ArgumentNullException.ThrowIfNull(parameters);
         var items = parameters.ToArray();
@@ -36,14 +35,8 @@ sealed class TileGymCandidate
         }
         _parameters = Array.AsReadOnly(items);
         _values = new ReadOnlyDictionary<string, string>(values);
-        CompilerConfig = compilerConfig ?? new TileCppConfig(
-        [
-            new KeyValuePair<string, string>("TILEGYM_VARIANT_ID", string.Join("_", items.Select(static item =>
-                Convert.ToHexString(System.Text.Encoding.UTF8.GetBytes($"{item.Name}={item.CppValue}")))))
-        ]);
     }
 
-    public TileCppConfig CompilerConfig { get; }
     public IReadOnlyList<TileGymHyperparameter> Parameters => _parameters;
     public string this[string name] => _values[name];
     public int GetInt32(string name) => int.Parse(this[name], CultureInfo.InvariantCulture);

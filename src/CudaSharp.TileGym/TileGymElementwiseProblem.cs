@@ -2,7 +2,7 @@
 
 namespace CudaSharp.Tester;
 
-readonly record struct TileGymElementwiseProblem(int Count, int Operation)
+readonly record struct TileGymElementwiseProblem(int Count, int Operation) : ITileGymProblem
 {
     public string TemplateArguments(TileGymCandidate candidate)
         => $"float, {candidate["BlockSize"]}, {Operation}";

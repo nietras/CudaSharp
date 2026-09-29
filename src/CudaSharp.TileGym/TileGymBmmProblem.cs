@@ -5,7 +5,7 @@ namespace CudaSharp.Tester;
 
 readonly record struct TileGymBmmProblem(
     int Batch, int M, int N, int K, string ElementType, bool TransposeA, bool TransposeB,
-    bool Persistent, int Architecture, int SmCount)
+    bool Persistent, int Architecture, int SmCount) : ITileGymProblem
 {
     public string TemplateArguments(TileGymCandidate candidate)
     {
