@@ -14,13 +14,19 @@ public sealed record TileCppTimingOptions
     /// <summary>Creates benchmark time budgets.</summary>
     /// <param name="warmupMilliseconds">Approximate warmup duration.</param>
     /// <param name="measurementMilliseconds">Approximate measurement duration.</param>
+    /// <param name="maxLaunches">
+    /// Upper bound on warmup and measured launch counts, so microsecond kernels are not launched thousands of times.
+    /// </param>
     /// <seealso href="https://docs.nvidia.com/cuda/cutile-python/performance.html" />
-    public TileCppTimingOptions(float warmupMilliseconds = 25, float measurementMilliseconds = 100)
+    public TileCppTimingOptions(float warmupMilliseconds = 25, float measurementMilliseconds = 100,
+        int maxLaunches = 1000)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(warmupMilliseconds);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(measurementMilliseconds);
+        ArgumentOutOfRangeException.ThrowIfLessThan(maxLaunches, 10);
         WarmupMilliseconds = warmupMilliseconds;
         MeasurementMilliseconds = measurementMilliseconds;
+        MaxLaunches = maxLaunches;
     }
 
     /// <summary>Gets the approximate warmup duration.</summary>
@@ -28,6 +34,9 @@ public sealed record TileCppTimingOptions
 
     /// <summary>Gets the approximate measurement duration.</summary>
     public float MeasurementMilliseconds { get; }
+
+    /// <summary>Gets the upper bound on warmup and measured launch counts.</summary>
+    public int MaxLaunches { get; }
 }
 
 /// <summary>Measures repeated CUDA Tile C++ kernel launches.</summary>
@@ -83,8 +92,9 @@ public sealed class CudaEventTileCppTimer : ITileCppTimer
         launch();
         Synchronize(stream);
         var estimate = MeasureBatch(launch, stream, 5) / 5;
-        var warmupCount = Math.Max(1, (int)(options.WarmupMilliseconds / Math.Max(estimate, 0.001f)));
-        var repeatCount = Math.Max(10, (int)(options.MeasurementMilliseconds / Math.Max(estimate, 0.001f)));
+        var perLaunch = Math.Max(estimate, 0.001f);
+        var warmupCount = Math.Clamp((int)(options.WarmupMilliseconds / perLaunch), 1, options.MaxLaunches);
+        var repeatCount = Math.Clamp((int)(options.MeasurementMilliseconds / perLaunch), 10, options.MaxLaunches);
 
         var host = Stopwatch.StartNew();
         for (var i = 0; i < warmupCount; i++)
@@ -103,6 +113,9 @@ public sealed class CudaEventTileCppTimer : ITileCppTimer
             {
                 cuEventCreate(out starts[i], 0).Ok();
                 cuEventCreate(out ends[i], 0).Ok();
+            }
+            for (var i = 0; i < repeatCount; i++)
+            {
                 cuEventRecord(starts[i], stream).Ok();
                 launch();
                 cuEventRecord(ends[i], stream).Ok();
@@ -111,7 +124,9 @@ public sealed class CudaEventTileCppTimer : ITileCppTimer
             cuEventSynchronize(ends[^1]).Ok();
             var times = GC.AllocateUninitializedArray<float>(repeatCount);
             for (var i = 0; i < repeatCount; i++)
+            {
                 cuEventElapsedTime(out times[i], starts[i], ends[i]).Ok();
+            }
             Array.Sort(times);
 
             var trim = times.Length / 10;
