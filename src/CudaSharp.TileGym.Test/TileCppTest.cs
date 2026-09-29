@@ -132,6 +132,49 @@ public class TileCppTest
     }
 
     [TestMethod]
+    public void TileCppTest_AutotunerCompilesCandidatesBeforeTimingWithoutLaunching()
+    {
+        var slow = CreateConfig(64);
+        var fast = CreateConfig(128);
+        var broken = CreateConfig(256);
+        var timer = new FakeTimer(new Dictionary<TileCppConfig, float>
+        {
+            [slow] = 2,
+            [fast] = 1,
+        });
+        var tuner = new TileCppAutotuner(new TileCppSearchSpace([slow, fast, broken]), timer);
+        var compiled = new System.Collections.Concurrent.ConcurrentBag<TileCppConfig>();
+        TileCppConfig? current = null;
+        var launches = 0;
+
+        void Compile(TileCppConfig config)
+        {
+            compiled.Add(config);
+            if (ReferenceEquals(config, broken))
+            {
+                throw new InvalidOperationException("Compilation failed.");
+            }
+        }
+
+        void Launch(TileCppConfig config)
+        {
+            current = config;
+            launches++;
+        }
+
+        timer.GetCurrent = () => current ?? throw new InvalidOperationException();
+        var result = tuner.Tune(default, ("relu", 4096), Launch,
+            static (_, config) => new TileCppGrid(4096 / uint.Parse(config["BLOCK_SIZE"])), seed: 42,
+            compile: Compile);
+
+        Assert.AreSame(fast, result.Config);
+        Assert.HasCount(3, compiled);
+        Assert.AreEqual(2, timer.MeasureCount);
+        Assert.AreEqual(0, timer.SynchronizeCount);
+        Assert.AreEqual(3, launches);
+    }
+
+    [TestMethod]
     public void TileCppTest_CUDA13_3CompilesTileGymReluToTileIr()
     {
         try

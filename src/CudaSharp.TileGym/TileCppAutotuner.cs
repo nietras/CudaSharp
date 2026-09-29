@@ -1,6 +1,7 @@
 ﻿using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
+using System.Threading.Tasks;
 using static CudaSharp.nvcuda;
 
 namespace CudaSharp.TileGym;
@@ -139,8 +140,10 @@ public sealed class CudaEventTileCppTimer : ITileCppTimer
 
 /// <summary>Searches and caches the fastest CUDA Tile C++ kernel configuration for each problem key.</summary>
 /// <remarks>
-/// Tuning first launches candidate configurations to populate their compile cache, then times only successfully
-/// compiled candidates. The fastest configuration is cached and launched once more for the caller.
+/// Tuning first prepares candidate configurations, then times only successfully prepared candidates, so
+/// compilation and module loading are never measured. With a <c>compile</c> callback candidates are compiled
+/// in parallel without launching; otherwise each candidate is launched once to populate its compile cache.
+/// The fastest configuration is cached and launched once more for the caller.
 /// </remarks>
 /// <seealso href="https://docs.nvidia.com/cuda/cutile-python/performance.html" />
 public sealed class TileCppAutotuner
@@ -192,6 +195,10 @@ public sealed class TileCppAutotuner
     /// <param name="forceRetune">Whether to ignore and replace a cached winner.</param>
     /// <param name="timingOptions">Optional warmup and measurement budgets.</param>
     /// <param name="log">Optional diagnostic callback.</param>
+    /// <param name="compile">
+    /// Optional callback that compiles and loads one configuration without launching it. When provided, candidates
+    /// are compiled in parallel before timing; the callback must be thread-safe and make the CUDA context current.
+    /// </param>
     /// <returns>The selected configuration, grid, and measured execution time.</returns>
     /// <seealso href="https://docs.nvidia.com/cuda/cutile-python/performance.html" />
     public TileCppTunedResult Tune(CUstream stream, object key,
@@ -199,16 +206,16 @@ public sealed class TileCppAutotuner
         Func<IReadOnlyDictionary<string, object?>, TileCppConfig, TileCppGrid> getGrid,
         IReadOnlyDictionary<string, object?>? namedArguments = null,
         int maxIterations = 60, int? seed = null, bool forceRetune = false,
-        TileCppTimingOptions? timingOptions = null, Action<string>? log = null)
+        TileCppTimingOptions? timingOptions = null, Action<string>? log = null,
+        Action<TileCppConfig>? compile = null)
     {
         ArgumentNullException.ThrowIfNull(key);
         ArgumentNullException.ThrowIfNull(launch);
         ArgumentNullException.ThrowIfNull(getGrid);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxIterations);
-        namedArguments ??= EmptyArguments;
+        var arguments = namedArguments ?? EmptyArguments;
         timingOptions ??= new TileCppTimingOptions();
 
-        var arguments = namedArguments ?? EmptyArguments;
         TileCppTunedResult result;
         lock (_lock)
         {
@@ -219,7 +226,7 @@ public sealed class TileCppAutotuner
             }
             else
             {
-                result = TuneCore(stream, launch, getGrid, arguments,
+                result = TuneCore(stream, launch, compile, getGrid, arguments,
                     maxIterations, seed, timingOptions, log);
                 _cache[key] = result;
             }
@@ -230,39 +237,50 @@ public sealed class TileCppAutotuner
     }
 
     TileCppTunedResult TuneCore(CUstream stream,
-        Action<TileCppConfig> launch,
+        Action<TileCppConfig> launch, Action<TileCppConfig>? compile,
         Func<IReadOnlyDictionary<string, object?>, TileCppConfig, TileCppGrid> getGrid,
         IReadOnlyDictionary<string, object?> namedArguments,
         int maxIterations, int? seed, TileCppTimingOptions timingOptions, Action<string>? log)
     {
         var indices = Enumerable.Range(0, _searchSpace.Count).ToArray();
-        Shuffle(indices, seed is null ? Random.Shared : new Random(seed.Value));
+        var random = seed is null ? Random.Shared : new Random(seed.Value);
+        Shuffle(indices, random);
 
         var candidates = new List<Candidate>(Math.Min(maxIterations, indices.Length));
-        foreach (var index in indices)
+        var batch = new List<Candidate>();
+        var next = 0;
+        while (candidates.Count < maxIterations && next < indices.Length)
         {
-            if (candidates.Count >= maxIterations)
-                break;
-
-            var config = _searchSpace[index];
-            if (!_searchSpace.IsMatch(namedArguments, config))
-                continue;
-
-            try
+            // Prepare only as many matching configurations as are still needed, so failures are replaced.
+            batch.Clear();
+            for (; next < indices.Length && candidates.Count + batch.Count < maxIterations; next++)
             {
-                var grid = getGrid(namedArguments, config);
-                launch(config);
-                candidates.Add(new Candidate(config, grid));
+                var config = _searchSpace[indices[next]];
+                if (!_searchSpace.IsMatch(namedArguments, config))
+                {
+                    continue;
+                }
+                try
+                {
+                    var grid = getGrid(namedArguments, config);
+                    batch.Add(new Candidate(config, grid));
+                }
+                catch (Exception ex)
+                {
+                    log?.Invoke($"CUDA Tile C++ configuration rejected during precompile: {config}; {ex.Message}");
+                }
             }
-            catch (Exception ex)
-            {
-                log?.Invoke($"CUDA Tile C++ configuration rejected during precompile: {config}; {ex.Message}");
-            }
+            Prepare(batch, compile ?? launch, parallel: compile is not null, candidates, log);
         }
 
         if (candidates.Count == 0)
+        {
             throw new InvalidOperationException("No valid CUDA Tile C++ configuration was found.");
-        _timer.Synchronize(stream);
+        }
+        if (compile is null)
+        {
+            _timer.Synchronize(stream);
+        }
 
         TileCppTunedResult? best = null;
         foreach (var candidate in candidates)
@@ -287,6 +305,45 @@ public sealed class TileCppAutotuner
         }
 
         return best ?? throw new InvalidOperationException("No CUDA Tile C++ configuration completed timing.");
+    }
+
+    static void Prepare(List<Candidate> batch, Action<TileCppConfig> prepare, bool parallel,
+        List<Candidate> prepared, Action<string>? log)
+    {
+        var errors = new Exception?[batch.Count];
+        void PrepareAt(int i)
+        {
+            try
+            {
+                prepare(batch[i].Config);
+            }
+            catch (Exception ex)
+            {
+                errors[i] = ex;
+            }
+        }
+        if (parallel)
+        {
+            Parallel.For(0, batch.Count, PrepareAt);
+        }
+        else
+        {
+            for (var i = 0; i < batch.Count; i++)
+            {
+                PrepareAt(i);
+            }
+        }
+        for (var i = 0; i < batch.Count; i++)
+        {
+            if (errors[i] is { } error)
+            {
+                log?.Invoke($"CUDA Tile C++ configuration rejected during precompile: {batch[i].Config}; {error.Message}");
+            }
+            else
+            {
+                prepared.Add(batch[i]);
+            }
+        }
     }
 
     static void Shuffle(Span<int> values, Random random)
