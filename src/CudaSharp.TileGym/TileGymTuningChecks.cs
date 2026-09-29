@@ -231,15 +231,18 @@ static class TileGymTuningChecks
             "Search report does not claim every candidate passed.");
         Require(report.Results[0].CompileMilliseconds == 1 && report.Results[0].LoadMilliseconds == 2 &&
             report.Results[0].FirstLaunchMilliseconds == selection.FirstLaunchMilliseconds &&
-            report.Results[0].HostMilliseconds == .5 && report.Results[0].KernelMilliseconds == 1,
-            "Phase timings are included in reports.");
+            report.Results[0].HostMilliseconds == .5 && report.Results[0].KernelMilliseconds == 1 &&
+            report.Results[0].Candidates == 3,
+            "Phase timings and candidate count are included in reports.");
         report.Add("activation", "1024", 1024, new TileGymRun(single, only, 6, 5));
-        Require(report.Results[1].Status == "Passed" && report.Results[1].Diagnostic is null,
+        Require(report.Results[1].Status == "Passed" && report.Results[1].Diagnostic is null &&
+            report.Results[1].Candidates == 1,
             "Fixed kernels report plain status.");
         Require(report.ToCsv().Contains("\"1\",\"2\",", StringComparison.Ordinal) &&
-            report.ToMarkdown().Contains("| Load ms | First launch ms | Tune ms | Host ms | Kernel ms |",
+            report.ToCsv().Contains("FirstLaunchMilliseconds,Candidates,TuneMilliseconds", StringComparison.Ordinal) &&
+            report.ToMarkdown().Contains("| Load ms | First launch ms | Candidates | Tune ms | Host ms | Kernel ms |",
                 StringComparison.Ordinal),
-            "Phase timings appear in CSV and Markdown reports.");
+            "Phase timings and candidates appear in CSV and Markdown reports.");
     }
 
     static void Require(bool condition, string description)

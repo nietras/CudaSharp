@@ -20,7 +20,8 @@ sealed record TileGymResult(
     string? Diagnostic,
     double? HostMilliseconds = null,
     double? LoadMilliseconds = null,
-    double? FirstLaunchMilliseconds = null);
+    double? FirstLaunchMilliseconds = null,
+    int Candidates = 1);
 
 sealed class TileGymReport
 {
@@ -47,7 +48,7 @@ sealed class TileGymReport
             searched ? "Passed (searched)" : "Passed",
             selection.Compiled.CompileMilliseconds, selection.TuneMilliseconds, run.KernelMilliseconds,
             bytes / (run.KernelMilliseconds * 1_000_000.0), "GB/s", diagnostic, run.HostMilliseconds,
-            selection.Compiled.LoadMilliseconds, selection.FirstLaunchMilliseconds));
+            selection.Compiled.LoadMilliseconds, selection.FirstLaunchMilliseconds, selection.Candidates));
     }
 
     public void Write(string directory)
@@ -63,8 +64,8 @@ sealed class TileGymReport
         text.AppendLine("# CudaSharp TileGym performance");
         text.AppendLine();
         text.AppendLine(
-            "| Family | Kernel | Shape | Configuration | Status | Compile ms | Load ms | First launch ms | Tune ms | Host ms | Kernel ms | Throughput |");
-        text.AppendLine("|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|");
+            "| Family | Kernel | Shape | Configuration | Status | Compile ms | Load ms | First launch ms | Candidates | Tune ms | Host ms | Kernel ms | Throughput |");
+        text.AppendLine("|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|");
         foreach (var result in _results)
         {
             text.Append("| ")
@@ -84,6 +85,8 @@ sealed class TileGymReport
                 .Append(" | ")
                 .Append(Format(result.FirstLaunchMilliseconds))
                 .Append(" | ")
+                .Append(result.Candidates)
+                .Append(" | ")
                 .Append(Format(result.TuneMilliseconds))
                 .Append(" | ")
                 .Append(Format(result.HostMilliseconds))
@@ -102,7 +105,7 @@ sealed class TileGymReport
     {
         var text = new StringBuilder(
             "Family,Kernel,Shape,Configuration,Status,CompileMilliseconds,LoadMilliseconds," +
-            "FirstLaunchMilliseconds,TuneMilliseconds,HostMilliseconds,KernelMilliseconds,Throughput," +
+            "FirstLaunchMilliseconds,Candidates,TuneMilliseconds,HostMilliseconds,KernelMilliseconds,Throughput," +
             "ThroughputUnit,Diagnostic\n");
         foreach (var result in _results)
         {
@@ -117,6 +120,7 @@ sealed class TileGymReport
                     Format(result.CompileMilliseconds),
                     Format(result.LoadMilliseconds),
                     Format(result.FirstLaunchMilliseconds),
+                    result.Candidates.ToString(CultureInfo.InvariantCulture),
                     Format(result.TuneMilliseconds),
                     Format(result.HostMilliseconds),
                     Format(result.KernelMilliseconds),
