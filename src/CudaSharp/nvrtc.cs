@@ -6,7 +6,7 @@
 /// <remarks>
 /// NVRTC compiles CUDA C++ source to PTX, CUBIN, LTO IR, or OptiX IR. Starting with CUDA
 /// Toolkit 13.3, it also compiles CUDA Tile C++ kernels declared with <c>__tile_global__</c>
-/// from <c>cuda_tile.h</c> to TileIR; <c>tileiras</c> then assembles TileIR to CUBIN.
+/// from <c>cuda_tile.h</c> to TileIR;
 /// </remarks>
 /// <seealso href="https://docs.nvidia.com/cuda/nvrtc/index.html"/>
 /// <seealso href="https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/understanding-cuda-programming-model.html#writing-tile-kernels"/>
