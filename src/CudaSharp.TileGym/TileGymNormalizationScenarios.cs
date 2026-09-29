@@ -6,9 +6,9 @@ namespace CudaSharp.Tester;
 
 static class TileGymNormalizationScenarios
 {
-    const int Rows = 8;
+    const int Rows = 16;
     const int Columns = 256;
-    const string Shape = "8x256";
+    const string Shape = "256x256";
 
     public static IEnumerable<TileGymBenchmark> Create(TileGymRuntime runtime, TileGymOptions options)
     {
@@ -79,7 +79,7 @@ static class TileGymNormalizationScenarios
     static TileGymBenchmark RmsNormPv()
     {
         const string name = "rms_norm_kernel_pv";
-        var kernel = TileGymKernel.Fixed("rms_norm.cuh", name, "float, float, 8, 256, 256",
+        var kernel = TileGymKernel.Fixed("rms_norm.cuh", name, $"float, float, {Rows}, 256, 256",
             "const float*, const float*, float*, float*, float", new TileCppGrid(Rows), "float,BLOCK_SIZE=256");
         return new(kernel, (runtime, report) =>
         {

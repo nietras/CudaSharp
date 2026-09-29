@@ -6,7 +6,7 @@ namespace CudaSharp.Tester;
 
 static class TileGymAttentionScenarios
 {
-    const int Sequence = 64;
+    const int Sequence = 256;
     const int Dimension = 64;
     const float Scale = .125f;
     const string ForwardSignature = "const float*, const float*, const float*, float*, float*, float";
@@ -21,11 +21,11 @@ static class TileGymAttentionScenarios
         yield return Prefill(runtime, "gemma_attention.cuh", "gemma_attention_fwd_kernel",
             "const float*, const float*, const float*, float*, float, float", gemma: true);
         yield return Decode("flash_decode.cuh", "attention_decode_kernel_optimized",
-            "float, 1, 1, 64, 1, 8, 64, 64, 64, 1", sink: false, gemma: false);
+            $"float, 1, 1, {Sequence}, 1, 8, {Sequence}, 64, 64, 1", sink: false, gemma: false);
         yield return Decode("attention_sink_decode.cuh", "attention_sink_decode_kernel",
-            "float, 1, 1, 1, 64, 1, 8, 64, 64, 64, 1, 0, false, 1", sink: true, gemma: false);
+            $"float, 1, 1, 1, {Sequence}, 1, 8, {Sequence}, 64, 64, 1, 0, false, 1", sink: true, gemma: false);
         yield return Decode("gemma_attention_decode.cuh", "gemma_attention_decode_kernel",
-            "float, 1, 1, 64, 1, 8, 64, 64, 64, 1, 0, false, 1", sink: false, gemma: true);
+            $"float, 1, 1, {Sequence}, 1, 8, {Sequence}, 64, 64, 1, 0, false, 1", sink: false, gemma: true);
     }
 
     static TileGymBenchmark Prefill(TileGymRuntime runtime, string header, string name, string signature, bool gemma)
@@ -73,7 +73,7 @@ static class TileGymAttentionScenarios
         const string name = "attention_sink_fwd_kernel";
         var kernel = TileGymKernel.Fixed("attention_sink.cuh", name, "float, 64, 64, 64, false",
             "float*, float*, float*, float*, float, float*, float*, int, int, int, int, int, int",
-            new TileCppGrid(1), "float,BLOCK_M=64,BLOCK_N=64");
+            new TileCppGrid(Sequence / 64), "float,BLOCK_M=64,BLOCK_N=64");
         return new(kernel, (runtime, report) =>
         {
             using var q = runtime.Allocate<float>(Sequence * Dimension);
@@ -225,9 +225,10 @@ static class TileGymAttentionScenarios
         var candidates = TileGymAttentionCandidates.For(problem);
         var kernel = TileGymKernel.Tuned("attention.cuh", name, signature, problem, candidates);
         var forward = TileGymKernel.Fixed("attention.cuh", "prefill_fmha_fwd_kernel",
-            "float, 1, 1, 1, 64, 64, 64, 64, 64, true, true, 2, 1", ForwardSignature, new TileCppGrid(1));
+            $"float, 1, 1, 1, {Sequence}, {Sequence}, 64, 64, 64, true, true, 2, 1", ForwardSignature,
+            new TileCppGrid(Sequence / 64));
         var preprocess = TileGymKernel.Fixed("attention.cuh", "fmha_bwd_preprocess_kernel",
-            "float, 1, 1, 64, 64, 64, 2", PreprocessSignature, new TileCppGrid(1));
+            $"float, 1, 1, {Sequence}, 64, 64, 2", PreprocessSignature, new TileCppGrid(Sequence / 64));
         return new([kernel, forward, preprocess], (runtime, report) =>
         {
             using var q = runtime.Allocate<float>(Sequence * Dimension);

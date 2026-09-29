@@ -62,7 +62,7 @@ static class TileGymMatrixScenarios
 
     static TileGymBenchmark Bmm(TileGymRuntime runtime, bool persistent)
     {
-        const int batch = 2, m = 64, n = 64, k = 64;
+        const int batch = 8, m = 256, n = 256, k = 256;
         var name = persistent ? "bmm_static_persistent_kernel" : "bmm_kernel";
         var signature = persistent
             ? "const float*, const float*, float*"

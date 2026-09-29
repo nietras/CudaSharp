@@ -6,9 +6,9 @@ namespace CudaSharp.Tester;
 
 static class TileGymRecurrentScenarios
 {
-    const int T = 8, Kd = 16, Vd = 16;
+    const int T = 1024, Kd = 16, Vd = 16;
     const float Scale = .25f;
-    const string Shape = "B=1,T=8,H=1,K=16,V=16";
+    const string Shape = "B=1,T=1024,H=1,K=16,V=16";
 
     public static IEnumerable<TileGymBenchmark> Create(TileGymRuntime runtime, TileGymOptions options)
     {
@@ -95,7 +95,7 @@ static class TileGymRecurrentScenarios
 
     static unsafe TileGymBenchmark Chunk()
     {
-        const int chunk = 4, chunks = 2;
+        const int chunk = 4, chunks = T / chunk;
         const string interName = "chunk_gated_delta_rule_inter_kernel";
         var label = $"CHUNK={chunk}";
         var intra = TileGymKernel.Fixed("chunk_gated_delta_rule.cuh", "chunk_gated_delta_rule_intra_kernel",

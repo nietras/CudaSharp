@@ -19,11 +19,11 @@ static class TileGymRopeSoftmaxScenarios
     static TileGymBenchmark Rope(bool backward)
     {
         const int batch = 1;
-        const int qHeads = 2;
-        const int kHeads = 1;
-        const int sequence = 4;
-        const int head = 64;
-        const int half = 32;
+        const int qHeads = 32;
+        const int kHeads = 8;
+        const int sequence = 16;
+        const int head = 128;
+        const int half = 64;
         var name = backward ? "rope_backward_kernel" : "rope_kernel";
         var templates = $"float, float, float, {batch}, {qHeads}, {kHeads}, {qHeads}, {kHeads}, {half}, {half}, " +
             $"{head}, 1, {sequence}";
@@ -81,7 +81,7 @@ static class TileGymRopeSoftmaxScenarios
 
     static TileGymBenchmark Softmax(bool online, bool backward)
     {
-        const int rows = 4;
+        var rows = online ? 1 << 14 : 1 << 16;
         var columns = online ? 1025 : 256;
         var name = (backward, online) switch
         {

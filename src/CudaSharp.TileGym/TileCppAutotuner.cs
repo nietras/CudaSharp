@@ -19,7 +19,7 @@ public sealed record TileCppTimingOptions
     /// </param>
     /// <seealso href="https://docs.nvidia.com/cuda/cutile-python/performance.html" />
     public TileCppTimingOptions(float warmupMilliseconds = 25, float measurementMilliseconds = 100,
-        int maxLaunches = 1000)
+        int maxLaunches = 10)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(warmupMilliseconds);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(measurementMilliseconds);

@@ -37,7 +37,7 @@ static class TileGymActivationScenarios
         yield return SiluAndMulRowWise(rows, 1024);
         yield return Swiglu(rows, 1024, backward: false);
         yield return Swiglu(rows, 1024, backward: true);
-        yield return SwigluPersistent(1, 1024);
+        yield return SwigluPersistent(rows, 1024);
     }
 
     static TileGymBenchmark Relu(int count, TileGymReluOperation operation)
