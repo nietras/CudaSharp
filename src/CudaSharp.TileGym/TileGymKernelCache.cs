@@ -151,6 +151,8 @@ sealed class TileGymKernelCache : IDisposable
         var compileParallelism = Environment.ProcessorCount;
         var pending = new Pending[distinct.Length];
         var compileOptions = new ParallelOptions { MaxDegreeOfParallelism = compileParallelism };
+        // Parallization does not work, it appears to be serialized by some
+        // underlying mechanism inside nvrtcCompileProgram
         //Parallel.For(0, distinct.Length, compileOptions, i => pending[i] = Compile(distinct[i]));
         for (var i = 0; i < distinct.Length; i++) { pending[i] = Compile(distinct[i]); }
         var compileWall = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
