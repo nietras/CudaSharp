@@ -34,6 +34,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
+      <_Parameter1>CudaSharp.TileGym.Test</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="NtvLibs.cuda13.nvrtc-builtins64_134.runtime.json" Version="13.4.2" />
     <PackageReference Include="NtvLibs.cuda13.nvrtc-builtins64_134.runtime.win-x64" Version="13.4.2" />
     <PackageReference Include="NtvLibs.cuda13.nvrtc64_130_0.runtime.json" Version="13.4.2" />

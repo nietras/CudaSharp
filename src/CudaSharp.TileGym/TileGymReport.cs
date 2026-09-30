@@ -21,7 +21,11 @@ sealed record TileGymResult(
     double? HostMilliseconds = null,
     double? LoadMilliseconds = null,
     double? FirstLaunchMilliseconds = null,
-    int Candidates = 1);
+    int Candidates = 1)
+{
+    public int? CompilationBatchId { get; init; }
+    public int BatchSpecializations { get; init; } = 1;
+}
 
 sealed class TileGymReport
 {
@@ -44,11 +48,23 @@ sealed class TileGymReport
                 diagnostic += $" First rejection: {selection.Rejections[0]}";
             }
         }
-        Add(new TileGymResult(family, run.Kernel.Name, shape, selection.Variant.Label,
+        var batch = selection.Compiled.Batch;
+        if (batch is { Specializations.Count: > 1 })
+        {
+            var note = $"Compile/load times are amortized shares of batch {batch.Id} " +
+                $"({batch.Specializations.Count} specializations).";
+            diagnostic = diagnostic is null ? note : diagnostic + " " + note;
+        }
+        var result = new TileGymResult(family, run.Kernel.Name, shape, selection.Variant.Label,
             searched ? "Passed (searched)" : "Passed",
             selection.Compiled.CompileMilliseconds, selection.TuneMilliseconds, run.KernelMilliseconds,
             bytes / (run.KernelMilliseconds * 1_000_000.0), "GB/s", diagnostic, run.HostMilliseconds,
-            selection.Compiled.LoadMilliseconds, selection.FirstLaunchMilliseconds, selection.Candidates));
+            selection.Compiled.LoadMilliseconds, selection.FirstLaunchMilliseconds, selection.Candidates)
+        {
+            CompilationBatchId = batch?.Id,
+            BatchSpecializations = batch?.Specializations.Count ?? 1,
+        };
+        Add(result);
     }
 
     public void Write(string directory)
@@ -67,9 +83,11 @@ sealed class TileGymReport
         var text = new StringBuilder();
         text.AppendLine("# CudaSharp TileGym performance");
         text.AppendLine();
+        text.AppendLine("For batched kernels, compile/load times are amortized per-specialization shares. " +
+            "Full batch costs are in tilegym-precompile-batches.csv.").AppendLine();
         text.AppendLine(
-            "| Family | Kernel | Shape | Configuration | Status | Compile ms | Load ms | First launch ms | Candidates | Tune ms | Host ms | Kernel ms | Throughput |");
-        text.AppendLine("|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|");
+            "| Family | Kernel | Shape | Configuration | Status | Compile ms | Load ms | First launch ms | Candidates | Tune ms | Host ms | Kernel ms | Throughput | Batch |");
+        text.AppendLine("|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|");
         foreach (var result in _results)
         {
             text.Append("| ")
@@ -100,6 +118,8 @@ sealed class TileGymReport
                 .Append(Format(result.Throughput))
                 .Append(' ')
                 .Append(result.ThroughputUnit)
+                .Append(" | ")
+                .Append(result.CompilationBatchId)
                 .AppendLine(" |");
         }
         return text.ToString();
@@ -110,7 +130,7 @@ sealed class TileGymReport
         var text = new StringBuilder(
             "Family,Kernel,Shape,Configuration,Status,CompileMilliseconds,LoadMilliseconds," +
             "FirstLaunchMilliseconds,Candidates,TuneMilliseconds,HostMilliseconds,KernelMilliseconds,Throughput," +
-            "ThroughputUnit,Diagnostic\n");
+            "ThroughputUnit,Diagnostic,CompilationBatchId,BatchSpecializations\n");
         foreach (var result in _results)
         {
             text.AppendLine(
@@ -131,6 +151,8 @@ sealed class TileGymReport
                     Format(result.Throughput),
                     result.ThroughputUnit,
                     result.Diagnostic ?? string.Empty,
+                    result.CompilationBatchId?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
+                    result.BatchSpecializations.ToString(CultureInfo.InvariantCulture),
                 }.Select(Escape)));
         }
         return text.ToString();

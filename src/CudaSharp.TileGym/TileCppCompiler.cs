@@ -1,4 +1,5 @@
 ﻿using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
@@ -33,6 +34,12 @@ public sealed record TileCppHeader
 /// <summary>Contains NVRTC-compiled CUDA TileIR and its lowered kernel entry point.</summary>
 /// <seealso href="https://docs.nvidia.com/cuda/nvrtc/index.html#group__compilation" />
 public sealed record TileCppCompilation(byte[] TileIr, string EntryPoint);
+
+/// <summary>Contains one compiled CUDA TileIR module and the exact lowered names of its kernel expressions.</summary>
+/// <param name="TileIr">CUDA TileIR bytecode containing all requested specializations.</param>
+/// <param name="EntryPoints">Maps each distinct NVRTC name expression to its copied lowered entry-point name.</param>
+/// <seealso href="https://docs.nvidia.com/cuda/nvrtc/index.html#group__compilation" />
+public sealed record TileCppCompilationBatch(byte[] TileIr, IReadOnlyDictionary<string, string> EntryPoints);
 
 /// <summary>Compiles CUDA Tile C++ source directly to TileIR or CUBIN with NVRTC.</summary>
 /// <remarks>
@@ -101,21 +108,34 @@ public sealed class TileCppCompiler
     byte[] CompileOutput(string source, string sourceName, TileCppConfig config,
         IReadOnlyList<TileCppHeader>? headers, IReadOnlyList<string>? additionalOptions,
         Func<nvrtcProgram, byte[]> getOutput)
+        => CompileProgram(source, sourceName, [], config, headers, additionalOptions,
+            $"CompileOutput[{sourceName}]", (program, _) => getOutput(program));
+
+    T CompileProgram<T>(string source, string sourceName, string[] nameExpressions, TileCppConfig config,
+        IReadOnlyList<TileCppHeader>? headers, IReadOnlyList<string>? additionalOptions,
+        string timingLabel, Func<nvrtcProgram, TileCppCompilationTiming, T> getOutput)
     {
         ArgumentNullException.ThrowIfNull(source);
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceName);
         ArgumentNullException.ThrowIfNull(config);
 
-        using var timing = new TileCppCompilationTiming($"CompileOutput[{sourceName}]");
+        using var timing = new TileCppCompilationTiming(timingLabel);
         timing.Step("Build virtual header buffers");
-        var headerSources = headers is null ? [] : headers.Select(static header => header.Source).ToArray();
-        var headerNames = headers is null ? [] : headers.Select(static header => header.Name).ToArray();
+        var headerSnapshot = headers is null ? [] : headers.ToArray();
+        var headerSources = headerSnapshot.Select(static header => header.Source).ToArray();
+        var headerNames = headerSnapshot.Select(static header => header.Name).ToArray();
+        var optionsSnapshot = additionalOptions?.ToArray();
         timing.Step(nameof(nvrtcCreateProgram));
         nvrtcCreateProgram(out var program, source, sourceName, headerSources.Length, headerSources, headerNames).Ok();
         try
         {
+            foreach (var nameExpression in nameExpressions)
+            {
+                timing.Step(nameof(nvrtcAddNameExpression));
+                nvrtcAddNameExpression(program, nameExpression).Ok();
+            }
             timing.Step(nameof(CreateNvrtcOptions));
-            var options = CreateNvrtcOptions(config, additionalOptions);
+            var options = CreateNvrtcOptions(config, optionsSnapshot);
             timing.Step($"nvrtcCompileProgram[program=0x{program.Value:X}]");
             var result = nvrtcCompileProgram(program, options.Length, options);
             timing.Step("Check compilation result");
@@ -129,7 +149,7 @@ public sealed class TileCppCompiler
             }
 
             timing.Step(nameof(nvrtcGetTileIR));
-            return getOutput(program);
+            return getOutput(program, timing);
         }
         finally
         {
@@ -164,47 +184,70 @@ public sealed class TileCppCompiler
         IReadOnlyList<string>? additionalOptions = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(nameExpression);
+        var compilation = CompileKernelsCore(source, sourceName, [nameExpression], config, headers,
+            additionalOptions, $"CompileKernel[{sourceName}, {nameExpression}]");
+        return new TileCppCompilation(compilation.TileIr, compilation.EntryPoints[nameExpression]);
+    }
+
+    /// <summary>Compiles multiple templated kernel specializations into one CUDA TileIR module.</summary>
+    /// <param name="source">CUDA Tile C++ source including any required explicit template instantiations.</param>
+    /// <param name="sourceName">Diagnostic source name.</param>
+    /// <param name="nameExpressions">Nonempty NVRTC name expressions; exact duplicates are registered only once.</param>
+    /// <param name="config">Compile-time kernel parameters and compiler hints shared by the batch.</param>
+    /// <param name="headers">Optional virtual headers.</param>
+    /// <param name="additionalOptions">Optional additional NVRTC command-line options.</param>
+    /// <returns>One TileIR blob and an ordinal map from each distinct expression to its exact lowered name.</returns>
+    /// <remarks>All expressions are registered before compilation and all lowered names are copied before destruction.</remarks>
+    /// <seealso href="https://docs.nvidia.com/cuda/nvrtc/index.html#group__compilation" />
+    public TileCppCompilationBatch CompileKernels(string source, string sourceName,
+        ReadOnlySpan<string> nameExpressions, TileCppConfig config,
+        IReadOnlyList<TileCppHeader>? headers = null, IReadOnlyList<string>? additionalOptions = null)
+    {
         ArgumentNullException.ThrowIfNull(source);
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceName);
         ArgumentNullException.ThrowIfNull(config);
-
-        using var timing = new TileCppCompilationTiming($"CompileKernel[{sourceName}, {nameExpression}]");
-        timing.Step("Build virtual header buffers");
-        var headerSources = headers is null ? [] : headers.Select(static header => header.Source).ToArray();
-        var headerNames = headers is null ? [] : headers.Select(static header => header.Name).ToArray();
-        timing.Step(nameof(nvrtcCreateProgram));
-        nvrtcCreateProgram(out var program, source, sourceName, headerSources.Length, headerSources, headerNames).Ok();
-        try
+        if (nameExpressions.IsEmpty)
         {
-            timing.Step(nameof(nvrtcAddNameExpression));
-            nvrtcAddNameExpression(program, nameExpression).Ok();
-            timing.Step(nameof(CreateNvrtcOptions));
-            var options = CreateNvrtcOptions(config, additionalOptions);
-            timing.Step($"nvrtcCompileProgram[program=0x{program.Value:X}]");
-            var result = nvrtcCompileProgram(program, options.Length, options);
-            timing.Step("Check compilation result");
-            if (result != nvrtcResult.NVRTC_SUCCESS)
+            throw new ArgumentException("At least one name expression is required.", nameof(nameExpressions));
+        }
+
+        var expressions = new List<string>(nameExpressions.Length);
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var expression in nameExpressions)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(expression, nameof(nameExpressions));
+            if (expression.Contains('\0'))
             {
-                timing.Step(nameof(nvrtcGetProgramLogString));
-                var resultName = result.ToStringFast();
-                var log = nvrtcGetProgramLogString(program);
-                throw new CudaException<nvrtcResult>(result,
-                    $"NVRTC CUDA Tile C++ compilation failed with {resultName}:\n{log}");
+                throw new ArgumentException("Name expressions cannot contain a null character.", nameof(nameExpressions));
             }
-
-            timing.Step(nameof(nvrtcGetTileIR));
-            var tileIr = nvrtcGetTileIR(program);
-            timing.Step(nameof(nvrtcGetLoweredNameString));
-            var loweredName = nvrtcGetLoweredNameString(program, nameExpression);
-            timing.Step("Build compilation result");
-            return new TileCppCompilation(tileIr, loweredName);
+            if (seen.Add(expression))
+            {
+                expressions.Add(expression);
+            }
         }
-        finally
-        {
-            timing.Step(nameof(nvrtcDestroyProgram));
-            nvrtcDestroyProgram(ref program).Ok();
-        }
+        var snapshot = expressions.ToArray();
+        return CompileKernelsCore(source, sourceName, snapshot, config, headers, additionalOptions,
+            $"CompileKernels[{sourceName}, {snapshot.Length} specializations]");
     }
+
+    TileCppCompilationBatch CompileKernelsCore(string source, string sourceName, string[] nameExpressions,
+        TileCppConfig config, IReadOnlyList<TileCppHeader>? headers, IReadOnlyList<string>? additionalOptions,
+        string timingLabel)
+        => CompileProgram(source, sourceName, nameExpressions, config, headers, additionalOptions,
+            timingLabel, (program, timing) =>
+            {
+                var tileIr = nvrtcGetTileIR(program);
+                var entryPoints = new Dictionary<string, string>(nameExpressions.Length, StringComparer.Ordinal);
+                foreach (var expression in nameExpressions)
+                {
+                    timing.Step(nameof(nvrtcGetLoweredNameString));
+                    var loweredName = nvrtcGetLoweredNameString(program, expression);
+                    entryPoints.Add(expression, loweredName);
+                }
+                timing.Step("Build compilation result");
+                var readOnlyEntryPoints = new ReadOnlyDictionary<string, string>(entryPoints);
+                return new TileCppCompilationBatch(tileIr, readOnlyEntryPoints);
+            });
 
     string[] CreateNvrtcOptions(TileCppConfig config, IReadOnlyList<string>? additionalOptions)
     {

@@ -17,6 +17,7 @@ interface ITileGymProblem
 /// <summary>Identifies one compiled CUDA Tile C++ kernel specialization.</summary>
 sealed record TileGymKernelSpec(string Header, string Name, string TemplateArguments, string Signature)
 {
+    public string NameExpression => $"&{Name}<{TemplateArguments}>";
     public override string ToString() => $"{Name}<{TemplateArguments}>";
 }
 
@@ -33,9 +34,12 @@ sealed class TileGymKernel
     {
         Name = name;
         Variants = variants;
+        var first = variants[0].Spec;
+        Definition = new(first.Header, name, first.Signature);
     }
 
     public string Name { get; }
+    public TileGymKernelDefinition Definition { get; }
     public IReadOnlyList<TileGymVariant> Variants { get; }
 
     public static TileGymKernel Fixed(string header, string name, string templateArguments, string signature,
