@@ -81,6 +81,8 @@ public sealed class TileCppCompiler
     /// <summary>Installs bundled CUDA headers before starting concurrent compilations.</summary>
     public void PrepareBundledHeaders()
     {
+        using var timing = new TileCppCompilationTiming(nameof(PrepareBundledHeaders));
+        timing.Step("_headersInstalled.Value");
         _ = _headersInstalled.Value;
     }
 
@@ -104,25 +106,34 @@ public sealed class TileCppCompiler
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceName);
         ArgumentNullException.ThrowIfNull(config);
 
+        using var timing = new TileCppCompilationTiming($"CompileOutput[{sourceName}]");
+        timing.Step("Build virtual header buffers");
         var headerSources = headers is null ? [] : headers.Select(static header => header.Source).ToArray();
         var headerNames = headers is null ? [] : headers.Select(static header => header.Name).ToArray();
+        timing.Step(nameof(nvrtcCreateProgram));
         nvrtcCreateProgram(out var program, source, sourceName, headerSources.Length, headerSources, headerNames).Ok();
         try
         {
+            timing.Step(nameof(CreateNvrtcOptions));
             var options = CreateNvrtcOptions(config, additionalOptions);
+            timing.Step($"nvrtcCompileProgram[program=0x{program.Value:X}]");
             var result = nvrtcCompileProgram(program, options.Length, options);
+            timing.Step("Check compilation result");
             if (result != nvrtcResult.NVRTC_SUCCESS)
             {
+                timing.Step(nameof(nvrtcGetProgramLogString));
                 var log = nvrtcGetProgramLogString(program);
                 var resultName = result.ToStringFast();
                 throw new CudaException<nvrtcResult>(result,
                     $"NVRTC CUDA Tile C++ compilation failed with {resultName}:\n{log}");
             }
 
+            timing.Step(nameof(nvrtcGetTileIR));
             return getOutput(program);
         }
         finally
         {
+            timing.Step(nameof(nvrtcDestroyProgram));
             nvrtcDestroyProgram(ref program).Ok();
         }
     }
@@ -157,28 +168,40 @@ public sealed class TileCppCompiler
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceName);
         ArgumentNullException.ThrowIfNull(config);
 
+        using var timing = new TileCppCompilationTiming($"CompileKernel[{sourceName}, {nameExpression}]");
+        timing.Step("Build virtual header buffers");
         var headerSources = headers is null ? [] : headers.Select(static header => header.Source).ToArray();
         var headerNames = headers is null ? [] : headers.Select(static header => header.Name).ToArray();
+        timing.Step(nameof(nvrtcCreateProgram));
         nvrtcCreateProgram(out var program, source, sourceName, headerSources.Length, headerSources, headerNames).Ok();
         try
         {
+            timing.Step(nameof(nvrtcAddNameExpression));
             nvrtcAddNameExpression(program, nameExpression).Ok();
+            timing.Step(nameof(CreateNvrtcOptions));
             var options = CreateNvrtcOptions(config, additionalOptions);
+            timing.Step($"nvrtcCompileProgram[program=0x{program.Value:X}]");
             var result = nvrtcCompileProgram(program, options.Length, options);
+            timing.Step("Check compilation result");
             if (result != nvrtcResult.NVRTC_SUCCESS)
             {
+                timing.Step(nameof(nvrtcGetProgramLogString));
                 var resultName = result.ToStringFast();
                 var log = nvrtcGetProgramLogString(program);
                 throw new CudaException<nvrtcResult>(result,
                     $"NVRTC CUDA Tile C++ compilation failed with {resultName}:\n{log}");
             }
 
+            timing.Step(nameof(nvrtcGetTileIR));
             var tileIr = nvrtcGetTileIR(program);
+            timing.Step(nameof(nvrtcGetLoweredNameString));
             var loweredName = nvrtcGetLoweredNameString(program, nameExpression);
+            timing.Step("Build compilation result");
             return new TileCppCompilation(tileIr, loweredName);
         }
         finally
         {
+            timing.Step(nameof(nvrtcDestroyProgram));
             nvrtcDestroyProgram(ref program).Ok();
         }
     }

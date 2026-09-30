@@ -185,13 +185,18 @@ sealed class TileGymKernelCache : IDisposable
 
     Pending Compile(TileGymKernelSpec spec)
     {
+        using var timing = new TileCppCompilationTiming($"TileGymKernelCache.Compile[{spec}]");
         var start = Stopwatch.GetTimestamp();
         try
         {
+            timing.Step(nameof(Create));
             var kernel = Create(spec);
+            timing.Step("_loaded.Add");
             _loaded.Add(kernel);
+            timing.Step("TileCppKernel.Compile (inclusive of nested stages)");
             var bytes = kernel.Compile(Config);
             var compileMilliseconds = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
+            timing.Step("Build pending result");
             return new(spec, kernel, compileMilliseconds, start, null, bytes);
         }
         catch (Exception ex)

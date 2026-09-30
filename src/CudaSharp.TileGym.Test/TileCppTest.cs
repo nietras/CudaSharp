@@ -1,5 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
@@ -37,6 +39,93 @@ public class TileCppTest
         Assert.ThrowsExactly<ArgumentNullException>(() => kernel.Compile(null!));
         kernel.Dispose();
         Assert.ThrowsExactly<ObjectDisposedException>(() => kernel.Compile(new TileCppConfig([])));
+    }
+
+    /// <summary>Checks stage diagnostics for compilation, cache hits, and compilation failures.</summary>
+    /// <seealso href="https://docs.nvidia.com/cuda/nvrtc/index.html#group__compilation" />
+    [TestMethod]
+    [DoNotParallelize]
+    public void TileCppTest_CUDA13_3TracesCompilationStages()
+    {
+        nvrtcVersion(out var major, out var minor).Ok();
+        if (major < 13 || major == 13 && minor < 3)
+        {
+            Assert.Inconclusive($"CUDA Tile C++ requires NVRTC 13.3 or later; found {major}.{minor}.");
+        }
+        var architectures = nvrtcGetSupportedArchs();
+        var compiler = new TileCppCompiler(architectures[^1]);
+        compiler.PrepareBundledHeaders();
+        const string source = """
+            #include <cuda_tile.h>
+            template<int Variant> __tile_global__ void timing_kernel() {}
+            template __tile_global__ void timing_kernel<1>();
+            """;
+        var config = new TileCppConfig([]);
+        using var writer = new StringWriter(CultureInfo.InvariantCulture);
+        using var listener = new TextWriterTraceListener(writer);
+        Trace.Listeners.Add(listener);
+        try
+        {
+            using var kernel = new TileCppKernel(compiler, source, "timing_kernel.cu", "timing_kernel",
+                nameExpression: "&timing_kernel<1>");
+            var bytes = kernel.Compile(config);
+            Assert.IsGreaterThan(0, bytes);
+            var compiledTrace = writer.ToString();
+            Assert.Contains("thread=", compiledTrace);
+            Assert.Contains("&timing_kernel<1>", compiledTrace);
+            Assert.Contains("_compilations.GetOrAdd:", compiledTrace);
+            Assert.Contains("Lazy.Value (inclusive of compiler stages):", compiledTrace);
+            Assert.Contains("_headersInstalled.Value:", compiledTrace);
+            Assert.Contains(".nvrtcCreateProgram:", compiledTrace);
+            Assert.Contains(".nvrtcAddNameExpression:", compiledTrace);
+            Assert.Contains(".nvrtcCompileProgram[program=0x", compiledTrace);
+            Assert.Contains(".nvrtcGetTileIR:", compiledTrace);
+            Assert.Contains(".nvrtcGetLoweredNameString:", compiledTrace);
+            Assert.Contains(".nvrtcDestroyProgram:", compiledTrace);
+            var reports = Regex.Matches(compiledTrace, "Compile timing:");
+            Assert.HasCount(1, reports);
+
+            var cachedBytes = kernel.Compile(config);
+            Assert.AreEqual(bytes, cachedBytes);
+            var cachedTrace = writer.ToString()[compiledTrace.Length..];
+            Assert.Contains("Lazy.Value (inclusive of compiler stages):", cachedTrace);
+            Assert.DoesNotContain(".nvrtcCompileProgram[", cachedTrace);
+
+            var output = compiler.CompileToTileIr(source, "timing_output.cu", config);
+            Assert.IsNotEmpty(output);
+            var outputTrace = writer.ToString();
+            Assert.Contains("CompileOutput[timing_output.cu].nvrtcGetTileIR:", outputTrace);
+
+            Assert.ThrowsExactly<CudaException<nvrtcResult>>(() =>
+                compiler.CompileToTileIr("invalid CUDA source", "timing_failure.cu", config));
+            var failedTrace = writer.ToString()[outputTrace.Length..];
+            Assert.Contains(".nvrtcGetProgramLogString:", failedTrace);
+            Assert.Contains(".nvrtcDestroyProgram:", failedTrace);
+
+            var parallelStart = writer.GetStringBuilder().Length;
+            Parallel.For(0, 4, i =>
+            {
+                using var parallelKernel = new TileCppKernel(compiler, source, $"timing_parallel_{i}.cu",
+                    "timing_kernel", nameExpression: "&timing_kernel<1>");
+                var parallelBytes = parallelKernel.Compile(config);
+                Assert.IsGreaterThan(0, parallelBytes);
+            });
+            var parallelTrace = writer.ToString()[parallelStart..];
+            var parallelReports = Regex.Matches(parallelTrace,
+                @"Compile timing:.*?(?=\r?\nCompile timing:|\z)", RegexOptions.Singleline);
+            Assert.HasCount(4, parallelReports);
+            foreach (Match report in parallelReports)
+            {
+                var sourceNames = Regex.Matches(report.Value, @"timing_parallel_\d+\.cu")
+                    .Select(static match => match.Value).Distinct(StringComparer.Ordinal).ToArray();
+                Assert.HasCount(1, sourceNames, "Parallel compilation timings must not mix specialization records.");
+                Assert.Contains(".nvrtcCompileProgram[program=0x", report.Value);
+            }
+        }
+        finally
+        {
+            Trace.Listeners.Remove(listener);
+        }
     }
 
     [TestMethod]

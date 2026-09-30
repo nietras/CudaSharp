@@ -59,8 +59,12 @@ public sealed class TileCppKernel : IDisposable
     {
         ArgumentNullException.ThrowIfNull(config);
         ObjectDisposedException.ThrowIf(_disposed, this);
+        using var timing = new TileCppCompilationTiming($"TileCppKernel.Compile[{_sourceName}, {_nameExpression ?? _kernelName}]");
+        timing.Step(nameof(GetConfigKey));
         var configKey = GetConfigKey(config);
+        timing.Step($"GetOrCompile[{configKey}]");
         var compilation = GetOrCompile(config, configKey);
+        timing.Step("Result validation");
         ObjectDisposedException.ThrowIf(_disposed, this);
         return compilation.TileIr.Length;
     }
@@ -135,6 +139,8 @@ public sealed class TileCppKernel : IDisposable
 
     TileCppCompilation GetOrCompile(TileCppConfig config, string configKey)
     {
+        using var timing = new TileCppCompilationTiming($"GetOrCompile[{_sourceName}, {configKey}]");
+        timing.Step("_compilations.GetOrAdd");
         var lazy = _compilations.GetOrAdd(configKey, _ => new Lazy<TileCppCompilation>(() =>
         {
             TileCppCompilation compilation;
@@ -154,12 +160,14 @@ public sealed class TileCppKernel : IDisposable
             }
             return compilation;
         }, LazyThreadSafetyMode.ExecutionAndPublication));
+        timing.Step("Lazy.Value (inclusive of compiler stages)");
         try
         {
             return lazy.Value;
         }
         catch
         {
+            timing.Step("Remove failed compilation");
             ((ICollection<KeyValuePair<string, Lazy<TileCppCompilation>>>)_compilations)
                 .Remove(new(configKey, lazy));
             throw;
