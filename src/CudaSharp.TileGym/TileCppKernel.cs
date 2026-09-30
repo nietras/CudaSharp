@@ -1,23 +1,20 @@
-﻿using System.Collections.Concurrent;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.InteropServices;
-using System.Threading;
 using static CudaSharp.nvcuda;
 
 namespace CudaSharp.TileGym;
 
 /// <summary>Compiles and loads variants of a CUDA Tile C++ kernel.</summary>
 /// <remarks>
-/// Loaded modules are cached per CUDA context. Dispose this object before destroying any context in which a variant
-/// was loaded. CUDA Tile kernels are launched with one thread per tile block as required by NVIDIA.
+/// This object is not thread-safe. Loaded modules are cached per CUDA context; dispose this object before destroying
+/// any context in which a variant was loaded. CUDA Tile kernels are launched with one thread per tile block.
 /// </remarks>
 /// <seealso href="https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#launching-kernels" />
 public sealed class TileCppKernel : IDisposable
 {
-    readonly ConcurrentDictionary<string, Lazy<TileCppCompilation>> _compilations = new(StringComparer.Ordinal);
+    readonly Dictionary<string, TileCppCompilation> _compilations = new(StringComparer.Ordinal);
     readonly Dictionary<LoadedKey, LoadedKernel> _loadedKernels = [];
-    readonly Lock _lock = new();
     readonly TileCppCompiler _compiler;
     readonly string _source;
     readonly string _sourceName;
@@ -25,7 +22,7 @@ public sealed class TileCppKernel : IDisposable
     readonly string? _nameExpression;
     readonly IReadOnlyList<TileCppHeader>? _headers;
     readonly IReadOnlyList<string>? _additionalOptions;
-    volatile bool _disposed;
+    bool _disposed;
 
     /// <summary>Creates a reusable CUDA Tile C++ kernel definition.</summary>
     /// <param name="compiler">CUDA Tile C++ compiler.</param>
@@ -64,8 +61,6 @@ public sealed class TileCppKernel : IDisposable
         var configKey = GetConfigKey(config);
         timing.Step($"GetOrCompile[{configKey}]");
         var compilation = GetOrCompile(config, configKey);
-        timing.Step("Result validation");
-        ObjectDisposedException.ThrowIf(_disposed, this);
         return compilation.TileIr.Length;
     }
 
@@ -92,86 +87,73 @@ public sealed class TileCppKernel : IDisposable
 
         var configKey = GetConfigKey(config);
         var loadedKey = new LoadedKey(configKey, context);
-        lock (_lock)
+        if (_loadedKernels.TryGetValue(loadedKey, out var loaded))
         {
-            ObjectDisposedException.ThrowIf(_disposed, this);
-            if (_loadedKernels.TryGetValue(loadedKey, out var loaded))
-            {
-                return loaded.Function;
-            }
+            return loaded.Function;
+        }
 
-            TileCppCompilation compilation;
-            if (compileIfNeeded)
+        TileCppCompilation compilation;
+        if (compileIfNeeded)
+        {
+            compilation = GetOrCompile(config, configKey);
+        }
+        else if (_compilations.TryGetValue(configKey, out var completed))
+        {
+            compilation = completed;
+        }
+        else
+        {
+            throw new InvalidOperationException("Compile the configuration before loading its CUDA function.");
+        }
+
+        cuModuleLoadData(out var module, compilation.TileIr).Ok();
+        try
+        {
+            var lookup = cuModuleGetFunction(out var function, module, compilation.EntryPoint);
+            if (lookup == CUresult.CUDA_ERROR_NOT_FOUND)
             {
-                compilation = GetOrCompile(config, configKey);
+                function = FindFunction(module, _kernelName);
             }
             else
             {
-                if (!_compilations.TryGetValue(configKey, out var completed) || !completed.IsValueCreated)
-                {
-                    throw new InvalidOperationException("Compile the configuration before loading its CUDA function.");
-                }
-                compilation = completed.Value;
+                lookup.Ok();
             }
-
-            cuModuleLoadData(out var module, compilation.TileIr).Ok();
-            try
-            {
-                var lookup = cuModuleGetFunction(out var function, module, compilation.EntryPoint);
-                if (lookup == CUresult.CUDA_ERROR_NOT_FOUND)
-                {
-                    function = FindFunction(module, _kernelName);
-                }
-                else
-                {
-                    lookup.Ok();
-                }
-                _loadedKernels.Add(loadedKey, new LoadedKernel(module, function));
-                return function;
-            }
-            catch
-            {
-                cuModuleUnload(module).Ok();
-                throw;
-            }
+            _loadedKernels.Add(loadedKey, new LoadedKernel(module, function));
+            return function;
+        }
+        catch
+        {
+            cuModuleUnload(module).Ok();
+            throw;
         }
     }
 
     TileCppCompilation GetOrCompile(TileCppConfig config, string configKey)
     {
         using var timing = new TileCppCompilationTiming($"GetOrCompile[{_sourceName}, {configKey}]");
-        timing.Step("_compilations.GetOrAdd");
-        var lazy = _compilations.GetOrAdd(configKey, _ => new Lazy<TileCppCompilation>(() =>
+        timing.Step("_compilations.TryGetValue");
+        if (_compilations.TryGetValue(configKey, out var compilation))
         {
-            TileCppCompilation compilation;
-            if (_nameExpression is null)
-            {
-                var tileIr = _compiler.Compile(_source, _sourceName, config, _headers, _additionalOptions);
-                compilation = new TileCppCompilation(tileIr, _kernelName);
-            }
-            else
-            {
-                compilation = _compiler.CompileKernel(
-                    _source, _sourceName, _nameExpression, config, _headers, _additionalOptions);
-            }
-            if (compilation.TileIr.Length == 0)
-            {
-                throw new InvalidOperationException("NVRTC returned empty CUDA TileIR.");
-            }
             return compilation;
-        }, LazyThreadSafetyMode.ExecutionAndPublication));
-        timing.Step("Lazy.Value (inclusive of compiler stages)");
-        try
-        {
-            return lazy.Value;
         }
-        catch
+        timing.Step("Compile specialization");
+        if (_nameExpression is null)
         {
-            timing.Step("Remove failed compilation");
-            ((ICollection<KeyValuePair<string, Lazy<TileCppCompilation>>>)_compilations)
-                .Remove(new(configKey, lazy));
-            throw;
+            var tileIr = _compiler.Compile(_source, _sourceName, config, _headers, _additionalOptions);
+            compilation = new TileCppCompilation(tileIr, _kernelName);
         }
+        else
+        {
+            compilation = _compiler.CompileKernel(
+                _source, _sourceName, _nameExpression, config, _headers, _additionalOptions);
+        }
+        if (compilation.TileIr.Length == 0)
+        {
+            throw new InvalidOperationException("NVRTC returned empty CUDA TileIR.");
+        }
+        timing.Step("Cache compilation");
+        _compilations.Add(configKey, compilation);
+        return compilation;
     }
 
     static CUfunction FindFunction(CUmodule module, string expectedName)
@@ -202,37 +184,34 @@ public sealed class TileCppKernel : IDisposable
     /// <seealso href="https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__MODULE.html" />
     public void Dispose()
     {
-        lock (_lock)
+        if (_disposed)
         {
-            if (_disposed)
-            {
-                return;
-            }
+            return;
+        }
 
-            foreach (var entry in _loadedKernels)
+        foreach (var entry in _loadedKernels)
+        {
+            cuCtxGetCurrent(out var previousContext).Ok();
+            if (previousContext != entry.Key.Context)
             {
-                cuCtxGetCurrent(out var previousContext).Ok();
+                cuCtxSetCurrent(entry.Key.Context).Ok();
+            }
+            try
+            {
+                cuModuleUnload(entry.Value.Module).Ok();
+            }
+            finally
+            {
                 if (previousContext != entry.Key.Context)
                 {
-                    cuCtxSetCurrent(entry.Key.Context).Ok();
-                }
-                try
-                {
-                    cuModuleUnload(entry.Value.Module).Ok();
-                }
-                finally
-                {
-                    if (previousContext != entry.Key.Context)
-                    {
-                        cuCtxSetCurrent(previousContext).Ok();
-                    }
+                    cuCtxSetCurrent(previousContext).Ok();
                 }
             }
-
-            _loadedKernels.Clear();
-            _compilations.Clear();
-            _disposed = true;
         }
+
+        _loadedKernels.Clear();
+        _compilations.Clear();
+        _disposed = true;
     }
 
     static string GetConfigKey(TileCppConfig config)

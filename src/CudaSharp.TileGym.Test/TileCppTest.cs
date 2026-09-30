@@ -73,9 +73,9 @@ public class TileCppTest
             var compiledTrace = writer.ToString();
             Assert.Contains("thread=", compiledTrace);
             Assert.Contains("&timing_kernel<1>", compiledTrace);
-            Assert.Contains("_compilations.GetOrAdd:", compiledTrace);
-            Assert.Contains("Lazy.Value (inclusive of compiler stages):", compiledTrace);
-            Assert.Contains("_headersInstalled.Value:", compiledTrace);
+            Assert.Contains("_compilations.TryGetValue:", compiledTrace);
+            Assert.Contains("Compile specialization:", compiledTrace);
+            Assert.Contains("_headersInstalled:", compiledTrace);
             Assert.Contains(".nvrtcCreateProgram:", compiledTrace);
             Assert.Contains(".nvrtcAddNameExpression:", compiledTrace);
             Assert.Contains(".nvrtcCompileProgram[program=0x", compiledTrace);
@@ -88,7 +88,8 @@ public class TileCppTest
             var cachedBytes = kernel.Compile(config);
             Assert.AreEqual(bytes, cachedBytes);
             var cachedTrace = writer.ToString()[compiledTrace.Length..];
-            Assert.Contains("Lazy.Value (inclusive of compiler stages):", cachedTrace);
+            Assert.Contains("_compilations.TryGetValue:", cachedTrace);
+            Assert.DoesNotContain("Compile specialization:", cachedTrace);
             Assert.DoesNotContain(".nvrtcCompileProgram[", cachedTrace);
 
             var output = compiler.CompileToTileIr(source, "timing_output.cu", config);
@@ -101,6 +102,14 @@ public class TileCppTest
             var failedTrace = writer.ToString()[outputTrace.Length..];
             Assert.Contains(".nvrtcGetProgramLogString:", failedTrace);
             Assert.Contains(".nvrtcDestroyProgram:", failedTrace);
+
+            using var failingKernel = new TileCppKernel(compiler, "invalid CUDA source", "timing_retry.cu", "missing");
+            var retryStart = writer.GetStringBuilder().Length;
+            Assert.ThrowsExactly<CudaException<nvrtcResult>>(() => failingKernel.Compile(config));
+            Assert.ThrowsExactly<CudaException<nvrtcResult>>(() => failingKernel.Compile(config));
+            var retryTrace = writer.ToString()[retryStart..];
+            var retryCalls = Regex.Matches(retryTrace, @"\.nvrtcCompileProgram\[program=0x");
+            Assert.HasCount(2, retryCalls, "Failed compilation must not publish a cached result.");
 
             var parallelStart = writer.GetStringBuilder().Length;
             Parallel.For(0, 4, i =>
@@ -252,12 +261,14 @@ public class TileCppTest
             [fast] = 1,
         });
         var tuner = new TileCppAutotuner(new TileCppSearchSpace([slow, fast, broken]), timer);
-        var compiled = new System.Collections.Concurrent.ConcurrentBag<TileCppConfig>();
+        var compiled = new List<TileCppConfig>();
+        var preparationThread = Environment.CurrentManagedThreadId;
         TileCppConfig? current = null;
         var launches = 0;
 
         void Compile(TileCppConfig config)
         {
+            Assert.AreEqual(preparationThread, Environment.CurrentManagedThreadId);
             compiled.Add(config);
             if (ReferenceEquals(config, broken))
             {
@@ -386,8 +397,10 @@ public class TileCppTest
                 "relu_activation_fwd_kernel", [header], nameExpression: "&relu_activation_fwd_kernel<float, 64, 0>");
             Assert.ThrowsExactly<InvalidOperationException>(() => kernel.LoadFunction(config));
             var otherConfig = new TileCppConfig([new("VARIANT", "1")]);
-            Parallel.Invoke(() => kernel.Compile(config), () => kernel.Compile(otherConfig),
-                () => kernel.Compile(config));
+            var compiledBytes = kernel.Compile(config);
+            kernel.Compile(otherConfig);
+            var cachedBytes = kernel.Compile(config);
+            Assert.AreEqual(compiledBytes, cachedBytes);
             var loadedFunction = kernel.LoadFunction(config);
             var otherLoadedFunction = kernel.LoadFunction(otherConfig);
             Assert.AreNotEqual(default, otherLoadedFunction);

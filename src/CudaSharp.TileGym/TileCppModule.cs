@@ -1,19 +1,19 @@
 ﻿using System.Collections.Generic;
 using System.Collections.ObjectModel;
-using System.Threading;
 using static CudaSharp.nvcuda;
 
 namespace CudaSharp.TileGym;
 
 /// <summary>Owns one compiled CUDA TileIR module loaded independently in each current CUDA context.</summary>
-/// <remarks>Dispose this owner before destroying any context in which its functions were loaded.</remarks>
+/// <remarks>
+/// This owner is not thread-safe. Dispose it before destroying any context in which its functions were loaded.
+/// </remarks>
 /// <seealso href="https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__MODULE.html" />
 public sealed class TileCppModule : IDisposable
 {
     readonly byte[] _tileIr;
     readonly IReadOnlyDictionary<string, string> _entryPoints;
     readonly Dictionary<CUcontext, LoadedModule> _loadedModules = [];
-    readonly Lock _lock = new();
     bool _disposed;
 
     /// <summary>Snapshots a compiled batch without requiring a CUDA context or calling the CUDA driver.</summary>
@@ -50,37 +50,34 @@ public sealed class TileCppModule : IDisposable
     /// <seealso href="https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__MODULE.html" />
     public IReadOnlyDictionary<string, CUfunction> LoadFunctions()
     {
-        lock (_lock)
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        cuCtxGetCurrent(out var context).Ok();
+        if (context.Value == IntPtr.Zero)
         {
-            ObjectDisposedException.ThrowIf(_disposed, this);
-            cuCtxGetCurrent(out var context).Ok();
-            if (context.Value == IntPtr.Zero)
-            {
-                throw new InvalidOperationException("A CUDA context must be current before loading a CUDA Tile C++ module.");
-            }
-            if (_loadedModules.TryGetValue(context, out var loaded))
-            {
-                return loaded.Functions;
-            }
+            throw new InvalidOperationException("A CUDA context must be current before loading a CUDA Tile C++ module.");
+        }
+        if (_loadedModules.TryGetValue(context, out var loaded))
+        {
+            return loaded.Functions;
+        }
 
-            cuModuleLoadData(out var module, _tileIr).Ok();
-            try
+        cuModuleLoadData(out var module, _tileIr).Ok();
+        try
+        {
+            var functions = new Dictionary<string, CUfunction>(_entryPoints.Count, StringComparer.Ordinal);
+            foreach (var entry in _entryPoints)
             {
-                var functions = new Dictionary<string, CUfunction>(_entryPoints.Count, StringComparer.Ordinal);
-                foreach (var entry in _entryPoints)
-                {
-                    cuModuleGetFunction(out var function, module, entry.Value).Ok();
-                    functions.Add(entry.Key, function);
-                }
-                var readOnlyFunctions = new ReadOnlyDictionary<string, CUfunction>(functions);
-                _loadedModules.Add(context, new LoadedModule(module, readOnlyFunctions));
-                return readOnlyFunctions;
+                cuModuleGetFunction(out var function, module, entry.Value).Ok();
+                functions.Add(entry.Key, function);
             }
-            catch
-            {
-                cuModuleUnload(module).Ok();
-                throw;
-            }
+            var readOnlyFunctions = new ReadOnlyDictionary<string, CUfunction>(functions);
+            _loadedModules.Add(context, new LoadedModule(module, readOnlyFunctions));
+            return readOnlyFunctions;
+        }
+        catch
+        {
+            cuModuleUnload(module).Ok();
+            throw;
         }
     }
 
@@ -89,29 +86,26 @@ public sealed class TileCppModule : IDisposable
     /// <seealso href="https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__MODULE.html" />
     public void Dispose()
     {
-        lock (_lock)
+        _disposed = true;
+        CUcontext[] contexts = [.. _loadedModules.Keys];
+        foreach (var context in contexts)
         {
-            _disposed = true;
-            CUcontext[] contexts = [.. _loadedModules.Keys];
-            foreach (var context in contexts)
+            cuCtxGetCurrent(out var previousContext).Ok();
+            if (previousContext != context)
             {
-                cuCtxGetCurrent(out var previousContext).Ok();
+                cuCtxSetCurrent(context).Ok();
+            }
+            try
+            {
+                var loaded = _loadedModules[context];
+                cuModuleUnload(loaded.Module).Ok();
+                _loadedModules.Remove(context);
+            }
+            finally
+            {
                 if (previousContext != context)
                 {
-                    cuCtxSetCurrent(context).Ok();
-                }
-                try
-                {
-                    var loaded = _loadedModules[context];
-                    cuModuleUnload(loaded.Module).Ok();
-                    _loadedModules.Remove(context);
-                }
-                finally
-                {
-                    if (previousContext != context)
-                    {
-                        cuCtxSetCurrent(previousContext).Ok();
-                    }
+                    cuCtxSetCurrent(previousContext).Ok();
                 }
             }
         }

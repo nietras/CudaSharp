@@ -1,8 +1,6 @@
 ﻿using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
 using static CudaSharp.nvcuda;
 
 namespace CudaSharp.TileGym;
@@ -154,7 +152,9 @@ public sealed class CudaEventTileCppTimer : ITileCppTimer
         {
             cuEventRecord(start, stream).Ok();
             for (var i = 0; i < count; i++)
+            {
                 launch();
+            }
             cuEventRecord(end, stream).Ok();
             cuEventSynchronize(end).Ok();
             cuEventElapsedTime(out var milliseconds, start, end).Ok();
@@ -172,24 +172,24 @@ public sealed class CudaEventTileCppTimer : ITileCppTimer
         foreach (var cudaEvent in events)
         {
             if (cudaEvent.Value != IntPtr.Zero)
+            {
                 cuEventDestroy(cudaEvent).Ok();
+            }
         }
     }
 }
 
 /// <summary>Searches and caches the fastest CUDA Tile C++ kernel configuration for each problem key.</summary>
 /// <remarks>
-/// Tuning first prepares candidate configurations, then times only successfully prepared candidates, so
-/// compilation and module loading are never measured. With a <c>compile</c> callback candidates are compiled
-/// in parallel without launching; otherwise each candidate is launched once to populate its compile cache.
-/// The fastest configuration is cached and launched once more for the caller.
+/// Tuning prepares candidates sequentially before timing. A <c>compile</c> callback prepares each configuration
+/// without launching; otherwise each candidate is launched once to populate its compile cache. The fastest
+/// configuration is cached and launched once more for the caller. This tuner is not thread-safe.
 /// </remarks>
 /// <seealso href="https://docs.nvidia.com/cuda/cutile-python/performance.html" />
 public sealed class TileCppAutotuner
 {
     static readonly IReadOnlyDictionary<string, object?> EmptyArguments = new Dictionary<string, object?>();
     readonly Dictionary<object, TileCppTunedResult> _cache = [];
-    readonly Lock _lock = new();
     readonly TileCppSearchSpace _searchSpace;
     readonly ITileCppTimer _timer;
 
@@ -208,8 +208,7 @@ public sealed class TileCppAutotuner
     /// <seealso href="https://docs.nvidia.com/cuda/cutile-python/performance.html" />
     public void ClearCache()
     {
-        lock (_lock)
-            _cache.Clear();
+        _cache.Clear();
     }
 
     /// <summary>Removes a cached tuning result for one problem key.</summary>
@@ -219,8 +218,7 @@ public sealed class TileCppAutotuner
     public bool ClearCache(object key)
     {
         ArgumentNullException.ThrowIfNull(key);
-        lock (_lock)
-            return _cache.Remove(key);
+        return _cache.Remove(key);
     }
 
     /// <summary>Tunes, caches, and launches a CUDA Tile C++ kernel configuration.</summary>
@@ -235,8 +233,8 @@ public sealed class TileCppAutotuner
     /// <param name="timingOptions">Optional warmup and measurement budgets.</param>
     /// <param name="log">Optional diagnostic callback.</param>
     /// <param name="compile">
-    /// Optional callback that compiles and loads one configuration without launching it. When provided, candidates
-    /// are compiled in parallel before timing; the callback must be thread-safe and make the CUDA context current.
+    /// Optional callback that compiles and loads one configuration without launching it. Candidates are prepared
+    /// sequentially on the calling thread before timing; the callback requires a current CUDA context.
     /// </param>
     /// <returns>The selected configuration, grid, and measured execution time.</returns>
     /// <seealso href="https://docs.nvidia.com/cuda/cutile-python/performance.html" />
@@ -256,19 +254,16 @@ public sealed class TileCppAutotuner
         timingOptions ??= new TileCppTimingOptions();
 
         TileCppTunedResult result;
-        lock (_lock)
+        if (!forceRetune && _cache.TryGetValue(key, out var cached))
         {
-            if (!forceRetune && _cache.TryGetValue(key, out var cached))
-            {
-                result = cached;
-                log?.Invoke($"CUDA Tile C++ autotune cache hit: {result.Config}");
-            }
-            else
-            {
-                result = TuneCore(stream, launch, compile, getGrid, arguments,
-                    maxIterations, seed, timingOptions, log);
-                _cache[key] = result;
-            }
+            result = cached;
+            log?.Invoke($"CUDA Tile C++ autotune cache hit: {result.Config}");
+        }
+        else
+        {
+            result = TuneCore(stream, launch, compile, getGrid, arguments,
+                maxIterations, seed, timingOptions, log);
+            _cache[key] = result;
         }
 
         launch(result.Config);
@@ -310,7 +305,7 @@ public sealed class TileCppAutotuner
                     log?.Invoke($"CUDA Tile C++ configuration rejected during precompile: {config}; {ex.Message}");
                 }
             }
-            Prepare(batch, compile ?? launch, parallel: compile is not null, candidates, log);
+            Prepare(batch, compile ?? launch, candidates, log);
         }
 
         if (candidates.Count == 0)
@@ -347,42 +342,21 @@ public sealed class TileCppAutotuner
         return best ?? throw new InvalidOperationException("No CUDA Tile C++ configuration completed timing.");
     }
 
-    static void Prepare(List<Candidate> batch, Action<TileCppConfig> prepare, bool parallel,
+    static void Prepare(List<Candidate> batch, Action<TileCppConfig> prepare,
         List<Candidate> prepared, Action<string>? log)
     {
-        var errors = new Exception?[batch.Count];
-        void PrepareAt(int i)
+        foreach (var candidate in batch)
         {
             try
             {
-                prepare(batch[i].Config);
+                prepare(candidate.Config);
             }
             catch (Exception ex)
             {
-                errors[i] = ex;
+                log?.Invoke($"CUDA Tile C++ configuration rejected during precompile: {candidate.Config}; {ex.Message}");
+                continue;
             }
-        }
-        if (parallel)
-        {
-            Parallel.For(0, batch.Count, PrepareAt);
-        }
-        else
-        {
-            for (var i = 0; i < batch.Count; i++)
-            {
-                PrepareAt(i);
-            }
-        }
-        for (var i = 0; i < batch.Count; i++)
-        {
-            if (errors[i] is { } error)
-            {
-                log?.Invoke($"CUDA Tile C++ configuration rejected during precompile: {batch[i].Config}; {error.Message}");
-            }
-            else
-            {
-                prepared.Add(batch[i]);
-            }
+            prepared.Add(candidate);
         }
     }
 

@@ -3,7 +3,6 @@ using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
-using System.Threading;
 using static CudaSharp.nvrtc;
 
 namespace CudaSharp.TileGym;
@@ -44,13 +43,13 @@ public sealed record TileCppCompilationBatch(byte[] TileIr, IReadOnlyDictionary<
 /// <summary>Compiles CUDA Tile C++ source directly to TileIR or CUBIN with NVRTC.</summary>
 /// <remarks>
 /// NVRTC and its bundled CUDA headers can be distributed as application dependencies. This type does not inspect or
-/// require a machine-wide CUDA Toolkit installation.
+/// require a machine-wide CUDA Toolkit installation. Header initialization must complete before concurrent compilation.
 /// </remarks>
 /// <seealso href="https://docs.nvidia.com/cuda/nvrtc/index.html" />
 public sealed class TileCppCompiler
 {
     readonly string? _bundledHeadersPath;
-    readonly Lazy<bool> _headersInstalled;
+    bool _headersInstalled;
 
     /// <summary>Creates a CUDA Tile C++ compiler for a target GPU architecture.</summary>
     /// <param name="architecture">Target SM architecture encoded as major times ten plus minor.</param>
@@ -72,14 +71,6 @@ public sealed class TileCppCompiler
         _bundledHeadersPath = installBundledHeaders
             ? bundledHeadersPath ?? GetDefaultBundledHeadersPath()
             : null;
-        _headersInstalled = new Lazy<bool>(() =>
-        {
-            if (_bundledHeadersPath is not null)
-            {
-                InstallBundledHeaders(_bundledHeadersPath);
-            }
-            return true;
-        }, LazyThreadSafetyMode.ExecutionAndPublication);
     }
 
     /// <summary>Gets the target SM architecture encoded as major times ten plus minor.</summary>
@@ -89,8 +80,17 @@ public sealed class TileCppCompiler
     public void PrepareBundledHeaders()
     {
         using var timing = new TileCppCompilationTiming(nameof(PrepareBundledHeaders));
-        timing.Step("_headersInstalled.Value");
-        _ = _headersInstalled.Value;
+        timing.Step(nameof(_headersInstalled));
+        if (_headersInstalled)
+        {
+            return;
+        }
+        if (_bundledHeadersPath is not null)
+        {
+            timing.Step(nameof(InstallBundledHeaders));
+            InstallBundledHeaders(_bundledHeadersPath);
+        }
+        _headersInstalled = true;
     }
 
     /// <summary>Compiles CUDA Tile C++ source to TileIR using NVRTC 13.3 or later.</summary>

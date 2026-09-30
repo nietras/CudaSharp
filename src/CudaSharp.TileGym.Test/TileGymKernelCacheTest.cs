@@ -69,6 +69,10 @@ public class TileGymKernelCacheTest
         Assert.HasCount(0, summary.Batches!);
         Assert.AreEqual(0, summary.CompileMilliseconds);
         Assert.AreEqual(0, summary.LoadMilliseconds);
+        var missing = new TileGymKernelSpec(Header, Forward, "float, 64, 0", ForwardSignature);
+        var error = Assert.ThrowsExactly<InvalidOperationException>(() => cache.Get(missing));
+        Assert.Contains("was not prepared", error.Message);
+        Assert.Contains("Call Prepare", error.Message);
         Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => cache.Prepare(plan, 0));
         Assert.ThrowsExactly<ArgumentNullException>(() => cache.Prepare((TileGymCompilationPlan)null!, 1));
         cache.Dispose();
@@ -240,11 +244,11 @@ public class TileGymKernelCacheTest
                     LaunchAndValidateRelu(result);
                 }
                 LaunchAndValidateRelu(expanded.Results[1]);
-                var onDemandSpec = forward.Specializations[0] with { TemplateArguments = "float, 512, 0" };
-                var onDemand = cache.Get(onDemandSpec);
-                Assert.IsNull(onDemand.Error);
-                Assert.AreSame(onDemand, cache.Get(onDemandSpec));
-                LaunchAndValidateRelu(onDemand);
+                var unprepared = forward.Specializations[0] with { TemplateArguments = "float, 512, 0" };
+                var lookupTraceStart = writer.GetStringBuilder().Length;
+                Assert.ThrowsExactly<InvalidOperationException>(() => cache.Get(unprepared));
+                var lookupTrace = writer.ToString()[lookupTraceStart..];
+                Assert.DoesNotContain(".nvrtcCompileProgram[", lookupTrace);
                 cache.Dispose();
                 cache.Dispose();
                 Assert.ThrowsExactly<ObjectDisposedException>(() => cache.Get(forward.Specializations[0]));
@@ -280,10 +284,8 @@ public class TileGymKernelCacheTest
             Assert.IsNotNull(invalid.Error);
             Assert.AreEqual(default, invalid.Function);
             Assert.AreSame(invalid, cache.Get(invalid.Spec));
-            var onDemandSpec = invalid.Spec with { TemplateArguments = "missing_type, 128, 0" };
-            var onDemand = cache.Get(onDemandSpec);
-            Assert.IsNotNull(onDemand.Error);
-            Assert.AreSame(onDemand, cache.Get(onDemandSpec));
+            var unprepared = invalid.Spec with { TemplateArguments = "missing_type, 128, 0" };
+            Assert.ThrowsExactly<InvalidOperationException>(() => cache.Get(unprepared));
             var total = summary.Batches!.Sum(static batch => batch.CompileMilliseconds);
             Assert.AreEqual(total, summary.CompileMilliseconds);
             Assert.IsGreaterThan(valid.CompileMilliseconds + invalid.CompileMilliseconds, total);

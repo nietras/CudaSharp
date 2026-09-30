@@ -1,5 +1,4 @@
-﻿using System.Collections.Concurrent;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
@@ -186,7 +185,6 @@ sealed class TileGymKernelCache : IDisposable
 {
     static readonly TileCppConfig Config = new([]);
     static readonly string SourceRoot = Path.Combine(AppContext.BaseDirectory, "src-tilecpp", "tilegym");
-    static readonly ConcurrentDictionary<string, string> Sources = new(StringComparer.Ordinal);
     static readonly TileCppHeader TypeTraits = new("type_traits",
         "namespace std { template<bool B, class T, class F> struct conditional { using type = T; }; " +
         "template<class T, class F> struct conditional<false, T, F> { using type = F; }; " +
@@ -198,6 +196,7 @@ sealed class TileGymKernelCache : IDisposable
         "#ifndef INFINITY\n#define INFINITY __builtin_bit_cast(float, 0x7f800000u)\n#endif\n");
 
     readonly Dictionary<TileGymKernelSpec, TileGymCompiledKernel> _kernels = [];
+    readonly Dictionary<string, string> _sources = new(StringComparer.Ordinal);
     readonly List<IDisposable> _loaded = [];
     readonly TileCppCompiler _compiler;
     readonly CUcontext _context;
@@ -308,24 +307,16 @@ sealed class TileGymKernelCache : IDisposable
         };
     }
 
-    /// <summary>Gets a prepared function, compiling an unrequested specialization individually on demand.</summary>
+    /// <summary>Gets a prepared function without compiling or loading during execution.</summary>
     public TileGymCompiledKernel Get(TileGymKernelSpec spec)
     {
         ArgumentNullException.ThrowIfNull(spec);
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (_kernels.TryGetValue(spec, out var result))
+        if (!_kernels.TryGetValue(spec, out var result))
         {
-            return result;
+            throw new InvalidOperationException($"Kernel specialization {spec} was not prepared. Call Prepare before execution.");
         }
-        result = Build(spec);
-        _kernels.Add(spec, result);
         return result;
-    }
-
-    TileGymCompiledKernel Build(TileGymKernelSpec spec)
-    {
-        var pending = Compile(spec);
-        return Load(pending);
     }
 
     PendingBatch CompileBatch(TileGymCompilationUnit unit)
@@ -509,7 +500,7 @@ sealed class TileGymKernelCache : IDisposable
             nameExpression: spec.NameExpression);
     }
 
-    static (string Source, IReadOnlyList<TileCppHeader> Headers) CreateSource(TileGymCompilationUnit unit)
+    (string Source, IReadOnlyList<TileCppHeader> Headers) CreateSource(TileGymCompilationUnit unit)
     {
         var headerName = Path.GetFileName(unit.Header);
         var prefix = $$"""
@@ -543,12 +534,17 @@ sealed class TileGymKernelCache : IDisposable
         return (sourceText, headers);
     }
 
-    static string ReadSource(string relativePath) =>
-        Sources.GetOrAdd(relativePath, static path =>
+    string ReadSource(string relativePath)
+    {
+        if (_sources.TryGetValue(relativePath, out var source))
         {
-            var sourcePath = Path.Combine(SourceRoot, path);
-            return File.ReadAllText(sourcePath);
-        });
+            return source;
+        }
+        var sourcePath = Path.Combine(SourceRoot, relativePath);
+        source = File.ReadAllText(sourcePath);
+        _sources.Add(relativePath, source);
+        return source;
+    }
 
     public void Dispose()
     {
@@ -560,5 +556,6 @@ sealed class TileGymKernelCache : IDisposable
             _loaded.RemoveAt(index);
         }
         _kernels.Clear();
+        _sources.Clear();
     }
 }
