@@ -48,15 +48,23 @@ public class nvrtcTest
         Assert.IsGreaterThan((nuint)0, info.uncompressedSize);
         Assert.IsGreaterThanOrEqualTo(13, info.cudaVersionMajor);
 
-        var installPath = Path.Combine(Path.GetTempPath(), $"CudaSharp-nvrtc-{Guid.NewGuid():N}");
+        var temporaryDirectory = Path.GetTempPath();
+        var installationId = Guid.NewGuid();
+        var installPath = Path.Combine(temporaryDirectory, $"CudaSharp-nvrtc-{installationId:N}");
         try
         {
             result = nvrtcInstallBundledHeaders(installPath, nvrtcInstallHeadersFlags.NVRTC_INSTALL_HEADERS_SKIP_IF_EXISTS, out errorLog);
             AssertNvrtcSuccess(result, errorLog, "install bundled headers");
-            Assert.IsTrue(Directory.Exists(installPath));
-            Assert.IsNotEmpty(Directory.EnumerateFiles(installPath, "*", SearchOption.AllDirectories));
-            Assert.IsTrue(File.Exists(Path.Combine(installPath, "cuda_fp16.h")));
-            Assert.IsTrue(Directory.Exists(Path.Combine(installPath, "cccl")));
+            var installDirectoryExists = Directory.Exists(installPath);
+            Assert.IsTrue(installDirectoryExists);
+            var installedFiles = Directory.EnumerateFiles(installPath, "*", SearchOption.AllDirectories);
+            Assert.IsNotEmpty(installedFiles);
+            var cudaFp16HeaderPath = Path.Combine(installPath, "cuda_fp16.h");
+            var cudaFp16HeaderExists = File.Exists(cudaFp16HeaderPath);
+            Assert.IsTrue(cudaFp16HeaderExists);
+            var ccclPath = Path.Combine(installPath, "cccl");
+            var ccclDirectoryExists = Directory.Exists(ccclPath);
+            Assert.IsTrue(ccclDirectoryExists);
 
             const string source = """
                 #include <cuda_fp16.h>
@@ -71,11 +79,13 @@ public class nvrtcTest
             nvrtcCreateProgram(out var program, source, "bundled_header_kernel.cu", 0, [], []).Ok();
             try
             {
-                Compile(program,
-                    $"--gpu-architecture=compute_{GetHighestArchitecture()}",
-                    $"-I{installPath}",
-                    $"-I{Path.Combine(installPath, "cccl")}");
-                Assert.IsNotEmpty(nvrtcGetPTX(program));
+                var highestArchitecture = GetHighestArchitecture();
+                var architectureOption = $"--gpu-architecture=compute_{highestArchitecture}";
+                var ccclIncludePath = Path.Combine(installPath, "cccl");
+                var ccclIncludeOption = $"-I{ccclIncludePath}";
+                Compile(program, architectureOption, $"-I{installPath}", ccclIncludeOption);
+                var ptx = nvrtcGetPTX(program);
+                Assert.IsNotEmpty(ptx);
             }
             finally
             {
@@ -154,14 +164,19 @@ public class nvrtcTest
         {
             const string nameExpression = "&increment<int>";
             nvrtcAddNameExpression(program, nameExpression).Ok();
-            Compile(program, $"--gpu-architecture=compute_{GetHighestArchitecture()}");
+            var highestArchitecture = GetHighestArchitecture();
+            var architectureOption = $"--gpu-architecture=compute_{highestArchitecture}";
+            Compile(program, architectureOption);
 
             var ptx = nvrtcGetPTX(program);
             var loweredName = nvrtcGetLoweredNameString(program, nameExpression);
 
             Assert.IsNotEmpty(ptx);
-            Assert.IsTrue(Encoding.UTF8.GetString(ptx).Contains(".version"));
-            Assert.IsFalse(string.IsNullOrWhiteSpace(loweredName));
+            var ptxText = Encoding.UTF8.GetString(ptx);
+            var ptxContainsVersion = ptxText.Contains(".version");
+            Assert.IsTrue(ptxContainsVersion);
+            var loweredNameIsEmpty = string.IsNullOrWhiteSpace(loweredName);
+            Assert.IsFalse(loweredNameIsEmpty);
         }
         finally
         {
@@ -179,7 +194,8 @@ public class nvrtcTest
             Assert.AreEqual(nvrtcResult.NVRTC_ERROR_COMPILATION, result);
 
             var log = nvrtcGetProgramLogString(program);
-            Assert.IsFalse(string.IsNullOrWhiteSpace(log));
+            var logIsEmpty = string.IsNullOrWhiteSpace(log);
+            Assert.IsFalse(logIsEmpty);
             StringAssert.Contains(log, "error");
         }
         finally
@@ -194,8 +210,11 @@ public class nvrtcTest
         nvrtcCreateProgram(out var program, KernelSource, "increment.cu", 0, [], []).Ok();
         try
         {
-            Compile(program, $"--gpu-architecture=sm_{GetHighestArchitecture()}");
-            Assert.IsNotEmpty(nvrtcGetCUBIN(program));
+            var highestArchitecture = GetHighestArchitecture();
+            var architectureOption = $"--gpu-architecture=sm_{highestArchitecture}";
+            Compile(program, architectureOption);
+            var cubin = nvrtcGetCUBIN(program);
+            Assert.IsNotEmpty(cubin);
         }
         finally
         {
@@ -209,11 +228,11 @@ public class nvrtcTest
         nvrtcCreateProgram(out var program, KernelSource, "increment.cu", 0, [], []).Ok();
         try
         {
-            Compile(program,
-                $"--gpu-architecture=compute_{GetHighestArchitecture()}",
-                "--relocatable-device-code=true",
-                "-dlto");
-            Assert.IsNotEmpty(nvrtcGetLTOIR(program));
+            var highestArchitecture = GetHighestArchitecture();
+            var architectureOption = $"--gpu-architecture=compute_{highestArchitecture}";
+            Compile(program, architectureOption, "--relocatable-device-code=true", "-dlto");
+            var ltoIr = nvrtcGetLTOIR(program);
+            Assert.IsNotEmpty(ltoIr);
         }
         finally
         {
@@ -236,12 +255,12 @@ public class nvrtcTest
         nvrtcCreateProgram(out var program, tileSource, "tile_increment.cu", 0, [], []).Ok();
         try
         {
-            Compile(program,
-                $"--gpu-architecture=compute_{GetHighestArchitecture()}",
-                "--std=c++20",
-                "-enable-tile");
+            var highestArchitecture = GetHighestArchitecture();
+            var architectureOption = $"--gpu-architecture=compute_{highestArchitecture}";
+            Compile(program, architectureOption, "--std=c++20", "-enable-tile");
 
-            Assert.IsNotEmpty(nvrtcGetTileIR(program));
+            var tileIr = nvrtcGetTileIR(program);
+            Assert.IsNotEmpty(tileIr);
         }
         finally
         {
@@ -275,7 +294,8 @@ public class nvrtcTest
         var result = nvrtcCompileProgram(program, options.Length, options);
         if (result != nvrtcResult.NVRTC_SUCCESS)
         {
-            Assert.Fail($"NVRTC compilation failed with {result}:\n{nvrtcGetProgramLogString(program)}");
+            var log = nvrtcGetProgramLogString(program);
+            Assert.Fail($"NVRTC compilation failed with {result}:\n{log}");
         }
     }
 

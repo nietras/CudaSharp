@@ -59,7 +59,8 @@ public sealed class TileCppKernel : IDisposable
     {
         ArgumentNullException.ThrowIfNull(config);
         ObjectDisposedException.ThrowIf(_disposed, this);
-        var compilation = GetOrCompile(config, GetConfigKey(config));
+        var configKey = GetConfigKey(config);
+        var compilation = GetOrCompile(config, configKey);
         ObjectDisposedException.ThrowIf(_disposed, this);
         return compilation.TileIr.Length;
     }
@@ -136,11 +137,17 @@ public sealed class TileCppKernel : IDisposable
     {
         var lazy = _compilations.GetOrAdd(configKey, _ => new Lazy<TileCppCompilation>(() =>
         {
-            var compilation = _nameExpression is null
-                ? new TileCppCompilation(
-                    _compiler.Compile(_source, _sourceName, config, _headers, _additionalOptions), _kernelName)
-                : _compiler.CompileKernel(
+            TileCppCompilation compilation;
+            if (_nameExpression is null)
+            {
+                var tileIr = _compiler.Compile(_source, _sourceName, config, _headers, _additionalOptions);
+                compilation = new TileCppCompilation(tileIr, _kernelName);
+            }
+            else
+            {
+                compilation = _compiler.CompileKernel(
                     _source, _sourceName, _nameExpression, config, _headers, _additionalOptions);
+            }
             if (compilation.TileIr.Length == 0)
             {
                 throw new InvalidOperationException("NVRTC returned empty CUDA TileIR.");
@@ -178,8 +185,9 @@ public sealed class TileCppKernel : IDisposable
                 return function;
             }
         }
+        var functionNames = string.Join(", ", names);
         throw new InvalidOperationException(
-            $"CUDA Tile C++ kernel '{expectedName}' was not found in the driver-loaded TileIR module. Functions: {string.Join(", ", names)}");
+            $"CUDA Tile C++ kernel '{expectedName}' was not found in the driver-loaded TileIR module. Functions: {functionNames}");
     }
 
     /// <summary>Unloads all context-specific CUDA modules owned by this kernel.</summary>
@@ -221,8 +229,9 @@ public sealed class TileCppKernel : IDisposable
 
     static string GetConfigKey(TileCppConfig config)
     {
-        var parameters = string.Join(";", config.Parameters.OrderBy(static pair => pair.Key, StringComparer.Ordinal)
-            .Select(static pair => $"{pair.Key}={pair.Value}"));
+        var orderedParameters = config.Parameters.OrderBy(static pair => pair.Key, StringComparer.Ordinal);
+        var parameterValues = orderedParameters.Select(static pair => $"{pair.Key}={pair.Value}");
+        var parameters = string.Join(";", parameterValues);
         return $"{parameters}|{config.NumCtas}|{config.Occupancy}|{config.OptimizationLevel}|{config.NumWorkerWarps}";
     }
 

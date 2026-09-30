@@ -205,8 +205,9 @@ unsafe sealed class StraightLineGraphPerf : IDisposable
         if (result.IsError())
         {
             var log = Encoding.UTF8.GetString(logBuffer).TrimEnd('\0');
+            var resultName = result.ToStringFast();
             throw new InvalidOperationException(
-                $"Straight-line graph instantiation failed with {result.ToStringFast()} at node {errorNode.Value}:\n{log}");
+                $"Straight-line graph instantiation failed with {resultName} at node {errorNode.Value}:\n{log}");
         }
 
         return Stopwatch.GetElapsedTime(startTimestamp, endTimestamp).TotalMilliseconds;
@@ -230,10 +231,9 @@ unsafe sealed class StraightLineGraphPerf : IDisposable
         var totalEnd = Stopwatch.GetTimestamp();
         cuEventElapsedTime(out var deviceMilliseconds, _startEvent, _endEvent).Ok();
 
-        return new LaunchMeasurement(
-            Stopwatch.GetElapsedTime(launchStart, launchEnd).TotalMicroseconds,
-            Stopwatch.GetElapsedTime(launchStart, totalEnd).TotalMicroseconds,
-            deviceMilliseconds * 1000.0);
+        var launchMicroseconds = Stopwatch.GetElapsedTime(launchStart, launchEnd).TotalMicroseconds;
+        var totalMicroseconds = Stopwatch.GetElapsedTime(launchStart, totalEnd).TotalMicroseconds;
+        return new LaunchMeasurement(launchMicroseconds, totalMicroseconds, deviceMilliseconds * 1000.0);
     }
 
     UploadMeasurement MeasureUpload()
@@ -244,9 +244,9 @@ unsafe sealed class StraightLineGraphPerf : IDisposable
         cuStreamSynchronize(_stream).Ok();
         var totalEnd = Stopwatch.GetTimestamp();
 
-        return new UploadMeasurement(
-            Stopwatch.GetElapsedTime(uploadStart, uploadEnd).TotalMicroseconds,
-            Stopwatch.GetElapsedTime(uploadStart, totalEnd).TotalMicroseconds);
+        var uploadMicroseconds = Stopwatch.GetElapsedTime(uploadStart, uploadEnd).TotalMicroseconds;
+        var totalMicroseconds = Stopwatch.GetElapsedTime(uploadStart, totalEnd).TotalMicroseconds;
+        return new UploadMeasurement(uploadMicroseconds, totalMicroseconds);
     }
 
     void DestroyGraphExec()
@@ -280,15 +280,18 @@ unsafe sealed class StraightLineGraphPerf : IDisposable
                 var log = GetCompileLog(program);
                 if (!IsUnsupportedArchitecture(result, log))
                 {
+                    var resultName = result.ToStringFast();
                     throw new InvalidOperationException(
-                        $"Kernel compilation failed with {result.ToStringFast()}:\n{log}");
+                        $"Kernel compilation failed with {resultName}:\n{log}");
                 }
 
                 result = nvrtcCompileProgram(program, 0, []);
                 if (result.IsError())
                 {
+                    var resultName = result.ToStringFast();
+                    var fallbackLog = GetCompileLog(program);
                     throw new InvalidOperationException(
-                        $"Kernel compilation fallback failed with {result.ToStringFast()}:\n{GetCompileLog(program)}");
+                        $"Kernel compilation fallback failed with {resultName}:\n{fallbackLog}");
                 }
 
                 nvrtcGetPTXSize(program, out var ptxSize).Ok();

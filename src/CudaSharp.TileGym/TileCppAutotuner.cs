@@ -285,7 +285,8 @@ public sealed class TileCppAutotuner
         var random = seed is null ? Random.Shared : new Random(seed.Value);
         Shuffle(indices, random);
 
-        var candidates = new List<Candidate>(Math.Min(maxIterations, indices.Length));
+        var candidateCapacity = Math.Min(maxIterations, indices.Length);
+        var candidates = new List<Candidate>(candidateCapacity);
         var batch = new List<Candidate>();
         var next = 0;
         while (candidates.Count < maxIterations && next < indices.Length)

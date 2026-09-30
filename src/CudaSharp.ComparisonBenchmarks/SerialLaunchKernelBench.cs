@@ -349,8 +349,9 @@ public unsafe class SerialLaunchKernelBench
         if (instantiateResult.IsError())
         {
             var log = Encoding.UTF8.GetString(logBuffer).TrimEnd('\0');
+            var resultName = instantiateResult.ToStringFast();
             throw new InvalidOperationException(
-                $"Captured graph instantiation failed with {instantiateResult.ToStringFast()} at node {errorNode.Value}:\n{log}");
+                $"Captured graph instantiation failed with {resultName} at node {errorNode.Value}:\n{log}");
         }
     }
 
@@ -411,8 +412,9 @@ public unsafe class SerialLaunchKernelBench
         if (instantiateResult.IsError())
         {
             var log = Encoding.UTF8.GetString(logBuffer).TrimEnd('\0');
+            var resultName = instantiateResult.ToStringFast();
             throw new InvalidOperationException(
-                $"True device-launch scheduler graph instantiation failed with {instantiateResult.ToStringFast()} at node {errorNode.Value}:\n{log}");
+                $"True device-launch scheduler graph instantiation failed with {resultName} at node {errorNode.Value}:\n{log}");
         }
     }
 
@@ -523,8 +525,9 @@ public unsafe class SerialLaunchKernelBench
         if (instantiateResult.IsError())
         {
             var log = Encoding.UTF8.GetString(logBuffer).TrimEnd('\0');
+            var resultName = instantiateResult.ToStringFast();
             throw new InvalidOperationException(
-                $"Graph instantiation failed with {instantiateResult.ToStringFast()} at node {errorNode.Value}:\n{log}");
+                $"Graph instantiation failed with {resultName} at node {errorNode.Value}:\n{log}");
         }
 
         var instantiateParams = new CUDA_GRAPH_INSTANTIATE_PARAMS
@@ -540,8 +543,9 @@ public unsafe class SerialLaunchKernelBench
             ref instantiateParams);
         if (instantiateResult.IsError())
         {
+            var resultName = instantiateResult.ToStringFast();
             throw new InvalidOperationException(
-                $"Device-launch-capable graph instantiation failed with {instantiateResult.ToStringFast()} and {instantiateParams.result_out} at node {instantiateParams.hErrNode_out.Value}.");
+                $"Device-launch-capable graph instantiation failed with {resultName} and {instantiateParams.result_out} at node {instantiateParams.hErrNode_out.Value}.");
         }
     }
 
@@ -605,7 +609,8 @@ public unsafe class SerialLaunchKernelBench
         var actualState = 0;
         var actualAccumulator = 0;
 
-        cuMemcpyDtoH_v2((IntPtr)(&actualState), GetFinalStateBuffer(), sizeof(int)).Ok();
+        var finalStateBuffer = GetFinalStateBuffer();
+        cuMemcpyDtoH_v2((IntPtr)(&actualState), finalStateBuffer, sizeof(int)).Ok();
         cuMemcpyDtoH_v2((IntPtr)(&actualAccumulator), _accumulator, sizeof(int)).Ok();
 
         if (actualState != expectedState || actualAccumulator != expectedAccumulator)
@@ -720,15 +725,18 @@ public unsafe class SerialLaunchKernelBench
                 var log = GetCompileLog(program);
                 if (!IsUnsupportedArchitecture(result, log))
                 {
+                    var resultName = result.ToStringFast();
                     throw new InvalidOperationException(
-                        $"Kernel compilation failed with {result.ToStringFast()}:\n{log}");
+                        $"Kernel compilation failed with {resultName}:\n{log}");
                 }
 
                 result = nvrtcCompileProgram(program, 0, []);
                 if (result.IsError())
                 {
+                    var resultName = result.ToStringFast();
+                    var fallbackLog = GetCompileLog(program);
                     throw new InvalidOperationException(
-                        $"Kernel compilation fallback failed with {result.ToStringFast()}:\n{GetCompileLog(program)}");
+                        $"Kernel compilation fallback failed with {resultName}:\n{fallbackLog}");
                 }
 
                 nvrtcGetPTXSize(program, out var ptxSize).Ok();
@@ -754,7 +762,8 @@ public unsafe class SerialLaunchKernelBench
         string kernelName,
         string deviceRuntimeLibraryPath)
     {
-        return CompileLinkedKernel(device, source, kernelName, deviceRuntimeLibraryPath, GetLinkedKernelCompileMode());
+        var compileMode = GetLinkedKernelCompileMode();
+        return CompileLinkedKernel(device, source, kernelName, deviceRuntimeLibraryPath, compileMode);
     }
 
     static unsafe byte[] CompileLinkedKernel(
@@ -769,8 +778,9 @@ public unsafe class SerialLaunchKernelBench
         var compileArchitecture = $"compute_{major}{minor}";
         var linkArchitecture = $"sm_{major}{minor}";
         var compileOptions = GetLinkedKernelCompileOptions(compileArchitecture, compileMode);
+        var joinedCompileOptions = string.Join(" ", compileOptions);
 
-        Console.WriteLine($"[DEBUG] NVRTC Options: {string.Join(" ", compileOptions)}");
+        Console.WriteLine($"[DEBUG] NVRTC Options: {joinedCompileOptions}");
 
         nvrtcCreateProgram(out var program, source, kernelName, 0, [], []).Ok();
         try
@@ -778,8 +788,10 @@ public unsafe class SerialLaunchKernelBench
             var compileResult = CompileProgram(program, compileOptions);
             if (compileResult.IsError())
             {
+                var resultName = compileResult.ToStringFast();
+                var compileLog = GetCompileLog(program);
                 throw new InvalidOperationException(
-                    $"Kernel compilation failed with {compileResult.ToStringFast()}:\n{GetCompileLog(program)}");
+                    $"Kernel compilation failed with {resultName}:\n{compileLog}");
             }
 
             nvrtcGetPTXSize(program, out var ptxSize).Ok();
@@ -858,13 +870,16 @@ public unsafe class SerialLaunchKernelBench
             nvJitLink.nvJitLinkGetLinkedCubinSize(linkState, out var cubinSize).Ok();
             var cubin = new byte[cubinSize];
             nvJitLink.nvJitLinkGetLinkedCubin(linkState, cubin).Ok();
-            DumpLinkedKernelArtifacts(kernelName, compileMode, ptx, cubin, GetLinkLog(linkState));
+            var linkLog = GetLinkLog(linkState);
+            DumpLinkedKernelArtifacts(kernelName, compileMode, ptx, cubin, linkLog);
             return cubin;
         }
         catch (CudaException<nvJitLink.nvJitLinkResult> exception)
         {
+            var resultName = exception.Result.ToStringFast();
+            var linkLog = GetLinkLog(linkState);
             throw new InvalidOperationException(
-                $"nvJitLink failed with {exception.Result.ToStringFast()}:\n{GetLinkLog(linkState)}",
+                $"nvJitLink failed with {resultName}:\n{linkLog}",
                 exception);
         }
         finally
@@ -928,8 +943,10 @@ public unsafe class SerialLaunchKernelBench
             {
                 var infoLog = Encoding.UTF8.GetString(infoLogBuffer).TrimEnd('\0');
                 var errorLog = Encoding.UTF8.GetString(errorLogBuffer).TrimEnd('\0');
+                var resultName = result.ToStringFast();
+                var moduleLoadLog = FormatModuleLoadLog(infoLog, errorLog);
                 throw new InvalidOperationException(
-                    $"Library load failed for '{kernelName}' with {result.ToStringFast()}:\n{FormatModuleLoadLog(infoLog, errorLog)}");
+                    $"Library load failed for '{kernelName}' with {resultName}:\n{moduleLoadLog}");
             }
         }
 
@@ -962,8 +979,10 @@ public unsafe class SerialLaunchKernelBench
             {
                 var infoLog = Encoding.UTF8.GetString(infoLogBuffer).TrimEnd('\0');
                 var errorLog = Encoding.UTF8.GetString(errorLogBuffer).TrimEnd('\0');
+                var resultName = result.ToStringFast();
+                var moduleLoadLog = FormatModuleLoadLog(infoLog, errorLog);
                 throw new InvalidOperationException(
-                    $"Library load failed for '{moduleName}' with {result.ToStringFast()}:\n{FormatModuleLoadLog(infoLog, errorLog)}");
+                    $"Library load failed for '{moduleName}' with {resultName}:\n{moduleLoadLog}");
             }
 
             var moduleResult = cuLibraryGetModule(out module, library);
@@ -973,8 +992,10 @@ public unsafe class SerialLaunchKernelBench
                 library = default;
                 var infoLog = Encoding.UTF8.GetString(infoLogBuffer).TrimEnd('\0');
                 var errorLog = Encoding.UTF8.GetString(errorLogBuffer).TrimEnd('\0');
+                var resultName = moduleResult.ToStringFast();
+                var moduleLoadLog = FormatModuleLoadLog(infoLog, errorLog);
                 throw new InvalidOperationException(
-                    $"Library GetModule failed for '{moduleName}' with {moduleResult.ToStringFast()}:\n{FormatModuleLoadLog(infoLog, errorLog)}");
+                    $"Library GetModule failed for '{moduleName}' with {resultName}:\n{moduleLoadLog}");
             }
         }
     }
@@ -1002,10 +1023,13 @@ public unsafe class SerialLaunchKernelBench
             var result = cuModuleLoadDataEx(out module, image, 4, options, optionValues);
             if (result.IsError())
             {
-                var tempPath = Path.Combine(Path.GetTempPath(), $"{moduleName}_{Guid.NewGuid()}.cubin");
+                var temporaryDirectory = Path.GetTempPath();
+                var temporaryFileName = $"{moduleName}_{Guid.NewGuid()}.cubin";
+                var tempPath = Path.Combine(temporaryDirectory, temporaryFileName);
                 try
                 {
-                    File.WriteAllBytes(tempPath, image.ToArray());
+                    var imageBytes = image.ToArray();
+                    File.WriteAllBytes(tempPath, imageBytes);
                     var fallbackResult = cuModuleLoad(out module, tempPath);
                     if (fallbackResult == CUresult.CUDA_SUCCESS)
                     {
@@ -1024,8 +1048,10 @@ public unsafe class SerialLaunchKernelBench
 
                 var infoLog = Encoding.UTF8.GetString(infoLogBuffer).TrimEnd('\0');
                 var errorLog = Encoding.UTF8.GetString(errorLogBuffer).TrimEnd('\0');
+                var resultName = result.ToStringFast();
+                var moduleLoadLog = FormatModuleLoadLog(infoLog, errorLog);
                 throw new InvalidOperationException(
-                    $"Module load failed for '{moduleName}' with {result.ToStringFast()}:\n{FormatModuleLoadLog(infoLog, errorLog)}");
+                    $"Module load failed for '{moduleName}' with {resultName}:\n{moduleLoadLog}");
             }
         }
     }
@@ -1104,8 +1130,11 @@ public unsafe class SerialLaunchKernelBench
         return Path.Combine(dumpRoot, $"{safeKernelName}.{compileMode}");
     }
 
-    static string GetFullLinkedKernelArtifactPrefix(string kernelName, string compileMode) =>
-        Path.GetFullPath(GetLinkedKernelArtifactPrefix(dumpRoot, kernelName, compileMode));
+    static string GetFullLinkedKernelArtifactPrefix(string kernelName, string compileMode)
+    {
+        var artifactPrefix = GetLinkedKernelArtifactPrefix(dumpRoot, kernelName, compileMode);
+        return Path.GetFullPath(artifactPrefix);
+    }
 
     static string GetSafeArtifactKernelName(string kernelName)
     {
@@ -1205,8 +1234,9 @@ public unsafe class SerialLaunchKernelBench
         if (instantiateResult.IsError())
         {
             var log = Encoding.UTF8.GetString(logBuffer).TrimEnd('\0');
+            var resultName = instantiateResult.ToStringFast();
             throw new InvalidOperationException(
-                $"True device fire-and-forget scheduler graph instantiation failed with {instantiateResult.ToStringFast()} at node {errorNode.Value}:\n{log}");
+                $"True device fire-and-forget scheduler graph instantiation failed with {resultName} at node {errorNode.Value}:\n{log}");
         }
     }
 }

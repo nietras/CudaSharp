@@ -20,7 +20,8 @@ readonly record struct TileGymPersistentRmsNormProblem(int Rows, int Columns, in
         {
             throw new ArgumentOutOfRangeException(nameof(candidate));
         }
-        return new TileCppGrid(checked((uint)Math.Min(SmCount, 1 + (Rows - 1) / tileM)));
+        var programs = Math.Min(SmCount, 1 + (Rows - 1) / tileM);
+        return new TileCppGrid(checked((uint)programs));
     }
 }
 

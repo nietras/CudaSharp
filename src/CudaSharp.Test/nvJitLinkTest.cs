@@ -47,10 +47,14 @@ public class nvJitLinkTest
     [TestMethod]
     public void nvJitLinkTest_nvJitLinkResult_IsOkAndIsError()
     {
-        Assert.IsTrue(nvJitLinkResult.NVJITLINK_SUCCESS.IsOk());
-        Assert.IsFalse(nvJitLinkResult.NVJITLINK_SUCCESS.IsError());
-        Assert.IsFalse(nvJitLinkResult.NVJITLINK_ERROR_INVALID_INPUT.IsOk());
-        Assert.IsTrue(nvJitLinkResult.NVJITLINK_ERROR_INVALID_INPUT.IsError());
+        var successIsOk = nvJitLinkResult.NVJITLINK_SUCCESS.IsOk();
+        Assert.IsTrue(successIsOk);
+        var successIsError = nvJitLinkResult.NVJITLINK_SUCCESS.IsError();
+        Assert.IsFalse(successIsError);
+        var invalidInputIsOk = nvJitLinkResult.NVJITLINK_ERROR_INVALID_INPUT.IsOk();
+        Assert.IsFalse(invalidInputIsOk);
+        var invalidInputIsError = nvJitLinkResult.NVJITLINK_ERROR_INVALID_INPUT.IsError();
+        Assert.IsTrue(invalidInputIsError);
     }
 
     [TestMethod]
@@ -65,7 +69,9 @@ public class nvJitLinkTest
     [TestMethod]
     public void nvJitLinkTest_InvalidPtxProducesDiagnostic()
     {
-        nvJitLinkCreate(out var handle, [$"-arch=sm_{GetHighestArchitecture()}"]).Ok();
+        var highestArchitecture = GetHighestArchitecture();
+        var architectureOption = $"-arch=sm_{highestArchitecture}";
+        nvJitLinkCreate(out var handle, [architectureOption]).Ok();
         try
         {
             const string invalidPtx = """
@@ -78,15 +84,17 @@ public class nvJitLinkTest
                     ret;
                 }
                 """;
+            var invalidPtxBytes = Encoding.UTF8.GetBytes(invalidPtx);
             var result = nvJitLinkAddData(
                 handle,
                 nvJitLinkInputType.NVJITLINK_INPUT_PTX,
-                Encoding.UTF8.GetBytes(invalidPtx),
+                invalidPtxBytes,
                 "invalid.ptx");
 
             Assert.AreEqual(nvJitLinkResult.NVJITLINK_ERROR_PTX_COMPILE, result);
             var errorLog = nvJitLinkGetErrorLogString(handle);
-            Assert.IsFalse(string.IsNullOrWhiteSpace(errorLog));
+            var errorLogIsEmpty = string.IsNullOrWhiteSpace(errorLog);
+            Assert.IsFalse(errorLogIsEmpty);
             StringAssert.Contains(errorLog, "error");
         }
         finally
@@ -99,7 +107,9 @@ public class nvJitLinkTest
     public void nvJitLinkTest_PtxLinksToCubin()
     {
         var ptx = CompilePtx();
-        nvJitLinkCreate(out var handle, [$"-arch=sm_{GetHighestArchitecture()}"]).Ok();
+        var highestArchitecture = GetHighestArchitecture();
+        var architectureOption = $"-arch=sm_{highestArchitecture}";
+        nvJitLinkCreate(out var handle, [architectureOption]).Ok();
         try
         {
             nvJitLinkAddData(handle, nvJitLinkInputType.NVJITLINK_INPUT_PTX, ptx, "increment.ptx").Ok();
@@ -119,7 +129,9 @@ public class nvJitLinkTest
     public void nvJitLinkTest_LtoIrLinksToLtoIrAndCubin()
     {
         var ltoir = CompileLtoIr();
-        nvJitLinkCreate(out var handle, ["-lto", $"-arch=sm_{GetHighestArchitecture()}"]).Ok();
+        var highestArchitecture = GetHighestArchitecture();
+        var architectureOption = $"-arch=sm_{highestArchitecture}";
+        nvJitLinkCreate(out var handle, ["-lto", architectureOption]).Ok();
         try
         {
             nvJitLinkAddData(handle, nvJitLinkInputType.NVJITLINK_INPUT_LTOIR, ltoir, "increment.ltoir").Ok();
@@ -141,7 +153,9 @@ public class nvJitLinkTest
     public void nvJitLinkTest_LtoIrLinksToPtx()
     {
         var ltoir = CompileLtoIr();
-        nvJitLinkCreate(out var handle, ["-lto", "-ptx", $"-arch=sm_{GetHighestArchitecture()}"]).Ok();
+        var highestArchitecture = GetHighestArchitecture();
+        var architectureOption = $"-arch=sm_{highestArchitecture}";
+        nvJitLinkCreate(out var handle, ["-lto", "-ptx", architectureOption]).Ok();
         try
         {
             nvJitLinkAddData(handle, nvJitLinkInputType.NVJITLINK_INPUT_LTOIR, ltoir, "increment.ltoir").Ok();
@@ -149,7 +163,8 @@ public class nvJitLinkTest
 
             var linkedPtx = nvJitLinkGetLinkedPtxString(handle);
 
-            Assert.IsFalse(string.IsNullOrWhiteSpace(linkedPtx));
+            var linkedPtxIsEmpty = string.IsNullOrWhiteSpace(linkedPtx);
+            Assert.IsFalse(linkedPtxIsEmpty);
             StringAssert.Contains(linkedPtx, ".version");
         }
         finally
@@ -163,7 +178,9 @@ public class nvJitLinkTest
         nvrtcCreateProgram(out var program, KernelSource, "increment.cu", 0, [], []).Ok();
         try
         {
-            Compile(program, $"--gpu-architecture=compute_{GetHighestArchitecture()}");
+            var highestArchitecture = GetHighestArchitecture();
+            var architectureOption = $"--gpu-architecture=compute_{highestArchitecture}";
+            Compile(program, architectureOption);
             return nvrtcGetPTX(program);
         }
         finally
@@ -177,10 +194,9 @@ public class nvJitLinkTest
         nvrtcCreateProgram(out var program, KernelSource, "increment.cu", 0, [], []).Ok();
         try
         {
-            Compile(program,
-                $"--gpu-architecture=compute_{GetHighestArchitecture()}",
-                "--relocatable-device-code=true",
-                "-dlto");
+            var highestArchitecture = GetHighestArchitecture();
+            var architectureOption = $"--gpu-architecture=compute_{highestArchitecture}";
+            Compile(program, architectureOption, "--relocatable-device-code=true", "-dlto");
             return nvrtcGetLTOIR(program);
         }
         finally
@@ -196,7 +212,8 @@ public class nvJitLinkTest
         var result = nvrtcCompileProgram(program, options.Length, options);
         if (result != nvrtcResult.NVRTC_SUCCESS)
         {
-            Assert.Fail($"NVRTC compilation failed with {result}:\n{nvrtcGetProgramLogString(program)}");
+            var log = nvrtcGetProgramLogString(program);
+            Assert.Fail($"NVRTC compilation failed with {result}:\n{log}");
         }
     }
 
@@ -205,7 +222,8 @@ public class nvJitLinkTest
         var result = nvJitLinkComplete(handle);
         if (result != nvJitLinkResult.NVJITLINK_SUCCESS)
         {
-            Assert.Fail($"nvJitLink failed with {result}:\n{nvJitLinkGetErrorLogString(handle)}");
+            var errorLog = nvJitLinkGetErrorLogString(handle);
+            Assert.Fail($"nvJitLink failed with {result}:\n{errorLog}");
         }
     }
 }

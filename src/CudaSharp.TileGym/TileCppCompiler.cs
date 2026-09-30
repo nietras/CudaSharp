@@ -114,8 +114,9 @@ public sealed class TileCppCompiler
             if (result != nvrtcResult.NVRTC_SUCCESS)
             {
                 var log = nvrtcGetProgramLogString(program);
+                var resultName = result.ToStringFast();
                 throw new CudaException<nvrtcResult>(result,
-                    $"NVRTC CUDA Tile C++ compilation failed with {result.ToStringFast()}:\n{log}");
+                    $"NVRTC CUDA Tile C++ compilation failed with {resultName}:\n{log}");
             }
 
             return getOutput(program);
@@ -166,11 +167,15 @@ public sealed class TileCppCompiler
             var result = nvrtcCompileProgram(program, options.Length, options);
             if (result != nvrtcResult.NVRTC_SUCCESS)
             {
+                var resultName = result.ToStringFast();
+                var log = nvrtcGetProgramLogString(program);
                 throw new CudaException<nvrtcResult>(result,
-                    $"NVRTC CUDA Tile C++ compilation failed with {result.ToStringFast()}:\n{nvrtcGetProgramLogString(program)}");
+                    $"NVRTC CUDA Tile C++ compilation failed with {resultName}:\n{log}");
             }
 
-            return new TileCppCompilation(nvrtcGetTileIR(program), nvrtcGetLoweredNameString(program, nameExpression));
+            var tileIr = nvrtcGetTileIR(program);
+            var loweredName = nvrtcGetLoweredNameString(program, nameExpression);
+            return new TileCppCompilation(tileIr, loweredName);
         }
         finally
         {
@@ -191,7 +196,8 @@ public sealed class TileCppCompiler
         if (_bundledHeadersPath is not null)
         {
             options.Add($"--include-path={_bundledHeadersPath}");
-            options.Add($"--include-path={Path.Combine(_bundledHeadersPath, "cccl")}");
+            var ccclHeadersPath = Path.Combine(_bundledHeadersPath, "cccl");
+            options.Add($"--include-path={ccclHeadersPath}");
         }
         foreach (var parameter in config.Parameters)
         {
@@ -211,8 +217,9 @@ public sealed class TileCppCompiler
         if (result != nvrtcResult.NVRTC_SUCCESS)
         {
             var message = errorLog == IntPtr.Zero ? string.Empty : Marshal.PtrToStringUTF8(errorLog);
+            var resultName = result.ToStringFast();
             throw new CudaException<nvrtcResult>(result,
-                $"Installing NVRTC bundled headers failed with {result.ToStringFast()}: {message}");
+                $"Installing NVRTC bundled headers failed with {resultName}: {message}");
         }
     }
 

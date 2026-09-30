@@ -27,7 +27,8 @@ using Perfolizer.Horology;
 
 Action<string> log = t => { Console.WriteLine(t); Trace.WriteLine(t); };
 
-log($"{Environment.Version} args: {args.Length} versions: {GetVersions()}");
+var startupVersions = GetVersions();
+log($"{Environment.Version} args: {args.Length} versions: {startupVersions}");
 
 
 
@@ -94,7 +95,8 @@ if (args.Length > 0)
             exporter.ExportToLog(s, logger);
 
             var versions = GetVersions();
-            File.WriteAllText(Path.Combine(directory, "Versions.txt"), versions);
+            var versionsFilePath = Path.Combine(directory, "Versions.txt");
+            File.WriteAllText(versionsFilePath, versions);
         }
     }
 }

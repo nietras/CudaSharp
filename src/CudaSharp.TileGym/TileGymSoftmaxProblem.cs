@@ -28,7 +28,9 @@ static class TileGymSoftmaxCandidates
         {
             if (problem.Online || block >= problem.Columns)
             {
-                candidates.Add(new TileGymCandidate([TileGymHyperparameter.Integer("BlockSize", block)]));
+                var blockSizeParameter = TileGymHyperparameter.Integer("BlockSize", block);
+                var candidate = new TileGymCandidate([blockSizeParameter]);
+                candidates.Add(candidate);
             }
         }
         return candidates;

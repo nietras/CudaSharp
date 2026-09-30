@@ -544,6 +544,58 @@ namespace CudaSharp
             where T5 :  unmanaged
             where T6 :  unmanaged { }
         [System.Runtime.CompilerServices.SkipLocalsInit]
+        public static CudaSharp.nvcuda.CUresult cuLaunchKernel<T1, T2, T3, T4, T5, T6, T7>(
+                    CudaSharp.nvcuda.CUfunction function,
+                    uint gridDimX,
+                    uint gridDimY,
+                    uint gridDimZ,
+                    uint blockDimX,
+                    uint blockDimY,
+                    uint blockDimZ,
+                    uint sharedMemBytes,
+                    CudaSharp.nvcuda.CUstream stream,
+                    T1 arg1,
+                    T2 arg2,
+                    T3 arg3,
+                    T4 arg4,
+                    T5 arg5,
+                    T6 arg6,
+                    T7 arg7)
+            where T1 :  unmanaged
+            where T2 :  unmanaged
+            where T3 :  unmanaged
+            where T4 :  unmanaged
+            where T5 :  unmanaged
+            where T6 :  unmanaged
+            where T7 :  unmanaged { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
+        public static CudaSharp.nvcuda.CUresult cuLaunchKernel<T1, T2, T3, T4, T5, T6, T7, T8>(
+                    CudaSharp.nvcuda.CUfunction function,
+                    uint gridDimX,
+                    uint gridDimY,
+                    uint gridDimZ,
+                    uint blockDimX,
+                    uint blockDimY,
+                    uint blockDimZ,
+                    uint sharedMemBytes,
+                    CudaSharp.nvcuda.CUstream stream,
+                    T1 arg1,
+                    T2 arg2,
+                    T3 arg3,
+                    T4 arg4,
+                    T5 arg5,
+                    T6 arg6,
+                    T7 arg7,
+                    T8 arg8)
+            where T1 :  unmanaged
+            where T2 :  unmanaged
+            where T3 :  unmanaged
+            where T4 :  unmanaged
+            where T5 :  unmanaged
+            where T6 :  unmanaged
+            where T7 :  unmanaged
+            where T8 :  unmanaged { }
+        [System.Runtime.CompilerServices.SkipLocalsInit]
         [System.Runtime.InteropServices.LibraryImport("nvcuda")]
         public static unsafe CudaSharp.nvcuda.CUresult cuLaunchKernelEx(in CudaSharp.nvcuda.CUlaunchConfig config, CudaSharp.nvcuda.CUfunction f, void** kernelParams, void** extra) { }
         [System.Runtime.CompilerServices.SkipLocalsInit]

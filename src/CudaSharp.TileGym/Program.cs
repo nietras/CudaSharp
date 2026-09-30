@@ -72,5 +72,6 @@ foreach (var benchmark in benchmarks)
 }
 
 report.Write(output);
-Console.WriteLine(report.ToMarkdown());
+var reportMarkdown = report.ToMarkdown();
+Console.WriteLine(reportMarkdown);
 Console.WriteLine($"Reports: {output}");

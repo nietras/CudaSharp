@@ -22,7 +22,8 @@ readonly record struct TileGymPersistentLayerNormProblem(int Rows, int Columns, 
         {
             throw new ArgumentOutOfRangeException(nameof(candidate));
         }
-        return new TileCppGrid(checked((uint)Math.Min(SmCount, 1 + (Rows - 1) / blockN)));
+        var programs = Math.Min(SmCount, 1 + (Rows - 1) / blockN);
+        return new TileCppGrid(checked((uint)programs));
     }
 }
 
@@ -35,7 +36,9 @@ static class TileGymPersistentLayerNormCandidates
         {
             if (blockN <= problem.Rows && (long)blockN * problem.Columns <= 256 * 8 * 32)
             {
-                candidates.Add(new TileGymCandidate([TileGymHyperparameter.Integer("BlockN", blockN)]));
+                var blockNParameter = TileGymHyperparameter.Integer("BlockN", blockN);
+                var candidate = new TileGymCandidate([blockNParameter]);
+                candidates.Add(candidate);
             }
         }
         return candidates;

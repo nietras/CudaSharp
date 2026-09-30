@@ -125,7 +125,8 @@ public static partial class nvJitLink
         {
             if (result != nvJitLinkResult.NVJITLINK_SUCCESS)
             {
-                Throws.Throw(result, result.ToStringFast());
+                var message = result.ToStringFast();
+                Throws.Throw(result, message);
             }
         }
 

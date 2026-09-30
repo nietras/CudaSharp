@@ -55,8 +55,12 @@ sealed class TileGymKernel
         {
             try
             {
-                var spec = new TileGymKernelSpec(header, name, problem.TemplateArguments(candidate), signature);
-                variants.Add(new TileGymVariant(spec, problem.Grid(candidate), candidate.ToString()));
+                var templateArguments = problem.TemplateArguments(candidate);
+                var spec = new TileGymKernelSpec(header, name, templateArguments, signature);
+                var grid = problem.Grid(candidate);
+                var label = candidate.ToString();
+                var variant = new TileGymVariant(spec, grid, label);
+                variants.Add(variant);
             }
             catch (Exception ex) when (ex is ArgumentException or OverflowException)
             {

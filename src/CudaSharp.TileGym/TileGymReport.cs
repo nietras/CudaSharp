@@ -54,8 +54,12 @@ sealed class TileGymReport
     public void Write(string directory)
     {
         Directory.CreateDirectory(directory);
-        File.WriteAllText(Path.Combine(directory, "tilegym-results.md"), ToMarkdown());
-        File.WriteAllText(Path.Combine(directory, "tilegym-results.csv"), ToCsv());
+        var markdownPath = Path.Combine(directory, "tilegym-results.md");
+        var markdown = ToMarkdown();
+        File.WriteAllText(markdownPath, markdown);
+        var csvPath = Path.Combine(directory, "tilegym-results.csv");
+        var csv = ToCsv();
+        File.WriteAllText(csvPath, csv);
     }
 
     public string ToMarkdown()

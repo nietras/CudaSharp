@@ -122,15 +122,18 @@ public unsafe class LaunchKernelBench
                 var log = GetCompileLog(program);
                 if (!IsUnsupportedArchitecture(result, log))
                 {
+                    var resultName = result.ToStringFast();
                     throw new InvalidOperationException(
-                        $"Kernel compilation failed with {result.ToStringFast()}:\n{log}");
+                        $"Kernel compilation failed with {resultName}:\n{log}");
                 }
 
                 result = nvrtcCompileProgram(program, 0, []);
                 if (result.IsError())
                 {
+                    var resultName = result.ToStringFast();
+                    var fallbackLog = GetCompileLog(program);
                     throw new InvalidOperationException(
-                        $"Kernel compilation fallback failed with {result.ToStringFast()}:\n{GetCompileLog(program)}");
+                        $"Kernel compilation fallback failed with {resultName}:\n{fallbackLog}");
                 }
 
                 nvrtcGetPTXSize(program, out var ptxSize).Ok();

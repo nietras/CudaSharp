@@ -40,7 +40,8 @@
 
 * **Adhere to .editorconfig:** Strictly follow the formatting rules defined in the `.editorconfig` file.
 * **Control-Flow Braces:** Always use braces for C# `if`, `else`, `for`, `foreach`, `while`, and `do` bodies, including single-statement bodies, in all new or modified code.
-* **No Nested Method Calls:** Never pass a method call directly as an argument to another method call. Assign the intermediate result to a local variable on a separate line so each call can be debugged independently (for example, assign `kernel.GetFunction(config)` before calling `cuLaunchKernel`). Chained calls such as `cuLaunchKernel(...).Ok()` are allowed.
+* **Readable Method Calls:** Prefer named locals when nested method calls make evaluation difficult to follow or debug, especially for side-effectful, expensive, interop, or multi-step calls. This is not a blanket prohibition: short, obvious, side-effect-free calls may remain inline when extracting them would add noise; preserve concise assertions, fluent/LINQ chains, and other idiomatic expressions. For example, split `new TileCppCompilation(nvrtcGetTileIR(program), nvrtcGetLoweredNameString(program, nameExpression))` when the intermediate results aid debugging. If extracting a call, preserve its evaluation point, short-circuit behavior, and deferred execution; do not hoist it across branches or out of a lambda. Chained calls such as `cuLaunchKernel(...).Ok()` are allowed.
+* **Preserve Method Signatures:** When refactoring method bodies, do not change existing method names, return types, parameters, generic parameters, or accessibility.
 * **Clean Formatting:** Avoid adding unnecessary empty lines and ensure proper indentation.
 * **Struct Definitions:** Define `struct` types with multi-line bodies; avoid one-line `struct` declarations.
 * **Method Declarations:** Keep declaration line lengths around 100-120 characters and split long signatures across multiple lines.

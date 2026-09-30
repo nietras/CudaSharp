@@ -74,7 +74,8 @@ public sealed class TileCppConfig
     /// <inheritdoc />
     public override string ToString()
     {
-        var parameters = string.Join(", ", _parameters.Select(static pair => $"{pair.Key}={pair.Value}"));
+        var parameterValues = _parameters.Select(static pair => $"{pair.Key}={pair.Value}");
+        var parameters = string.Join(", ", parameterValues);
         return $"TileCppConfig({parameters}, NumCtas={NumCtas}, Occupancy={Occupancy}, " +
             $"OptimizationLevel={OptimizationLevel}, NumWorkerWarps={NumWorkerWarps})";
     }

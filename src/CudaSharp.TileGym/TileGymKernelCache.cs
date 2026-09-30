@@ -39,7 +39,9 @@ sealed record TileGymPrecompileSummary(IReadOnlyList<TileGymCompiledKernel> Resu
         var csv = new StringBuilder("Kernel,Header,TemplateArguments,TileIrBytes,CompileStartMilliseconds," +
             "CompileMilliseconds,LoadStartMilliseconds,LoadMilliseconds,TotalMilliseconds,Error\n");
         var markdown = new StringBuilder();
-        markdown.AppendLine("# CudaSharp TileGym precompile").AppendLine().AppendLine(ToString()).AppendLine();
+        markdown.AppendLine("# CudaSharp TileGym precompile").AppendLine();
+        var summary = ToString();
+        markdown.AppendLine(summary).AppendLine();
         markdown.AppendLine("| Kernel | Template arguments | TileIR bytes | Compile start ms | Compile ms | " +
             "Load start ms | Load ms | Total ms | Error |");
         markdown.AppendLine("|---|---|---:|---:|---:|---:|---:|---:|---|");
@@ -53,18 +55,25 @@ sealed record TileGymPrecompileSummary(IReadOnlyList<TileGymCompiledKernel> Resu
                 Format(row.CompileStart), Format(row.Result.CompileMilliseconds), Format(row.LoadStart),
                 Format(row.Result.LoadMilliseconds), Format(row.Total), error
             ];
-            csv.AppendJoin(',', fields.Select(static f => $"\"{f.Replace("\"", "\"\"")}\"")).Append('\n');
-            markdown.Append("| ").AppendJoin(" | ", fields.Select(static f => f.Replace("|", "\\|"))).AppendLine(" |");
+            var csvFields = fields.Select(static field => $"\"{field.Replace("\"", "\"\"")}\"");
+            csv.AppendJoin(',', csvFields).Append('\n');
+            var markdownFields = fields.Select(static field => field.Replace("|", "\\|"));
+            markdown.Append("| ").AppendJoin(" | ", markdownFields).AppendLine(" |");
         }
-        File.WriteAllText(Path.Combine(directory, "tilegym-precompile.csv"), csv.ToString());
-        File.WriteAllText(Path.Combine(directory, "tilegym-precompile.md"), markdown.ToString());
+        var csvPath = Path.Combine(directory, "tilegym-precompile.csv");
+        var csvContents = csv.ToString();
+        File.WriteAllText(csvPath, csvContents);
+        var markdownPath = Path.Combine(directory, "tilegym-precompile.md");
+        var markdownContents = markdown.ToString();
+        File.WriteAllText(markdownPath, markdownContents);
     }
 
     /// <summary>Writes per-kernel compile and load times, slowest first.</summary>
     public void WriteTo(TextWriter writer)
     {
         ArgumentNullException.ThrowIfNull(writer);
-        writer.WriteLine(ToString());
+        var summary = ToString();
+        writer.WriteLine(summary);
         writer.WriteLine($"{"TileIR B",10} {"Compile ms",10} {"Load ms",10} {"Load start",10}  Kernel");
         foreach (var row in Rows())
         {
@@ -75,7 +84,12 @@ sealed record TileGymPrecompileSummary(IReadOnlyList<TileGymCompiledKernel> Resu
     }
 
     Row[] Rows() => Results
-        .Select(r => new Row(r, Elapsed(r.CompileStartTimestamp), Elapsed(r.LoadStartTimestamp)))
+        .Select(r =>
+        {
+            var compileStart = Elapsed(r.CompileStartTimestamp);
+            var loadStart = Elapsed(r.LoadStartTimestamp);
+            return new Row(r, compileStart, loadStart);
+        })
         .OrderByDescending(static r => r.Total)
         .ToArray();
 
@@ -137,7 +151,8 @@ sealed class TileGymKernelCache : IDisposable
         var compileParallelism = Environment.ProcessorCount;
         var pending = new Pending[distinct.Length];
         var compileOptions = new ParallelOptions { MaxDegreeOfParallelism = compileParallelism };
-        Parallel.For(0, distinct.Length, compileOptions, i => pending[i] = Compile(distinct[i]));
+        //Parallel.For(0, distinct.Length, compileOptions, i => pending[i] = Compile(distinct[i]));
+        for (var i = 0; i < distinct.Length; i++) { pending[i] = Compile(distinct[i]); }
         var compileWall = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
         var loadStart = Stopwatch.GetTimestamp();
         var compiled = new TileGymCompiledKernel[distinct.Length];
@@ -176,11 +191,13 @@ sealed class TileGymKernelCache : IDisposable
             var kernel = Create(spec);
             _loaded.Add(kernel);
             var bytes = kernel.Compile(Config);
-            return new(spec, kernel, Stopwatch.GetElapsedTime(start).TotalMilliseconds, start, null, bytes);
+            var compileMilliseconds = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
+            return new(spec, kernel, compileMilliseconds, start, null, bytes);
         }
         catch (Exception ex)
         {
-            return new(spec, null, Stopwatch.GetElapsedTime(start).TotalMilliseconds, start, ex);
+            var compileMilliseconds = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
+            return new(spec, null, compileMilliseconds, start, ex);
         }
     }
 
@@ -223,17 +240,25 @@ sealed class TileGymKernelCache : IDisposable
             #include "{{headerName}}"
             template __tile_global__ void {{spec.Name}}<{{spec.TemplateArguments}}>({{spec.Signature}});
             """;
-        var headers = new List<TileCppHeader>(4) { new(headerName, ReadSource(spec.Header)), TypeTraits, Cmath };
+        var headerSource = ReadSource(spec.Header);
+        var mainHeader = new TileCppHeader(headerName, headerSource);
+        var headers = new List<TileCppHeader>(4) { mainHeader, TypeTraits, Cmath };
         if (spec.Header.StartsWith("conv", StringComparison.Ordinal))
         {
-            headers.Add(new TileCppHeader("convolution_common.cuh", ReadSource("convolution_common.cuh")));
+            var commonHeaderSource = ReadSource("convolution_common.cuh");
+            var commonHeader = new TileCppHeader("convolution_common.cuh", commonHeaderSource);
+            headers.Add(commonHeader);
         }
         return new TileCppKernel(_compiler, source, $"{spec.Name}.cu", spec.Name, headers,
             nameExpression: $"&{spec.Name}<{spec.TemplateArguments}>");
     }
 
     static string ReadSource(string relativePath) =>
-        Sources.GetOrAdd(relativePath, static path => File.ReadAllText(Path.Combine(SourceRoot, path)));
+        Sources.GetOrAdd(relativePath, static path =>
+        {
+            var sourcePath = Path.Combine(SourceRoot, path);
+            return File.ReadAllText(sourcePath);
+        });
 
     public void Dispose()
     {

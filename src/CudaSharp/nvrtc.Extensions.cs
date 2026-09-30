@@ -142,7 +142,8 @@ public static partial class nvrtc
     public static unsafe string nvrtcGetLoweredNameString(nvrtcProgram program, string nameExpression)
     {
         nvrtcGetLoweredName(program, nameExpression, out var loweredName).Ok();
-        return Encoding.UTF8.GetString(MemoryMarshal.CreateReadOnlySpanFromNullTerminated((byte*)loweredName));
+        var loweredNameBytes = MemoryMarshal.CreateReadOnlySpanFromNullTerminated((byte*)loweredName);
+        return Encoding.UTF8.GetString(loweredNameBytes);
     }
 
     static byte[] AllocateOutput(nuint size) => GC.AllocateUninitializedArray<byte>(checked((int)size));
@@ -153,7 +154,8 @@ public static partial class nvrtc
         {
             if (result != nvrtcResult.NVRTC_SUCCESS)
             {
-                Throws.Throw(result, result.ToStringFast());
+                var message = result.ToStringFast();
+                Throws.Throw(result, message);
             }
         }
         public bool IsOk() => result == nvrtcResult.NVRTC_SUCCESS;

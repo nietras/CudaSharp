@@ -18,7 +18,8 @@ public static class DllResolver
             if (_registered) return;
             try
             {
-                NativeLibrary.SetDllImportResolver(Assembly.GetExecutingAssembly(), OnDllImport);
+                var assembly = Assembly.GetExecutingAssembly();
+                NativeLibrary.SetDllImportResolver(assembly, OnDllImport);
             }
             catch (InvalidOperationException)
             {
@@ -131,7 +132,8 @@ public static class DllResolver
                                             .ToList();
                     foreach (var version in versions)
                     {
-                        foreach (var binPath in GetCudaNvrtcSearchPaths(Path.Combine(defaultPath, version!)))
+                        var versionPath = Path.Combine(defaultPath, version!);
+                        foreach (var binPath in GetCudaNvrtcSearchPaths(versionPath))
                         {
                             if (!Directory.Exists(binPath))
                             {
@@ -257,7 +259,8 @@ public static class DllResolver
                                             .ToList();
                     foreach (var version in versions)
                     {
-                        foreach (var binPath in GetCudaNvrtcSearchPaths(Path.Combine(defaultPath, version!)))
+                        var versionPath = Path.Combine(defaultPath, version!);
+                        foreach (var binPath in GetCudaNvrtcSearchPaths(versionPath))
                         {
                             if (!Directory.Exists(binPath))
                             {

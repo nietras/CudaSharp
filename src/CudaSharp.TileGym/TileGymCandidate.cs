@@ -40,5 +40,9 @@ sealed class TileGymCandidate
     public IReadOnlyList<TileGymHyperparameter> Parameters => _parameters;
     public string this[string name] => _values[name];
     public int GetInt32(string name) => int.Parse(this[name], CultureInfo.InvariantCulture);
-    public override string ToString() => string.Join(", ", _parameters.Select(static p => $"{p.Name}={p.CppValue}"));
+    public override string ToString()
+    {
+        var parameterValues = _parameters.Select(static parameter => $"{parameter.Name}={parameter.CppValue}");
+        return string.Join(", ", parameterValues);
+    }
 }

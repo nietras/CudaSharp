@@ -23,7 +23,8 @@ public static partial class nvcuda
         {
             if (result != CUresult.CUDA_SUCCESS)
             {
-                Throws.Throw(result, result.ToStringFast());
+                var message = result.ToStringFast();
+                Throws.Throw(result, message);
             }
         }
         public bool IsOk() => result == CUresult.CUDA_SUCCESS;
