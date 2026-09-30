@@ -1,4 +1,5 @@
-﻿using System.IO;
+﻿using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using CudaSharp.Tester;
 
@@ -10,6 +11,7 @@ string? filter = null;
 var list = false;
 var tuningChecks = false;
 var enableAutotuning = true;
+var traceCompilation = false;
 // The driver serializes cuModuleLoadData (TileIR JIT); concurrent loads only add contention and memory.
 var loadParallelism = 1;
 for (var i = 0; i < args.Length; i++)
@@ -32,6 +34,7 @@ for (var i = 0; i < args.Length; i++)
         case "--list": list = true; break;
         case "--tuning-checks": tuningChecks = true; break;
         case "--no-autotune": enableAutotuning = false; break;
+        case "--trace-compilation": traceCompilation = true; break;
         case "--load-parallelism" when hasValue: loadParallelism = int.Parse(args[++i]); break;
     }
 }
@@ -54,8 +57,17 @@ if (list)
     return;
 }
 
+using var compilationTrace = traceCompilation ? new ConsoleTraceListener() : null;
+if (compilationTrace is not null)
+{
+    Trace.Listeners.Add(compilationTrace);
+}
+Console.WriteLine($"Initializing CUDA device {device}...");
 using var runtime = new TileGymRuntime(device) { EnableAutotuning = enableAutotuning };
+runtime.Kernels.ProgressOutput = Console.Out;
 Console.WriteLine($"CUDA Tile C++ SM {runtime.Architecture}");
+output = Path.GetFullPath(output);
+Console.WriteLine($"Reports: {output}");
 var benchmarks = TileGymCatalog.Select(filter).SelectMany(s => s.Create(runtime, options)).ToArray();
 if (benchmarks.Length == 0)
 {
@@ -68,6 +80,9 @@ precompile.Write(output);
 var report = new TileGymReport();
 foreach (var benchmark in benchmarks)
 {
+    var kernelNames = benchmark.Kernels.Select(static kernel => kernel.Name);
+    var benchmarkName = string.Join(", ", kernelNames);
+    Console.WriteLine($"Running {benchmarkName}...");
     benchmark.Run(runtime, report);
 }
 

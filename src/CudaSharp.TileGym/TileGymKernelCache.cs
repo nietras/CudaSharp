@@ -5,7 +5,6 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
-using System.Threading.Tasks;
 using CudaSharp.TileGym;
 using static CudaSharp.nvcuda;
 
@@ -25,8 +24,7 @@ sealed record TileGymCompiledKernel(TileGymKernelSpec Spec, CUfunction Function,
 /// <see cref="TileGymKernelCache.Prepare(TileGymCompilationPlan, int)" /> call.
 /// </summary>
 sealed record TileGymPrecompileSummary(IReadOnlyList<TileGymCompiledKernel> Results, long StartTimestamp,
-    double CompileWallMilliseconds, double LoadWallMilliseconds, int CompileParallelism, int LoadParallelism,
-    double CpuMilliseconds, long PeakWorkingSetBytes)
+    double CompileWallMilliseconds, double LoadWallMilliseconds, double CpuMilliseconds, long PeakWorkingSetBytes)
 {
     public IReadOnlyList<TileGymBatchTiming>? Batches { get; init; }
     public int Failed => Results.Count(static c => c.Error is not null);
@@ -39,9 +37,8 @@ sealed record TileGymPrecompileSummary(IReadOnlyList<TileGymCompiledKernel> Resu
     public override string ToString() =>
         $"Prepared {Results.Count} specializations ({Failed} failed) using {Batches?.Count ?? Results.Count} " +
         $"compilation attempts in {WallMilliseconds / 1000:F1} s: " +
-        $"compile {CompileWallMilliseconds / 1000:F1} s wall ({CompileMilliseconds / 1000:F1} s sum, " +
-        $"parallelism {CompileParallelism}), load {LoadWallMilliseconds / 1000:F1} s wall " +
-        $"({LoadMilliseconds / 1000:F1} s sum, parallelism {LoadParallelism}), " +
+        $"compile {CompileWallMilliseconds / 1000:F1} s wall ({CompileMilliseconds / 1000:F1} s sum), " +
+        $"load {LoadWallMilliseconds / 1000:F1} s wall ({LoadMilliseconds / 1000:F1} s sum), " +
         $"CPU {CpuMilliseconds / 1000:F1} s, peak working set {PeakWorkingSetBytes / (1024 * 1024)} MB";
 
     public void Write(string directory)
@@ -184,6 +181,7 @@ sealed record TileGymPrecompileSummary(IReadOnlyList<TileGymCompiledKernel> Resu
 /// <see cref="Prepare(TileGymCompilationPlan, int)" /> batches kernels by header and loads a shared module
 /// for each batch, so later launches and tuning only measure execution.
 /// </summary>
+/// <remarks>This runtime-owned cache is not thread-safe; preparation, lookups, and disposal must not overlap.</remarks>
 sealed class TileGymKernelCache : IDisposable
 {
     static readonly TileCppConfig Config = new([]);
@@ -199,9 +197,8 @@ sealed class TileGymKernelCache : IDisposable
     static readonly TileCppHeader Cmath = new("cmath",
         "#ifndef INFINITY\n#define INFINITY __builtin_bit_cast(float, 0x7f800000u)\n#endif\n");
 
-    readonly ConcurrentDictionary<TileGymKernelSpec, Lazy<TileGymCompiledKernel>> _kernels = new();
+    readonly Dictionary<TileGymKernelSpec, TileGymCompiledKernel> _kernels = [];
     readonly List<IDisposable> _loaded = [];
-    readonly System.Threading.Lock _lock = new();
     readonly TileCppCompiler _compiler;
     readonly CUcontext _context;
     int _nextBatchId;
@@ -212,6 +209,15 @@ sealed class TileGymKernelCache : IDisposable
         ArgumentNullException.ThrowIfNull(compiler);
         _compiler = compiler;
         _context = context;
+    }
+
+    /// <summary>Optional output for preparation progress, including messages before blocking driver JIT calls.</summary>
+    public TextWriter? ProgressOutput { get; set; }
+
+    void WriteProgress(string message)
+    {
+        ProgressOutput?.WriteLine(message);
+        ProgressOutput?.Flush();
     }
 
     /// <summary>Adapts flat specialization requests to the explicit compilation hierarchy.</summary>
@@ -228,84 +234,92 @@ sealed class TileGymKernelCache : IDisposable
     }
 
     /// <summary>
-    /// Compiles each header once for its required kernels and specializations, then loads one module per batch.
+    /// Compiles each header once for its required kernels and specializations, then loads modules sequentially.
     /// NVRTC compilation failures retry individually to retain per-specialization failure isolation.
     /// </summary>
+    /// <param name="plan">Required kernels and specializations grouped by header.</param>
+    /// <param name="loadParallelism">Retained for compatibility; must be positive. Loading always uses one thread.</param>
     public TileGymPrecompileSummary Prepare(TileGymCompilationPlan plan, int loadParallelism)
     {
         ArgumentNullException.ThrowIfNull(plan);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(loadParallelism);
-        lock (_lock)
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        var missing = plan.Where(spec => !_kernels.ContainsKey(spec));
+        var missingCount = missing.Units.Sum(static unit => unit.Specializations.Count);
+        WriteProgress($"Preparing {missingCount} uncached specializations in {missing.Units.Count} header batches.");
+        if (missing.Units.Count != 0)
         {
-            ObjectDisposedException.ThrowIf(_disposed, this);
-            var missing = plan.Where(spec => !_kernels.ContainsKey(spec));
-            if (missing.Units.Count != 0)
-            {
-                _compiler.PrepareBundledHeaders();
-            }
-            using var process = Process.GetCurrentProcess();
-            var cpuStart = process.TotalProcessorTime;
-            var start = Stopwatch.GetTimestamp();
-            var pending = new List<PendingBatch>();
-            var attempts = new List<TileGymBatchTiming>();
-            // Compile batches sequentially: parallel requests contend inside NVRTC's frontend.
-            foreach (var unit in missing.Units)
-            {
-                var batch = CompileBatch(unit);
-                if (batch.Timing.Error is CudaException<nvrtc.nvrtcResult> && unit.Specializations.Count > 1)
-                {
-                    attempts.Add(batch.Timing);
-                    Trace.WriteLine($"Compilation batch {batch.Timing.Id} ({unit.Header}) failed; " +
-                        $"retrying {unit.Specializations.Count} specializations individually: {batch.Timing.Error.Message}");
-                    foreach (var spec in unit.Specializations)
-                    {
-                        var single = Compile(spec);
-                        var singletonPlan = TileGymCompilationPlan.FromSpecs([spec]);
-                        pending.Add(new(singletonPlan.Units[0], null, single.Batch, single));
-                    }
-                }
-                else
-                {
-                    pending.Add(batch);
-                }
-            }
-            var compileWall = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
-            var loadStart = Stopwatch.GetTimestamp();
-            var loadedTimings = new TileGymBatchTiming[pending.Count];
-            var options = new ParallelOptions { MaxDegreeOfParallelism = loadParallelism };
-            Parallel.For(0, pending.Count, options, i =>
-            {
-                var (batchTiming, results) = LoadBatch(pending[i]);
-                loadedTimings[i] = batchTiming;
-                foreach (var result in results)
-                {
-                    _kernels.TryAdd(result.Spec, new Lazy<TileGymCompiledKernel>(result));
-                }
-            });
-            var loadWall = Stopwatch.GetElapsedTime(loadStart).TotalMilliseconds;
-            attempts.AddRange(loadedTimings);
-            var compiled = plan.Units.SelectMany(static unit => unit.Specializations)
-                .Select(spec => _kernels[spec].Value).ToArray();
-            process.Refresh();
-            var cpu = (process.TotalProcessorTime - cpuStart).TotalMilliseconds;
-            return new(compiled, start, compileWall, loadWall, 1, loadParallelism, cpu, process.PeakWorkingSet64)
-            {
-                Batches = attempts.AsReadOnly(),
-            };
+            WriteProgress("Preparing NVRTC bundled headers...");
+            _compiler.PrepareBundledHeaders();
         }
+        using var process = Process.GetCurrentProcess();
+        var cpuStart = process.TotalProcessorTime;
+        var start = Stopwatch.GetTimestamp();
+        var pending = new List<PendingBatch>();
+        var attempts = new List<TileGymBatchTiming>();
+        // Compile batches sequentially: parallel requests contend inside NVRTC's frontend.
+        foreach (var unit in missing.Units)
+        {
+            WriteProgress($"Compiling {unit.Header}: {unit.Specializations.Count} specializations...");
+            var batch = CompileBatch(unit);
+            WriteProgress($"Batch {batch.Timing.Id} ({unit.Header}): compile {batch.Timing.CompileMilliseconds:F1} ms" +
+                (batch.Timing.Error is null ? "." : $" FAILED: {batch.Timing.Error.Message}"));
+            if (batch.Timing.Error is CudaException<nvrtc.nvrtcResult> && unit.Specializations.Count > 1)
+            {
+                attempts.Add(batch.Timing);
+                var retryMessage = $"Compilation batch {batch.Timing.Id} ({unit.Header}) failed; " +
+                    $"retrying {unit.Specializations.Count} specializations individually: {batch.Timing.Error.Message}";
+                Trace.WriteLine(retryMessage);
+                WriteProgress(retryMessage);
+                foreach (var spec in unit.Specializations)
+                {
+                    WriteProgress($"Compiling individual specialization {spec}...");
+                    var single = Compile(spec);
+                    WriteProgress($"Batch {single.Batch.Id}: compile {single.CompileMilliseconds:F1} ms" +
+                        (single.Error is null ? "." : $" FAILED: {single.Error.Message}"));
+                    var singletonPlan = TileGymCompilationPlan.FromSpecs([spec]);
+                    pending.Add(new(singletonPlan.Units[0], null, single.Batch, single));
+                }
+            }
+            else
+            {
+                pending.Add(batch);
+            }
+        }
+        var compileWall = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
+        var loadStart = Stopwatch.GetTimestamp();
+        foreach (var batch in pending)
+        {
+            var (batchTiming, results) = LoadBatch(batch);
+            attempts.Add(batchTiming);
+            foreach (var result in results)
+            {
+                _kernels.TryAdd(result.Spec, result);
+            }
+        }
+        var loadWall = Stopwatch.GetElapsedTime(loadStart).TotalMilliseconds;
+        var compiled = plan.Units.SelectMany(static unit => unit.Specializations)
+            .Select(spec => _kernels[spec]).ToArray();
+        process.Refresh();
+        var cpu = (process.TotalProcessorTime - cpuStart).TotalMilliseconds;
+        return new(compiled, start, compileWall, loadWall, cpu, process.PeakWorkingSet64)
+        {
+            Batches = attempts.AsReadOnly(),
+        };
     }
 
     /// <summary>Gets a prepared function, compiling an unrequested specialization individually on demand.</summary>
     public TileGymCompiledKernel Get(TileGymKernelSpec spec)
     {
         ArgumentNullException.ThrowIfNull(spec);
-        lock (_lock)
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_kernels.TryGetValue(spec, out var result))
         {
-            ObjectDisposedException.ThrowIf(_disposed, this);
-            var lazy = _kernels.GetOrAdd(spec,
-                static (s, cache) => new Lazy<TileGymCompiledKernel>(() => cache.Build(s)), this);
-            return lazy.Value;
+            return result;
         }
+        result = Build(spec);
+        _kernels.Add(spec, result);
+        return result;
     }
 
     TileGymCompiledKernel Build(TileGymKernelSpec spec)
@@ -349,7 +363,10 @@ sealed class TileGymKernelCache : IDisposable
     {
         if (pending.Single is { } single)
         {
+            WriteProgress($"Loading individual batch {single.Batch.Id} ({single.Spec}); CUDA driver JIT...");
             var result = Load(single);
+            WriteProgress($"Batch {result.Batch!.Id}: load {result.LoadMilliseconds:F1} ms" +
+                (result.Error is null ? "." : $" FAILED: {result.Error.Message}"));
             return (result.Batch!, [result]);
         }
         if (pending.Module is null)
@@ -357,6 +374,9 @@ sealed class TileGymKernelCache : IDisposable
             var failed = BatchResults(pending, pending.Timing, null);
             return (pending.Timing, failed);
         }
+        WriteProgress($"Loading batch {pending.Timing.Id} ({pending.Unit.Header}): " +
+            $"{pending.Unit.Specializations.Count} specializations, {pending.Timing.TileIrBytes} TileIR bytes; " +
+            "CUDA driver JIT may take time on a cache miss...");
         var start = Stopwatch.GetTimestamp();
         TileGymBatchTiming batchTiming;
         IReadOnlyDictionary<string, CUfunction>? functions = null;
@@ -382,6 +402,8 @@ sealed class TileGymKernelCache : IDisposable
             functions = null;
         }
         var results = BatchResults(pending, batchTiming, functions);
+        WriteProgress($"Batch {batchTiming.Id} ({batchTiming.Header}): load {batchTiming.LoadMilliseconds:F1} ms" +
+            (batchTiming.Error is null ? "." : $" FAILED: {batchTiming.Error.Message}"));
         return (batchTiming, results);
     }
 
@@ -530,16 +552,13 @@ sealed class TileGymKernelCache : IDisposable
 
     public void Dispose()
     {
-        lock (_lock)
+        _disposed = true;
+        while (_loaded.Count != 0)
         {
-            _disposed = true;
-            while (_loaded.Count != 0)
-            {
-                var index = _loaded.Count - 1;
-                _loaded[index].Dispose();
-                _loaded.RemoveAt(index);
-            }
-            _kernels.Clear();
+            var index = _loaded.Count - 1;
+            _loaded[index].Dispose();
+            _loaded.RemoveAt(index);
         }
+        _kernels.Clear();
     }
 }

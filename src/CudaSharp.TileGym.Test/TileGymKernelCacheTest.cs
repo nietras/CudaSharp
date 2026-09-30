@@ -59,12 +59,16 @@ public class TileGymKernelCacheTest
         var compiler = new TileCppCompiler(120, installBundledHeaders: false);
         var plan = TileGymCompilationPlan.Create([]);
         using var cache = new TileGymKernelCache(compiler, default);
+        using var progress = new StringWriter(CultureInfo.InvariantCulture);
+        cache.ProgressOutput = progress;
         var summary = cache.Prepare(plan, 1);
+        var progressText = progress.ToString();
+        Assert.Contains("Preparing 0 uncached specializations", progressText);
+        Assert.DoesNotContain("Preparing NVRTC bundled headers", progressText);
         Assert.HasCount(0, summary.Results);
         Assert.HasCount(0, summary.Batches!);
         Assert.AreEqual(0, summary.CompileMilliseconds);
         Assert.AreEqual(0, summary.LoadMilliseconds);
-        Assert.AreEqual(1, summary.CompileParallelism);
         Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => cache.Prepare(plan, 0));
         Assert.ThrowsExactly<ArgumentNullException>(() => cache.Prepare((TileGymCompilationPlan)null!, 1));
         cache.Dispose();
@@ -90,7 +94,7 @@ public class TileGymKernelCacheTest
             new(second, new CUfunction(2), 60, 30, CompileStartTimestamp: start,
                 LoadStartTimestamp: start, TileIrBytes: 200) { Batch = shared }
         ];
-        var summary = new TileGymPrecompileSummary(results, start, 160, 60, 1, 1, 200, 300)
+        var summary = new TileGymPrecompileSummary(results, start, 160, 60, 200, 300)
         {
             Batches = [retry, shared],
         };
@@ -101,6 +105,7 @@ public class TileGymKernelCacheTest
         var text = writer.ToString();
         Assert.Contains("Full batch timings", text);
         Assert.Contains("Compile/share", text);
+        Assert.DoesNotContain("parallelism", text);
         var legacy = summary with { Batches = null };
         using var legacyWriter = new StringWriter(CultureInfo.InvariantCulture);
         legacy.WriteTo(legacyWriter);
@@ -179,6 +184,8 @@ public class TileGymKernelCacheTest
             var backward = new TileGymKernelRequest(new(Header, Backward, BackwardSignature), ["float, 64, 0"]);
             var plan = TileGymCompilationPlan.Create([forward, backward]);
             using var writer = new StringWriter(CultureInfo.InvariantCulture);
+            using var progress = new StringWriter(CultureInfo.InvariantCulture);
+            cache.ProgressOutput = progress;
             using var listener = new TextWriterTraceListener(writer);
             Trace.Listeners.Add(listener);
             try
@@ -190,6 +197,12 @@ public class TileGymKernelCacheTest
                 Assert.AreEqual(0, summary.Failed);
                 Assert.HasCount(3, summary.Results);
                 Assert.HasCount(1, summary.Batches!);
+                var progressText = progress.ToString();
+                Assert.Contains("Preparing 3 uncached specializations in 1 header batches.", progressText);
+                Assert.Contains($"Compiling {Header}: 3 specializations...", progressText);
+                Assert.Contains($"Loading batch 1 ({Header})", progressText);
+                Assert.Contains("compile ", progressText);
+                Assert.Contains("load ", progressText);
                 var batch = summary.Batches![0];
                 Assert.HasCount(3, batch.Specializations);
                 foreach (var result in summary.Results)
@@ -209,6 +222,9 @@ public class TileGymKernelCacheTest
                 Assert.HasCount(0, cached.Batches!);
                 Assert.AreEqual(0, cached.CompileMilliseconds);
                 Assert.AreEqual(0, cached.LoadMilliseconds);
+                var cachedProgress = progress.ToString()[progressText.Length..];
+                Assert.Contains("Preparing 0 uncached specializations", cachedProgress);
+                Assert.DoesNotContain("Loading batch", cachedProgress);
                 var cachedTrace = writer.ToString()[firstTrace.Length..];
                 Assert.DoesNotContain(".nvrtcCompileProgram[", cachedTrace);
 
@@ -224,6 +240,11 @@ public class TileGymKernelCacheTest
                     LaunchAndValidateRelu(result);
                 }
                 LaunchAndValidateRelu(expanded.Results[1]);
+                var onDemandSpec = forward.Specializations[0] with { TemplateArguments = "float, 512, 0" };
+                var onDemand = cache.Get(onDemandSpec);
+                Assert.IsNull(onDemand.Error);
+                Assert.AreSame(onDemand, cache.Get(onDemandSpec));
+                LaunchAndValidateRelu(onDemand);
                 cache.Dispose();
                 cache.Dispose();
                 Assert.ThrowsExactly<ObjectDisposedException>(() => cache.Get(forward.Specializations[0]));
@@ -258,6 +279,11 @@ public class TileGymKernelCacheTest
             Assert.AreNotEqual(default, valid.Function);
             Assert.IsNotNull(invalid.Error);
             Assert.AreEqual(default, invalid.Function);
+            Assert.AreSame(invalid, cache.Get(invalid.Spec));
+            var onDemandSpec = invalid.Spec with { TemplateArguments = "missing_type, 128, 0" };
+            var onDemand = cache.Get(onDemandSpec);
+            Assert.IsNotNull(onDemand.Error);
+            Assert.AreSame(onDemand, cache.Get(onDemandSpec));
             var total = summary.Batches!.Sum(static batch => batch.CompileMilliseconds);
             Assert.AreEqual(total, summary.CompileMilliseconds);
             Assert.IsGreaterThan(valid.CompileMilliseconds + invalid.CompileMilliseconds, total);
